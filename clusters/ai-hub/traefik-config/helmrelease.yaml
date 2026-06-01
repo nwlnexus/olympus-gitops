@@ -33,7 +33,10 @@ spec:
         tls:
           enabled: true
       portainer-edge:
-        port: 8000
+        # NOTE: must not be 8000 — that is the chart's built-in `web` entryPoint
+        # container port. Reusing it causes "bind: address already in use" and
+        # crashloops the whole Traefik pod. Keep this on a dedicated free port.
+        port: 8001
         expose:
           default: true
         protocol: TCP

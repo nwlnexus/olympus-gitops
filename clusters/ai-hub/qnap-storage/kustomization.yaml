@@ -4,3 +4,4 @@ resources:
   - externalsecret.yaml
   - trident-backend.yaml
   - storageclass.yaml
+  - storageclass-delete.yaml
