@@ -29,3 +29,6 @@ resources:
   - clickhouse-statefulset.yaml
   - clickhouse-ingressroute.yaml
   - tailscale-services.yaml
+  - ch-ui-pvc.yaml
+  - ch-ui-deployment.yaml
+  - ch-ui-ingressroute.yaml
