@@ -15,6 +15,18 @@ spec:
       labels:
         app: ch-ui
     spec:
+      # qnap-iscsi volumes mount root-owned and the trident CSI driver does not
+      # honor fsGroup chowning here, so the non-root ch-ui user (uid 100) can't
+      # write /app/data. Chown it on every start (same pattern as pgAdmin).
+      initContainers:
+        - name: fix-perms
+          image: busybox:1.36
+          command: ["sh", "-c", "chown -R 100:101 /app/data"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
       containers:
         - name: ch-ui
           image: ghcr.io/caioricciuti/ch-ui:v2.2.0
