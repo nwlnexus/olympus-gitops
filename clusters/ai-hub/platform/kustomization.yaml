@@ -13,7 +13,8 @@ resources:
   - pgadmin-certificate.yaml
   - pgadmin-ingressroute.yaml
   - postgrest-deployment.yaml
-  - postgrest-ingressroute.yaml
+  # postgrest-ingressroute.yaml — deferred: PostgREST scaled to 0 (see
+  # postgrest-deployment.yaml). Re-add to restore the public pg.nwlnexus.io route.
   - redis-pvc.yaml
   - redis-helmrelease.yaml
   - redisinsight-deployment.yaml
