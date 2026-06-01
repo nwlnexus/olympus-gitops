@@ -1,0 +1,93 @@
+# Internal-only tailnet exposure for the data layer.
+#
+# Each Service is a parallel LoadBalancer (loadBalancerClass: tailscale) that
+# selects the same pods as the Helm/StatefulSet-managed ClusterIP service, so
+# the upstream chart services are left untouched. No `tailscale.com/funnel`
+# annotation => reachable only inside the tailnet (raptor-mimosa.ts.net), never
+# the public internet. UIs (pgAdmin/RedisInsight/Redpanda Console/ch-ui) remain
+# the Cloudflare-exposed surface; these are the raw protocol ports.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-ts
+  namespace: platform
+  annotations:
+    tailscale.com/hostname: "postgres-ai-hub"   # postgres-ai-hub.raptor-mimosa.ts.net:5432
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app.kubernetes.io/component: primary
+    app.kubernetes.io/instance: postgresql
+    app.kubernetes.io/name: postgresql
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-ts
+  namespace: platform
+  annotations:
+    tailscale.com/hostname: "redis-ai-hub"       # redis-ai-hub.raptor-mimosa.ts.net:6379
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app.kubernetes.io/component: master
+    app.kubernetes.io/instance: redis
+    app.kubernetes.io/name: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse-ts
+  namespace: platform
+  annotations:
+    tailscale.com/hostname: "clickhouse-ai-hub"  # clickhouse-ai-hub.raptor-mimosa.ts.net (9000 native / 8123 http)
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app: clickhouse
+  ports:
+    - name: native
+      port: 9000
+      targetPort: 9000
+      protocol: TCP
+    - name: http
+      port: 8123
+      targetPort: 8123
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-ts
+  namespace: platform
+  annotations:
+    tailscale.com/hostname: "kafka-ai-hub"       # kafka-ai-hub.raptor-mimosa.ts.net:9092
+    # NOTE: exposing the port is only step 1. Kafka hands clients its
+    # advertised.listeners on connect; external tailnet producers/consumers
+    # will be redirected to the in-cluster broker address and fail until the
+    # broker advertises a tailnet-reachable listener. Tracked as a follow-up —
+    # in-cluster access (Redpanda Console) already works.
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app: kafka
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: 9092
+      protocol: TCP

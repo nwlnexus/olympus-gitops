@@ -27,3 +27,4 @@ resources:
   - clickhouse-configmap.yaml
   - clickhouse-statefulset.yaml
   - clickhouse-ingressroute.yaml
+  - tailscale-services.yaml
