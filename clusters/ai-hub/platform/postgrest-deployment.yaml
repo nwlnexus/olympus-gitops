@@ -1,10 +1,20 @@
+# DEFERRED (2026-06-01): scaled to 0. PostgREST is not usable as configured —
+# it targets Sentry's `sentry` DB / `public` schema and references an `anon`
+# anon-role that does not exist (only the `postgres` superuser exists), so every
+# request fails. Deferred until there is a concrete API data model. To re-enable:
+#   1. create a dedicated DB/schema (not Sentry's) for the API surface
+#   2. create roles: authenticator (LOGIN, NOINHERIT) + anon (NOLOGIN);
+#      GRANT anon TO authenticator; grant USAGE/SELECT on the exposed schema
+#   3. repoint PGRST_DB_URI at `authenticator` (not `postgres`), set
+#      PGRST_DB_SCHEMA to the exposed schema, set replicas back to 1, and
+#      re-add postgrest-ingressroute.yaml to kustomization.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: postgrest
   namespace: platform
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: postgrest
