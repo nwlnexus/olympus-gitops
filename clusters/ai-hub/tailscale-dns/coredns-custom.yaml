@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  # Forward tailnet MagicDNS names (*.raptor-mimosa.ts.net) to the tailscale
+  # resolver so in-cluster pods can reach tailnet services (e.g. the otel
+  # collector → obs-tempo.raptor-mimosa.ts.net for Traefik traces → Tempo).
+  ts.net.server: |
+    raptor-mimosa.ts.net:53 {
+        errors
+        cache 30
+        forward . 100.100.100.100
+    }
