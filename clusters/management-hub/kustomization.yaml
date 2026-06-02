@@ -6,6 +6,7 @@ resources:
   - flux-kustomizations/external-dns.yaml
   - flux-kustomizations/cloudflared.yaml
   - flux-kustomizations/traefik-config.yaml
+  - flux-kustomizations/traefik-config-ingress.yaml
   - flux-kustomizations/connect-ingress.yaml
   - flux-kustomizations/whoami.yaml
   - flux-kustomizations/qnap-ui.yaml
