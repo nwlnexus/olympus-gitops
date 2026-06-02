@@ -94,7 +94,9 @@ spec:
       username: resend
       useTls: false
       useSsl: true
-      from: sentry@nwlnexus.io
+      # Must be a Resend-verified sending domain. nwlnexus.net is verified;
+      # nwlnexus.io is not (Resend rejected it with 550 domain-not-verified).
+      from: sentry@nwlnexus.net
     user:
       create: true
       superuser: true
