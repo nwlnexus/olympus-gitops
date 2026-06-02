@@ -7,6 +7,10 @@ metadata:
 provisioner: csi.trident.qnap.io
 parameters:
   selector: "location=compute-hub"
+  # Required so fsGroup applies (Trident fsGroupPolicy=ReadWriteOnceWithFSType):
+  # without a known fsType kubelet skips the chown and non-root workloads get
+  # permission denied on the root-owned volume.
+  fsType: "ext4"
 allowVolumeExpansion: true
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
