@@ -14,4 +14,3 @@ data:
         originRequest:
           noTLSVerify: true
           http2Origin: true
-      - service: http_status:404
