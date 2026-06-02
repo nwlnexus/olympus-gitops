@@ -13,6 +13,8 @@ kind: Deployment
 metadata:
   name: postgrest
   namespace: platform
+  annotations:
+    reloader.stakater.com/auto: "true"
 spec:
   replicas: 0
   selector:

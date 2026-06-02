@@ -18,6 +18,8 @@ spec:
         name: portainer
         namespace: portainer
   values:
+    annotations:
+      reloader.stakater.com/auto: "true"
     # Must match the AGENT_SECRET the standard agents require, or agent
     # environments (management-hub, compute-hub) are rejected with 403 (Down).
     extraEnv:
