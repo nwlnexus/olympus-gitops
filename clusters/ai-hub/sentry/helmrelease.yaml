@@ -47,15 +47,6 @@ spec:
       valuesKey: admin-password
       targetPath: user.password
   values:
-    sentry:
-      web:
-        # Google OAuth creds (GOOGLE_CLIENT_ID/SECRET) for the login pipeline,
-        # read by config.sentryConfPy via os.getenv. auth-google.* options are
-        # FLAG_PRIORITIZE_DISK, so conf.py is authoritative — env on web is
-        # sufficient (SSO runs in web only). GitHub App options are NOT here:
-        # they are non-disk-priority options set in the DB store by the
-        # sentry-configure-options Job (see configure-options-job.yaml).
-        existingSecretEnv: sentry-integrations-env
     postgresql:
       enabled: false
     redis:
@@ -137,14 +128,8 @@ spec:
             return _orig_csrf_process_view(self, request, callback, cb_args, cb_kwargs)
         _CsrfMW.process_view = _csrf_skip_api
 
-        # Google SSO. Creds come from the sentry-integrations-env secret
-        # (ExternalSecret ← 1Password) via sentry.web.existingSecretEnv. The
-        # OAuth client's Authorized redirect URIs MUST include
-        # https://sentry.nwlnexus.net/auth/sso/ for login to complete.
-        # auth-google.* are FLAG_PRIORITIZE_DISK, so this conf.py is authoritative.
-        import os as _os
-        SENTRY_OPTIONS['auth-google.client-id'] = _os.getenv('GOOGLE_CLIENT_ID', '')
-        SENTRY_OPTIONS['auth-google.client-secret'] = _os.getenv('GOOGLE_CLIENT_SECRET', '')
-        # NOTE: github-app.* are deliberately NOT set here. They are non-disk-
-        # priority options where the DB store wins over conf.py, so they are
-        # set in the store by the sentry-configure-options Job.
+        # Google SSO is intentionally NOT configured: Sentry's google provider
+        # is Google Workspace-only (requires the `hd` hosted-domain claim and
+        # blocklists gmail.com), so personal Gmail can't use it. Org uses native
+        # email/password login. github-app.* options are set in the DB store by
+        # the sentry-configure-options Job (non-disk-priority options).
