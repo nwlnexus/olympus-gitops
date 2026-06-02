@@ -87,9 +87,10 @@ spec:
               value: homelab
               action: upsert
       exporters:
-        # Traefik/edge traces → Tempo on management-hub over the tailnet.
+        # Traefik/edge traces → Tempo on management-hub via the tailscale egress
+        # proxy (in-cluster Service; ai-hub Colima has no node tailscaled/MagicDNS).
         otlp/tempo:
-          endpoint: obs-tempo.raptor-mimosa.ts.net:4317
+          endpoint: obs-tempo.otel.svc.cluster.local:4317
           tls:
             insecure: true
       service:
