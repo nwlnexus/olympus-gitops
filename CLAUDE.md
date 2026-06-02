@@ -34,9 +34,36 @@ external-secrets
   → <apps> (dependsOn varies per app)
 ```
 
+## Reloader — Auto-restart on Secret/ConfigMap Changes
+
+[Stakater Reloader](https://github.com/stakater/Reloader) is deployed on all three clusters (`reloader` namespace). It watches Secrets and ConfigMaps and triggers rolling restarts of Deployments/StatefulSets/DaemonSets that are annotated to use them.
+
+**Why this matters for ESO**: ExternalSecrets sync changes from 1Password automatically, but Kubernetes does not restart pods when a Secret value changes. Reloader bridges that gap.
+
+### Annotation pattern
+
+Add to any Deployment/StatefulSet/DaemonSet that mounts a Secret or ConfigMap:
+
+```yaml
+metadata:
+  annotations:
+    # Restart when ANY watched secret or configmap changes (recommended default)
+    reloader.stakater.com/auto: "true"
+
+    # Or scope to specific resources:
+    secret.reloader.stakater.com/reload: "my-secret,other-secret"
+    configmap.reloader.stakater.com/reload: "my-configmap"
+```
+
+`watchGlobally: false` is set in all clusters — Reloader only acts on annotated workloads.
+
+### Checklist for existing deployments
+
+When reviewing or updating any workload that uses a Secret (including ESO-managed ones), add `reloader.stakater.com/auto: "true"` to the Deployment/StatefulSet metadata if not already present.
+
 ## Common Patterns
 
-- **New app checklist**: namespace → helmrepository → helmrelease → (externalsecret if secrets needed) → (certificate + ingressroute if public)
+- **New app checklist**: namespace → helmrepository → helmrelease → (externalsecret if secrets needed) → (certificate + ingressroute if public) → **add reloader annotation to Deployment**
 - **Secret keys**: ExternalSecret `target.template` renames 1Password field names to what the chart expects
 - **valuesFrom**: Use `HelmRelease.spec.valuesFrom` to inject secret values as Helm values
 - **HTTP redirect**: Handled globally by Traefik HelmChartConfig — no per-route redirect needed
