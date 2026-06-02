@@ -47,6 +47,12 @@ spec:
       valuesKey: admin-password
       targetPath: user.password
   values:
+    sentry:
+      web:
+        # Inject Google OAuth creds as env (GOOGLE_CLIENT_ID/SECRET) for the
+        # login pipeline; read by config.sentryConfPy via os.getenv. SSO is
+        # handled by the web component only, so worker env is not needed here.
+        existingSecretEnv: sentry-oauth-env
     postgresql:
       enabled: false
     redis:
@@ -124,3 +130,11 @@ spec:
                 return None
             return _orig_csrf_process_view(self, request, callback, cb_args, cb_kwargs)
         _CsrfMW.process_view = _csrf_skip_api
+
+        # Google SSO. Credentials come from the sentry-oauth-env secret
+        # (ExternalSecret ← 1Password google-oauth-olympus) via envFrom on the
+        # web pod. The Google OAuth client's Authorized redirect URIs MUST
+        # include https://sentry.nwlnexus.net/auth/sso/ for login to complete.
+        import os as _os
+        SENTRY_OPTIONS['auth-google.client-id'] = _os.getenv('GOOGLE_CLIENT_ID', '')
+        SENTRY_OPTIONS['auth-google.client-secret'] = _os.getenv('GOOGLE_CLIENT_SECRET', '')

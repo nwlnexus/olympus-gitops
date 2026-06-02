@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - externalsecret.yaml
+  - oauth-externalsecret.yaml
   - helmrepository.yaml
   - helmrelease.yaml
   - certificate.yaml
