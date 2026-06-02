@@ -27,7 +27,10 @@ resources:
   - clickhouse-pvc.yaml
   - clickhouse-configmap.yaml
   - clickhouse-statefulset.yaml
-  - clickhouse-ingressroute.yaml
+  # clickhouse-ingressroute.yaml removed 2026-06-01: ClickHouse is no longer
+  # exposed publicly via Cloudflare. Tailnet access via `clickhouse-ts`
+  # (LoadBalancer in tailscale-services.yaml) and in-cluster
+  # clickhouse.platform.svc.cluster.local. UI = chui.nwlnexus.io (ch-ui).
   - tailscale-services.yaml
   - ch-ui-pvc.yaml
   - ch-ui-deployment.yaml
