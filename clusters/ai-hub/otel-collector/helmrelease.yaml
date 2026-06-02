@@ -87,10 +87,11 @@ spec:
               value: homelab
               action: upsert
       exporters:
-        sentry:
-          url: http://sentry-web.sentry.svc.cluster.local:9000
-          org_slug: nwlnexus
-          auth_token: ${env:SENTRY_AUTH_TOKEN}
+        # Traefik/edge traces → Tempo on management-hub over the tailnet.
+        otlp/tempo:
+          endpoint: obs-tempo.raptor-mimosa.ts.net:4317
+          tls:
+            insecure: true
       service:
         telemetry:
           metrics:
@@ -99,6 +100,6 @@ spec:
           traces:
             receivers: [otlp]
             processors: [memory_limiter, resource, batch]
-            exporters: [sentry]
+            exporters: [otlp/tempo]
           metrics: null
           logs: null

@@ -1,0 +1,25 @@
+# Tailnet-only OTLP ingress for Tempo, so per-cluster otel-collectors on
+# ai-hub/compute-hub can ship Traefik/edge traces over the tailnet (never CF).
+# No tailscale.com/funnel => reachable only inside raptor-mimosa.ts.net.
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-ts
+  namespace: observability
+  annotations:
+    tailscale.com/hostname: "obs-tempo"
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: tempo
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP

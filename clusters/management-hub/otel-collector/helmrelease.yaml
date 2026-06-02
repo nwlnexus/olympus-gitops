@@ -89,10 +89,12 @@ spec:
               value: homelab
               action: upsert
       exporters:
-        sentry:
-          url: https://sentry.nwlnexus.net
-          org_slug: nwlnexus
-          auth_token: ${env:SENTRY_AUTH_TOKEN}
+        # Traefik/edge traces → Tempo (in-cluster). Sentry can't ingest OTLP, so
+        # traces were being dropped; Tempo is the real backend now (view in Grafana).
+        otlp/tempo:
+          endpoint: tempo.observability.svc.cluster.local:4317
+          tls:
+            insecure: true
       service:
         telemetry:
           metrics:
@@ -101,6 +103,6 @@ spec:
           traces:
             receivers: [otlp]
             processors: [memory_limiter, resource, batch]
-            exporters: [sentry]
+            exporters: [otlp/tempo]
           metrics: null
           logs: null
