@@ -1,0 +1,54 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: grafana
+      version: "10.5.15"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: observability
+  install:
+    timeout: 10m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 10m
+    remediation:
+      retries: 3
+  values:
+    # Admin creds from 1Password (olympus-obs-stack) via the grafana-admin secret.
+    admin:
+      existingSecret: grafana-admin
+      userKey: admin-user
+      passwordKey: admin-password
+    # Dashboards/users on qnap-iscsi (Trident now applies fsGroup via fsType=ext4;
+    # Grafana runs as uid 472).
+    persistence:
+      enabled: true
+      storageClassName: qnap-iscsi
+      size: 5Gi
+    # Prometheus datasource (in-cluster). Loki/Tempo added in Phase 3.
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: Prometheus
+            type: prometheus
+            uid: prometheus
+            url: http://prometheus-server.observability.svc.cluster.local
+            access: proxy
+            isDefault: true
+    grafana.ini:
+      server:
+        root_url: https://grafana.nwlnexus.net
+    service:
+      type: ClusterIP
+    # UI is exposed via Traefik IngressRoute (grafana.nwlnexus.net), not the chart ingress.
+    ingress:
+      enabled: false

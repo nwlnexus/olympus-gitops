@@ -5,3 +5,7 @@ resources:
   - externalsecret.yaml
   - helmrepository.yaml
   - prometheus-helmrelease.yaml
+  - grafana-admin-externalsecret.yaml
+  - grafana-helmrelease.yaml
+  - grafana-certificate.yaml
+  - grafana-ingressroute.yaml
