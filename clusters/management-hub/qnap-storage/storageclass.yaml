@@ -7,6 +7,12 @@ metadata:
 provisioner: csi.trident.qnap.io
 parameters:
   selector: "location=management-hub"
+  # fsType is required for fsGroup to apply: the Trident CSIDriver uses
+  # fsGroupPolicy=ReadWriteOnceWithFSType, so kubelet only chowns the volume to
+  # a pod's fsGroup when the volume has a known filesystem. Without this,
+  # non-root workloads (e.g. Prometheus uid 65534) get permission denied on the
+  # freshly-formatted, root-owned volume.
+  fsType: "ext4"
 allowVolumeExpansion: true
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
