@@ -16,17 +16,22 @@ spec:
   install:
     remediation:
       retries: 3
+  upgrade:
+    remediation:
+      retries: 3
   values:
     podAnnotations:
       config-version: "1"
     ingressClass:
       enabled: true
-      isDefaultClass: true
+      isDefaultClass: false
     providers:
       kubernetesCRD:
         allowExternalNameServices: true
+        ingressClass: traefik
       kubernetesIngress:
         enabled: true
+        ingressClass: traefik
     ports:
       web:
         redirectTo:
@@ -34,14 +39,6 @@ spec:
       websecure:
         tls:
           enabled: true
-      portainer-edge:
-        # NOTE: must not be 8000 — that is the chart's built-in `web` entryPoint
-        # container port. Reusing it causes "bind: address already in use" and
-        # crashloops the whole Traefik pod. Keep this on a dedicated free port.
-        port: 8001
-        expose:
-          default: true
-        protocol: TCP
     api:
       dashboard: true
     logs:

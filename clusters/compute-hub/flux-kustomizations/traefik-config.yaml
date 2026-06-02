@@ -7,13 +7,11 @@ spec:
   interval: 10m
   path: ./clusters/compute-hub/traefik-config
   prune: true
+  wait: true
+  timeout: 5m
   sourceRef:
     kind: GitRepository
     name: flux-system
   dependsOn:
     - name: cert-manager-config
     - name: external-dns
-  # Note: NOT depending on otel-collector — Traefik handles unreachable OTLP
-  # tracing endpoints gracefully (retries silently with insecure: true) and the
-  # collector's kustomization being suspended (staged rollout) would deadlock
-  # this chain forever otherwise.
