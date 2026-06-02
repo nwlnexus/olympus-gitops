@@ -4,9 +4,6 @@ metadata:
   name: otel-collector
   namespace: flux-system
 spec:
-  # Staged rollout: kept suspended until management-hub validates.
-  # Resume via follow-up PR removing this flag (and the matching one on traefik-config).
-  suspend: true
   interval: 10m
   path: ./clusters/compute-hub/otel-collector
   prune: true
