@@ -12,7 +12,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sentry-configure-options-1
+  name: sentry-configure-options-2
   namespace: sentry
 spec:
   backoffLimit: 20
@@ -51,11 +51,33 @@ spec:
                   pk.startswith("-----BEGIN") and pk.rstrip().endswith("PRIVATE KEY-----"),
               ))
           env:
+            # Skip the startup backend-validation gauntlet (Kafka/Snuba/etc).
+            # options.set only needs Postgres (write) + Redis (options cache).
+            - name: SENTRY_SKIP_BACKEND_VALIDATION
+              value: "1"
             - name: SENTRY_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: sentry-sentry-secret
                   key: key
+            - name: POSTGRES_HOST
+              value: postgresql.platform.svc.cluster.local
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_NAME
+              value: sentry
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sentry-secrets
+                  key: postgres-password
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sentry-secrets
+                  key: redis-password
           envFrom:
             - secretRef:
                 name: sentry-integrations-env
