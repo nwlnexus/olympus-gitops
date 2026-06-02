@@ -5,6 +5,23 @@ metadata:
   namespace: sentry
 spec:
   interval: 1h
+  # Inject the integrations secret (Google SSO + GitHub App creds) as envFrom
+  # into the web pod AND the taskworkers — Google login runs in web, but GitHub
+  # webhook/commit tasks run in workers, which the chart does NOT expose an
+  # existingSecretEnv hook for. Targeted by name so the snuba deployments (which
+  # have their own envFrom: sentry-snuba-env) are never touched.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Deployment
+              name: "sentry-(web|launchpad-taskworker|taskworker-(default|ingest|long|products))"
+            patch: |
+              - op: add
+                path: /spec/template/spec/containers/0/envFrom
+                value:
+                  - secretRef:
+                      name: sentry-integrations-env
   chart:
     spec:
       chart: sentry
@@ -47,12 +64,6 @@ spec:
       valuesKey: admin-password
       targetPath: user.password
   values:
-    sentry:
-      web:
-        # Inject Google OAuth creds as env (GOOGLE_CLIENT_ID/SECRET) for the
-        # login pipeline; read by config.sentryConfPy via os.getenv. SSO is
-        # handled by the web component only, so worker env is not needed here.
-        existingSecretEnv: sentry-oauth-env
     postgresql:
       enabled: false
     redis:
@@ -134,10 +145,24 @@ spec:
             return _orig_csrf_process_view(self, request, callback, cb_args, cb_kwargs)
         _CsrfMW.process_view = _csrf_skip_api
 
-        # Google SSO. Credentials come from the sentry-oauth-env secret
-        # (ExternalSecret ← 1Password google-oauth-olympus) via envFrom on the
-        # web pod. The Google OAuth client's Authorized redirect URIs MUST
-        # include https://sentry.nwlnexus.net/auth/sso/ for login to complete.
+        # Integrations creds come from the sentry-integrations-env secret
+        # (ExternalSecret ← 1Password) injected as envFrom via the HelmRelease
+        # postRenderers (web + taskworkers).
         import os as _os
+
+        # Google SSO. The OAuth client's Authorized redirect URIs MUST include
+        # https://sentry.nwlnexus.net/auth/sso/ for login to complete.
         SENTRY_OPTIONS['auth-google.client-id'] = _os.getenv('GOOGLE_CLIENT_ID', '')
         SENTRY_OPTIONS['auth-google.client-secret'] = _os.getenv('GOOGLE_CLIENT_SECRET', '')
+
+        # GitHub org integration (GitHub App "olympus-sentry"). private-key is a
+        # multiline PEM; the .replace is a no-op for real newlines but rescues a
+        # value that arrived with literal \n.
+        _gh_id = _os.getenv('GITHUB_APP_ID', '')
+        if _gh_id:
+            SENTRY_OPTIONS['github-app.id'] = int(_gh_id)
+        SENTRY_OPTIONS['github-app.name'] = _os.getenv('GITHUB_APP_NAME', '')
+        SENTRY_OPTIONS['github-app.client-id'] = _os.getenv('GITHUB_APP_CLIENT_ID', '')
+        SENTRY_OPTIONS['github-app.client-secret'] = _os.getenv('GITHUB_APP_CLIENT_SECRET', '')
+        SENTRY_OPTIONS['github-app.webhook-secret'] = _os.getenv('GITHUB_APP_WEBHOOK_SECRET', '')
+        SENTRY_OPTIONS['github-app.private-key'] = _os.getenv('GITHUB_APP_PRIVATE_KEY', '').replace('\\n', '\n')
