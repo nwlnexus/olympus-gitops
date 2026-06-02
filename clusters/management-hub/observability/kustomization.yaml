@@ -4,3 +4,4 @@ resources:
   - namespace.yaml
   - externalsecret.yaml
   - helmrepository.yaml
+  - prometheus-helmrelease.yaml
