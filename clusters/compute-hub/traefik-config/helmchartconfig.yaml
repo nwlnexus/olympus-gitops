@@ -28,6 +28,27 @@ spec:
     logs:
       general:
         level: INFO
+    accessLog:
+      format: json
+      fields:
+        defaultMode: keep
+        names:
+          ClientAddr: keep
+          RequestHost: keep
+          RequestMethod: keep
+          RequestPath: keep
+          RequestProtocol: keep
+          DownstreamStatus: keep
+          Duration: keep
+          RouterName: keep
+          ServiceName: keep
+        headers:
+          defaultMode: drop
+          names:
+            Authorization: redact
+            Cookie: drop
+            X-Forwarded-For: keep
+            X-Real-Ip: keep
     tracing:
       otlp:
         enabled: true
