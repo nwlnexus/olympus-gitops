@@ -77,10 +77,17 @@ spec:
     nginx:
       enabled: false
     mail:
+      # backend defaults to "dummy" in the chart (silently discards mail) — must
+      # be "smtp" to actually send. The chart templates these values into
+      # sentry.conf.py as the os.getenv() defaults for SENTRY_EMAIL_*.
+      backend: smtp
       host: smtp.resend.com
-      port: 587
+      # Resend SMTP: 465 (implicit TLS/SSL). Both 465+SSL and 587+STARTTLS
+      # authenticate fine with the API key; using 465 per Resend guidance.
+      port: 465
       username: resend
-      useTls: true
+      useTls: false
+      useSsl: true
       from: sentry@nwlnexus.io
     user:
       create: true
