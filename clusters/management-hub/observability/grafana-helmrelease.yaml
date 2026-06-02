@@ -44,6 +44,16 @@ spec:
             url: http://prometheus-server.observability.svc.cluster.local
             access: proxy
             isDefault: true
+          - name: Loki
+            type: loki
+            uid: loki
+            url: http://loki.observability.svc.cluster.local:3100
+            access: proxy
+          - name: Tempo
+            type: tempo
+            uid: tempo
+            url: http://tempo.observability.svc.cluster.local:3100
+            access: proxy
     grafana.ini:
       server:
         root_url: https://grafana.nwlnexus.net
