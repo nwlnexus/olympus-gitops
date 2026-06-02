@@ -4,12 +4,16 @@ metadata:
   name: coredns-custom
   namespace: kube-system
 data:
-  # Forward tailnet MagicDNS names (*.raptor-mimosa.ts.net) to the tailscale
-  # resolver so in-cluster pods can reach tailnet services (e.g. the otel
-  # collector → obs-tempo.raptor-mimosa.ts.net for Traefik traces → Tempo).
+  # Forward tailnet MagicDNS names (*.raptor-mimosa.ts.net) so in-cluster pods can
+  # reach tailnet services (e.g. otel collector → obs-tempo.raptor-mimosa.ts.net
+  # for Traefik traces → Tempo).
+  # NOTE: ai-hub is a Colima single-node without node-level tailscaled, so we
+  # forward to the tailscale operator's in-cluster k8s-nameserver (DNSConfig),
+  # not 100.100.100.100 (which only works on bare-metal tailscale nodes like
+  # compute-hub/mgmt-hub). ClusterIP of the `nameserver` svc in the tailscale ns.
   ts.net.server: |
     raptor-mimosa.ts.net:53 {
         errors
         cache 30
-        forward . 100.100.100.100
+        forward . 10.43.236.28
     }
