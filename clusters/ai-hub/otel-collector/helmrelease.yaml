@@ -86,7 +86,7 @@ spec:
               action: upsert
       exporters:
         sentry:
-          url: https://sentry.nwlnexus.net
+          url: http://sentry-web.sentry.svc.cluster.local:9000
           org_slug: nwlnexus
           auth_token: ${env:SENTRY_AUTH_TOKEN}
       service:
