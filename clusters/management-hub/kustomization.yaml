@@ -16,3 +16,4 @@ resources:
   - flux-kustomizations/portainer-agent.yaml
   - flux-kustomizations/plex.yaml
   - flux-kustomizations/otel-collector.yaml
+  - flux-kustomizations/observability.yaml
