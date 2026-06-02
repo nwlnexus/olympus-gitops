@@ -1,0 +1,69 @@
+# Sets the GitHub App options in Sentry's options STORE (Postgres).
+#
+# github-app.id / name / webhook-secret / private-key are registered WITHOUT
+# FLAG_PRIORITIZE_DISK, so the DB store wins over settings.SENTRY_OPTIONS —
+# config.sentryConfPy can't set them. client-id / client-secret ARE disk-
+# priority but are set here too so the store is the single source of truth for
+# the whole integration.
+#
+# Re-run semantics: a completed Job is immutable and Flux won't re-run it. The
+# values persist in Postgres, so this only needs to run on first apply and on
+# credential rotation — bump the `-N` name suffix to force a fresh run then.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sentry-configure-options-1
+  namespace: sentry
+spec:
+  backoffLimit: 20
+  template:
+    metadata:
+      labels:
+        app: sentry-configure-options
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: configure-options
+          image: ghcr.io/getsentry/sentry:26.5.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - sentry
+            - django
+            - shell
+            - -c
+            - |
+              import os
+              from sentry import options
+              gid = os.environ.get("GITHUB_APP_ID", "").strip()
+              if gid:
+                  options.set("github-app.id", int(gid))
+              options.set("github-app.name", os.environ.get("GITHUB_APP_NAME", ""))
+              options.set("github-app.client-id", os.environ.get("GITHUB_APP_CLIENT_ID", ""))
+              options.set("github-app.client-secret", os.environ.get("GITHUB_APP_CLIENT_SECRET", ""))
+              options.set("github-app.webhook-secret", os.environ.get("GITHUB_APP_WEBHOOK_SECRET", ""))
+              # PEM: real newlines pass through envFrom intact; .replace rescues a literal \n.
+              options.set("github-app.private-key", os.environ.get("GITHUB_APP_PRIVATE_KEY", "").replace("\\n", "\n"))
+              pk = options.get("github-app.private-key") or ""
+              print("github-app set: id=%s name=%s webhook_secret=%s pem_ok=%s" % (
+                  options.get("github-app.id"),
+                  options.get("github-app.name"),
+                  bool(options.get("github-app.webhook-secret")),
+                  pk.startswith("-----BEGIN") and pk.rstrip().endswith("PRIVATE KEY-----"),
+              ))
+          env:
+            - name: SENTRY_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sentry-sentry-secret
+                  key: key
+          envFrom:
+            - secretRef:
+                name: sentry-integrations-env
+          volumeMounts:
+            - name: config
+              mountPath: /etc/sentry
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: sentry-sentry

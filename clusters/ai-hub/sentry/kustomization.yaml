@@ -6,6 +6,7 @@ resources:
   - integrations-externalsecret.yaml
   - helmrepository.yaml
   - helmrelease.yaml
+  - configure-options-job.yaml
   - certificate.yaml
   - middleware.yaml
   - ingressroute.yaml
