@@ -12,6 +12,8 @@ spec:
     metadata:
       labels:
         app: cloudflared
+      annotations:
+        config-hash: "v1"
     spec:
       containers:
         - name: cloudflared
