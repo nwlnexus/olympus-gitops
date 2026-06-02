@@ -94,9 +94,10 @@ spec:
       username: resend
       useTls: false
       useSsl: true
-      # Must be a Resend-verified sending domain. nwlnexus.net is verified;
-      # nwlnexus.io is not (Resend rejected it with 550 domain-not-verified).
-      from: sentry@nwlnexus.net
+      # Must be a Resend-verified sending domain. The verified entry is the
+      # subdomain mail.nwlnexus.net (NOT the apex nwlnexus.net, nor nwlnexus.io)
+      # — confirmed by probing which from-address Resend's SMTP accepts.
+      from: sentry@mail.nwlnexus.net
     user:
       create: true
       superuser: true
