@@ -4,9 +4,6 @@ metadata:
   name: traefik-config
   namespace: flux-system
 spec:
-  # Staged rollout: suspended until management-hub OTLP validates.
-  # Resume via follow-up PR removing this flag.
-  suspend: true
   interval: 10m
   path: ./clusters/ai-hub/traefik-config
   prune: true
