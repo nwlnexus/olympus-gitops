@@ -17,6 +17,8 @@ spec:
     remediation:
       retries: 3
   values:
+    podAnnotations:
+      config-version: "1"
     ingressClass:
       enabled: true
       isDefaultClass: true
