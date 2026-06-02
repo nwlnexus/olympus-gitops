@@ -13,3 +13,4 @@ spec:
   dependsOn:
     - name: cert-manager
     - name: cert-manager-config
+    - name: external-secrets-config
