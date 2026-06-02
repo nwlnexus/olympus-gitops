@@ -15,3 +15,4 @@ resources:
   - flux-kustomizations/platform.yaml
   - flux-kustomizations/sentry.yaml
   - flux-kustomizations/otel-collector.yaml
+  - flux-kustomizations/reloader.yaml

@@ -23,6 +23,8 @@ spec:
     mode: deployment
     replicaCount: 1
     fullnameOverride: opentelemetry-collector
+    annotations:
+      reloader.stakater.com/auto: "true"
     # contrib distribution includes the sentry exporter
     image:
       repository: otel/opentelemetry-collector-contrib

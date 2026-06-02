@@ -3,6 +3,8 @@ kind: StatefulSet
 metadata:
   name: clickhouse
   namespace: platform
+  annotations:
+    reloader.stakater.com/auto: "true"
 spec:
   serviceName: clickhouse
   replicas: 1
