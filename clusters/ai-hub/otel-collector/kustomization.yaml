@@ -5,5 +5,6 @@ resources:
   - helmrepository.yaml
   - externalsecret.yaml
   - helmrelease.yaml
+  - helmrelease-logs.yaml
   - tempo-egress.yaml
   - loki-egress.yaml
