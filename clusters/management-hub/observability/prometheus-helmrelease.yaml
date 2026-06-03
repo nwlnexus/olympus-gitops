@@ -48,3 +48,18 @@ spec:
       enabled: true
     prometheus-node-exporter:
       enabled: true
+    # Scrape the local Traefik metrics Service; stamp cluster=management-hub so the
+    # Traefik dashboard can distinguish clusters (remote clusters set this via the
+    # otel prometheusremotewrite relabel — see Phase M3).
+    extraScrapeConfigs: |
+      - job_name: traefik
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: [traefik]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: traefik-metrics
+          - target_label: cluster
+            replacement: management-hub
