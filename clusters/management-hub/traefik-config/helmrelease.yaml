@@ -22,10 +22,12 @@ spec:
   values:
     podAnnotations:
       config-version: "2"
-      # Dedupe: the cluster-labeled `traefik` scrape job (prometheus-helmrelease)
-      # owns Traefik scraping. Disable the chart's auto pod-annotation scrape so the
-      # default kubernetes-pods job doesn't double-scrape (cluster-less duplicates).
-      prometheus.io/scrape: "false"
+    # cluster label -> series label via the kubernetes-pods labelmap, so mgmt's
+    # (chart-forced) Traefik annotation scrape carries cluster=management-hub,
+    # uniform with the remote clusters. Single annotation scrape = no duplicates.
+    deployment:
+      podLabels:
+        cluster: management-hub
     ingressClass:
       enabled: true
       isDefaultClass: false
