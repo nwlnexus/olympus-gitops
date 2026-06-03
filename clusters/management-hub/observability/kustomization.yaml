@@ -13,3 +13,4 @@ resources:
   - tempo-helmrelease.yaml
   - tempo-tailscale-service.yaml
   - loki-tailscale-service.yaml
+  - prometheus-tailscale-service.yaml
