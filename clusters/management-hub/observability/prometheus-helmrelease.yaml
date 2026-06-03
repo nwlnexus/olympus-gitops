@@ -61,5 +61,8 @@ spec:
           - source_labels: [__meta_kubernetes_service_name]
             action: keep
             regex: traefik-metrics
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: metrics
           - target_label: cluster
             replacement: management-hub
