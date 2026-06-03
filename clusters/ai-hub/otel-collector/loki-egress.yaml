@@ -1,0 +1,14 @@
+# Tailscale egress proxy → obs-loki on management-hub. ai-hub is Colima with no
+# node-level tailscaled, so MagicDNS doesn't resolve in-cluster; the operator runs
+# a userspace-tailscale egress proxy exposed as this in-cluster Service. The log
+# agent targets obs-loki.otel.svc.cluster.local:3100 with no MagicDNS dependency.
+apiVersion: v1
+kind: Service
+metadata:
+  name: obs-loki
+  namespace: otel
+  annotations:
+    tailscale.com/tailnet-fqdn: obs-loki.raptor-mimosa.ts.net
+spec:
+  type: ExternalName
+  externalName: placeholder  # overwritten by the tailscale operator with the egress proxy

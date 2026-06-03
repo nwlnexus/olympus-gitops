@@ -6,3 +6,4 @@ resources:
   - externalsecret.yaml
   - helmrelease.yaml
   - tempo-egress.yaml
+  - loki-egress.yaml
