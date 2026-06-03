@@ -21,7 +21,7 @@ spec:
       retries: 3
   values:
     podAnnotations:
-      config-version: "1"
+      config-version: "2"
     ingressClass:
       enabled: true
       isDefaultClass: true
@@ -41,6 +41,14 @@ spec:
           enabled: true
     api:
       dashboard: true
+    metrics:
+      prometheus:
+        entryPoint: metrics
+        service:
+          enabled: true
+        addEntryPointsLabels: true
+        addServicesLabels: true
+        addRoutersLabels: true
     logs:
       general:
         level: INFO

@@ -27,6 +27,13 @@ spec:
       reloader.stakater.com/auto: "true"
     image:
       repository: otel/opentelemetry-collector-contrib
+    # Prometheus receiver k8s service discovery needs cluster read access.
+    clusterRole:
+      create: true
+      rules:
+        - apiGroups: [""]
+          resources: [services, endpoints, pods]
+          verbs: [get, list, watch]
     extraEnvsFrom:
       - secretRef:
           name: sentry-otlp
@@ -65,8 +72,26 @@ spec:
             http:
               endpoint: 0.0.0.0:4318
         jaeger: null
-        prometheus: null
         zipkin: null
+        # Scrape the in-cluster Traefik metrics Service; keep only the metrics port
+        # (role:endpoints also emits the pod's other container ports), stamp cluster.
+        prometheus:
+          config:
+            scrape_configs:
+              - job_name: traefik
+                kubernetes_sd_configs:
+                  - role: endpoints
+                    namespaces:
+                      names: [traefik]
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_service_name]
+                    action: keep
+                    regex: traefik-metrics
+                  - source_labels: [__meta_kubernetes_endpoint_port_name]
+                    action: keep
+                    regex: metrics
+                  - target_label: cluster
+                    replacement: compute-hub
       processors:
         memory_limiter:
           check_interval: 1s
@@ -92,6 +117,9 @@ spec:
           endpoint: obs-tempo.raptor-mimosa.ts.net:4317
           tls:
             insecure: true
+        # Traefik metrics → mgmt Prometheus remote-write receiver over the tailnet.
+        prometheusremotewrite/mgmt:
+          endpoint: http://obs-prometheus.raptor-mimosa.ts.net:9090/api/v1/write
       service:
         telemetry:
           metrics:
@@ -101,5 +129,8 @@ spec:
             receivers: [otlp]
             processors: [memory_limiter, resource, batch]
             exporters: [otlp/tempo]
-          metrics: null
+          metrics:
+            receivers: [prometheus]
+            processors: [memory_limiter, batch]
+            exporters: [prometheusremotewrite/mgmt]
           logs: null
