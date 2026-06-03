@@ -21,7 +21,7 @@ spec:
       retries: 3
   values:
     podAnnotations:
-      config-version: "1"
+      config-version: "2"
     ingressClass:
       enabled: true
       isDefaultClass: false
@@ -41,6 +41,14 @@ spec:
           enabled: true
     api:
       dashboard: true
+    metrics:
+      prometheus:
+        entryPoint: metrics              # chart default metrics entrypoint (port 9100)
+        service:
+          enabled: true                  # creates the `traefik-metrics` Service for scraping
+        addEntryPointsLabels: true
+        addServicesLabels: true
+        addRoutersLabels: true           # per-router panels (off by default)
     logs:
       general:
         level: INFO
