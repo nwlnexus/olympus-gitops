@@ -75,6 +75,16 @@ spec:
           gnetId: 17347
           revision: 9
           datasource: Prometheus
+        # Node Exporter Full — node CPU/mem/disk/net (filter by cluster/instance).
+        node-exporter-full:
+          gnetId: 1860
+          revision: 45
+          datasource: Prometheus
+        # Kubernetes object state from kube-state-metrics.
+        kube-state-metrics-v2:
+          gnetId: 13332
+          revision: 12
+          datasource: Prometheus
     grafana.ini:
       server:
         root_url: https://grafana.nwlnexus.net
