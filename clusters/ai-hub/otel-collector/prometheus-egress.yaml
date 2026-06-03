@@ -1,0 +1,12 @@
+# Tailscale egress proxy → obs-prometheus on management-hub (ai-hub Colima: no MagicDNS).
+# The collector remote-writes to obs-prometheus.otel.svc.cluster.local:9090.
+apiVersion: v1
+kind: Service
+metadata:
+  name: obs-prometheus
+  namespace: otel
+  annotations:
+    tailscale.com/tailnet-fqdn: obs-prometheus.raptor-mimosa.ts.net
+spec:
+  type: ExternalName
+  externalName: placeholder  # overwritten by the tailscale operator with the egress proxy

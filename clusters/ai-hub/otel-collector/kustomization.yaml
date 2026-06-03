@@ -8,3 +8,4 @@ resources:
   - helmrelease-logs.yaml
   - tempo-egress.yaml
   - loki-egress.yaml
+  - prometheus-egress.yaml
