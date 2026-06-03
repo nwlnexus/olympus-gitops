@@ -14,3 +14,4 @@ resources:
   - tempo-tailscale-service.yaml
   - loki-tailscale-service.yaml
   - prometheus-tailscale-service.yaml
+  - alertmanager-resend-externalsecret.yaml
