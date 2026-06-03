@@ -1,0 +1,21 @@
+# Tailnet-only push endpoint for Loki, so ai-hub/compute-hub log agents can ship
+# logs over the tailnet (never CF). No tailscale.com/funnel => tailnet-only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki-ts
+  namespace: observability
+  annotations:
+    tailscale.com/hostname: "obs-loki"
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/component: single-binary
+  ports:
+    - name: http
+      port: 3100
+      targetPort: 3100
+      protocol: TCP
