@@ -46,5 +46,12 @@ spec:
       enabled: false
     kube-state-metrics:
       enabled: true
+      # Surface `cluster` on mgmt's kube_* series via the service-endpoints labelmap
+      # (uniform with the remote clusters, whose otel relabel sets cluster).
+      customLabels:
+        cluster: management-hub
     prometheus-node-exporter:
       enabled: true
+      service:
+        labels:
+          cluster: management-hub
