@@ -9,3 +9,6 @@ resources:
   - tempo-egress.yaml
   - loki-egress.yaml
   - prometheus-egress.yaml
+  - prometheus-community-helmrepository.yaml
+  - node-exporter-helmrelease.yaml
+  - kube-state-metrics-helmrelease.yaml
