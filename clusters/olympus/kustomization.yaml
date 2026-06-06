@@ -18,3 +18,4 @@ resources:
   - flux-kustomizations/otel-collector.yaml
   - flux-kustomizations/reloader.yaml
   - flux-kustomizations/platform.yaml
+  - flux-kustomizations/portainer.yaml
