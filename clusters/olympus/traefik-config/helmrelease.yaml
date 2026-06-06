@@ -1,0 +1,86 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: traefik
+  namespace: traefik
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: traefik
+      version: ">=30.0.0 <31.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: traefik
+        namespace: traefik
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    podAnnotations:
+      config-version: "2"
+    ingressClass:
+      enabled: true
+      isDefaultClass: true
+    providers:
+      kubernetesCRD:
+        allowExternalNameServices: true
+        ingressClass: traefik
+      kubernetesIngress:
+        enabled: true
+        ingressClass: traefik
+    ports:
+      web:
+        redirectTo:
+          port: websecure
+      websecure:
+        tls:
+          enabled: true
+    api:
+      dashboard: true
+    metrics:
+      prometheus:
+        entryPoint: metrics
+        service:
+          enabled: true
+        addEntryPointsLabels: true
+        addServicesLabels: true
+        addRoutersLabels: true
+    logs:
+      general:
+        level: INFO
+      access:
+        enabled: true
+        format: json
+        fields:
+          general:
+            defaultmode: keep
+            names:
+              ClientAddr: keep
+              RequestHost: keep
+              RequestMethod: keep
+              RequestPath: keep
+              RequestProtocol: keep
+              DownstreamStatus: keep
+              Duration: keep
+              RouterName: keep
+              ServiceName: keep
+          headers:
+            defaultmode: drop
+            names:
+              Authorization: redact
+              Cookie: drop
+              X-Forwarded-For: keep
+              X-Real-Ip: keep
+    tracing:
+      otlp:
+        enabled: true
+        grpc:
+          enabled: true
+          endpoint: opentelemetry-collector.otel.svc.cluster.local:4317
+          insecure: true
+    service:
+      type: LoadBalancer

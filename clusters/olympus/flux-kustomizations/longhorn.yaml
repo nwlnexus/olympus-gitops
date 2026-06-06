@@ -1,0 +1,16 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: longhorn
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/longhorn
+  prune: true
+  wait: true
+  timeout: 10m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    - name: external-secrets

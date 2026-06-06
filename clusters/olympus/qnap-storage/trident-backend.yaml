@@ -1,0 +1,18 @@
+apiVersion: trident.qnap.io/v1
+kind: TridentBackendConfig
+metadata:
+  name: qnap-iscsi-backend
+  namespace: trident
+spec:
+  version: 1
+  storageDriverName: qnap-iscsi
+  backendName: qnap-iscsi-backend
+  userCHAP: true
+  credentials:
+    name: qnap-trident-backend-creds
+  debugTraceFlags:
+    method: true
+  storage:
+    - serviceLevel: pool1
+      labels:
+        location: compute-hub
