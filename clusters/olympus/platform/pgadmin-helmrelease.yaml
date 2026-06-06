@@ -1,0 +1,44 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: pgadmin
+  namespace: platform
+spec:
+  interval: 1h
+  install:
+    timeout: 15m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 15m
+    remediation:
+      retries: 3
+  chart:
+    spec:
+      chart: pgadmin4
+      sourceRef:
+        kind: HelmRepository
+        name: runix
+        namespace: platform
+  values:
+    ingress:
+      enabled: false
+    persistentVolume:
+      enabled: true
+      existingClaim: pgadmin-data
+    existingSecret: pgadmin-credentials
+    secretKeys:
+      pgadminPasswordKey: password
+    env:
+      email: admin@nwlnexus.net
+    serverDefinitions:
+      enabled: true
+      servers:
+        ai-hub:
+          Name: ai-hub-postgres
+          Group: ai-hub
+          Port: 5432
+          Username: postgres
+          Host: postgresql.platform.svc.cluster.local
+          SSLMode: prefer
+          MaintenanceDB: postgres
