@@ -34,9 +34,6 @@ spec:
         - apiGroups: [""]
           resources: [services, endpoints, pods]
           verbs: [get, list, watch]
-    extraEnvsFrom:
-      - secretRef:
-          name: sentry-otlp
     ports:
       otlp:
         enabled: true

@@ -3,7 +3,6 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - helmrepository.yaml
-  - externalsecret.yaml
   - helmrelease.yaml
   - helmrelease-logs.yaml
   - prometheus-community-helmrepository.yaml

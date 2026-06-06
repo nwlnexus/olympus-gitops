@@ -35,7 +35,7 @@ spec:
                   name: platform-credentials
                   key: postgres-password
             - name: PGRST_DB_URI
-              value: "postgresql://postgres:$(POSTGRES_PASSWORD)@postgresql.platform.svc.cluster.local:5432/sentry"
+              value: "postgresql://postgres:$(POSTGRES_PASSWORD)@postgresql.platform.svc.cluster.local:5432/platform"
             - name: PGRST_JWT_SECRET
               valueFrom:
                 secretKeyRef:

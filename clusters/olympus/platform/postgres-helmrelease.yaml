@@ -28,7 +28,7 @@ spec:
       existingSecret: platform-credentials
       secretKeys:
         adminPasswordKey: postgres-password
-      database: sentry
+      database: platform
     primary:
       persistence:
         existingClaim: postgres-data
