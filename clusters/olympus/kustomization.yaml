@@ -20,3 +20,5 @@ resources:
   - flux-kustomizations/platform.yaml
   - flux-kustomizations/portainer.yaml
   - flux-kustomizations/observability.yaml
+  - flux-kustomizations/plex.yaml
+  - flux-kustomizations/qnap-ui.yaml
