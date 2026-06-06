@@ -1,0 +1,141 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: prometheus
+  namespace: observability
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: prometheus
+      version: "29.9.0"
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: observability
+  install:
+    timeout: 15m
+    remediation:
+      retries: 3
+  upgrade:
+    timeout: 15m
+    remediation:
+      retries: 3
+  values:
+    # Central metrics store: receives remote-write from per-cluster agents over
+    # the tailnet AND scrapes management-hub's own targets.
+    server:
+      retention: "30d"
+      persistentVolume:
+        enabled: true
+        storageClass: qnap-iscsi
+        size: 50Gi
+      extraFlags:
+        - web.enable-lifecycle
+        - web.enable-remote-write-receiver
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          memory: 2Gi
+    # Alertmanager → Resend email (Phase 7). Server auto-wires to the bundled AM.
+    alertmanager:
+      enabled: true
+      persistence:
+        enabled: true
+        storageClass: qnap-iscsi
+        size: 2Gi
+      # Resend API key (ESO) mounted as a file → kept out of the alertmanager ConfigMap.
+      extraSecretMounts:
+        - name: resend
+          secretName: alertmanager-resend
+          mountPath: /etc/alertmanager/secrets
+          readOnly: true
+      config:
+        global:
+          resolve_timeout: 5m
+          smtp_smarthost: smtp.resend.com:587
+          smtp_from: alerts@mail.nwlnexus.net
+          smtp_auth_username: resend
+          smtp_auth_password_file: /etc/alertmanager/secrets/api_key
+          smtp_require_tls: true
+        route:
+          receiver: email
+          group_by: [alertname, cluster]
+          group_wait: 30s
+          group_interval: 5m
+          repeat_interval: 4h
+          routes:
+            # Watchdog always fires; sink it (reserve for a future dead-man's-switch).
+            - matchers:
+                - 'alertname="Watchdog"'
+              receiver: 'null'
+        receivers:
+          - name: email
+            email_configs:
+              - to: nigel.williamslucas@gmail.com
+                send_resolved: true
+          - name: 'null'
+    serverFiles:
+      alerting_rules.yml:
+        groups:
+          - name: fleet-infra
+            rules:
+              - alert: Watchdog
+                expr: vector(1)
+                labels:
+                  severity: none
+                annotations:
+                  summary: "Alerting pipeline alive (always firing)."
+              - alert: NodeFilesystemAlmostFull
+                expr: >-
+                  100 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} * 100
+                  / node_filesystem_size_bytes) > 85
+                for: 15m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "Filesystem >85% full on {{ $labels.cluster }}/{{ $labels.instance }} ({{ $labels.mountpoint }})."
+              - alert: NodeHighMemory
+                expr: >-
+                  (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+                for: 15m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "Memory >90% used on {{ $labels.cluster }}/{{ $labels.instance }}."
+              - alert: KubeNodeNotReady
+                expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+                for: 5m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: "Node {{ $labels.node }} on {{ $labels.cluster }} not Ready >5m."
+              - alert: KubePodCrashLooping
+                expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
+                for: 15m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} on {{ $labels.cluster }} crash-looping."
+              - alert: TargetDown
+                expr: up == 0
+                for: 10m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "Target {{ $labels.job }} ({{ $labels.instance }}) on {{ $labels.cluster }} down >10m."
+    prometheus-pushgateway:
+      enabled: false
+    kube-state-metrics:
+      enabled: true
+      # Surface `cluster` on mgmt's kube_* series via the service-endpoints labelmap
+      # (uniform with the remote clusters, whose otel relabel sets cluster).
+      customLabels:
+        cluster: management-hub
+    prometheus-node-exporter:
+      enabled: true
+      service:
+        labels:
+          cluster: management-hub

@@ -19,3 +19,4 @@ resources:
   - flux-kustomizations/reloader.yaml
   - flux-kustomizations/platform.yaml
   - flux-kustomizations/portainer.yaml
+  - flux-kustomizations/observability.yaml
