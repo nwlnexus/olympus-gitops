@@ -20,6 +20,6 @@ spec:
     config:
       kafka:
         brokers:
-          - kafka.platform.svc.cluster.local:9092
+          - redpanda.platform.svc.cluster.local:9092
     ingress:
       enabled: false

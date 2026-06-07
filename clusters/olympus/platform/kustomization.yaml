@@ -20,6 +20,7 @@ resources:
 
   # Redpanda — in-cluster broker (no macOS arm64 binary available)
   - redpanda-helmrepository.yaml
+  - redpanda-server-helmrelease.yaml
   - redpanda-helmrelease.yaml
   - redpanda-ingressroute.yaml
 

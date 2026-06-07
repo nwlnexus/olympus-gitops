@@ -1,0 +1,69 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: redpanda
+  namespace: platform
+spec:
+  interval: 1h
+  install:
+    timeout: 15m
+    remediation:
+      retries: 2
+  upgrade:
+    timeout: 15m
+    remediation:
+      retries: 2
+  chart:
+    spec:
+      chart: redpanda
+      version: ">=5.9.0 <6.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: redpanda
+        namespace: platform
+  dependsOn:
+    - name: longhorn
+      namespace: flux-system
+  values:
+    statefulset:
+      replicas: 1
+    resources:
+      cpu:
+        cores: 1
+        overprovisioning_factor: 2
+      memory:
+        container:
+          max: "2.5Gi"
+    storage:
+      persistentVolume:
+        size: "20Gi"
+        storageClass: "longhorn"
+    listeners:
+      kafka:
+        port: 9092
+        external:
+          default:
+            enabled: false
+      http:
+        port: 8082
+        external:
+          default:
+            enabled: false
+      schemaRegistry:
+        port: 8081
+        external:
+          default:
+            enabled: false
+    tls:
+      enabled: false
+    auth:
+      sasl:
+        enabled: false
+    monitoring:
+      enabled: false
+    post_install_job:
+      enabled: false
+    tests:
+      enabled: false
+    console:
+      enabled: false
