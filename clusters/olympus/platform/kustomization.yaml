@@ -28,5 +28,7 @@ resources:
   - ch-ui-deployment.yaml
   - ch-ui-ingressroute.yaml
 
-  # Tailscale LoadBalancer services (Redpanda, ClickHouse, Redis on ai-hub)
-  - tailscale-services.yaml
+  # tailscale-services.yaml — intentionally excluded from kustomization.
+  # postgres-ts/redis-ts/clickhouse-ts/kafka-ts removed; data layer now native
+  # on ai-hub. Re-add entries to tailscale-services.yaml + here when new
+  # in-cluster services need tailnet LoadBalancer exposure.

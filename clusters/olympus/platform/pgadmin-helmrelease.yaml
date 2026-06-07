@@ -39,6 +39,6 @@ spec:
           Group: ai-hub
           Port: 5432
           Username: postgres
-          Host: postgresql.platform.svc.cluster.local
+          Host: ai-hub
           SSLMode: prefer
           MaintenanceDB: postgres
