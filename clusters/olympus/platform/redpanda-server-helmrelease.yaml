@@ -21,9 +21,6 @@ spec:
         kind: HelmRepository
         name: redpanda
         namespace: platform
-  dependsOn:
-    - name: longhorn
-      namespace: flux-system
   values:
     statefulset:
       replicas: 1
