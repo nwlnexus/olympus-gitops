@@ -30,6 +30,7 @@ spec:
     domainFilters:
       - nwlnexus.net
       - nwlnexus.xyz
+      - nwlnexus.io
     policy: sync
     sources:
       - service

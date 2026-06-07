@@ -6,7 +6,7 @@ metadata:
   annotations:
     kubernetes.io/ingress.class: traefik
     external-dns.alpha.kubernetes.io/hostname: grafana.nwlnexus.net
-    external-dns.alpha.kubernetes.io/target: ing.mgmt.nwlnexus.net
+    external-dns.alpha.kubernetes.io/target: ing.compute.nwlnexus.net
 spec:
   entryPoints:
     - websecure

@@ -5,7 +5,7 @@ metadata:
   namespace: platform
   annotations:
     external-dns.alpha.kubernetes.io/hostname: chui.nwlnexus.io
-    external-dns.alpha.kubernetes.io/target: ing.ai-hub.nwlnexus.net
+    external-dns.alpha.kubernetes.io/target: ing.compute.nwlnexus.net
 spec:
   entryPoints:
     - websecure
