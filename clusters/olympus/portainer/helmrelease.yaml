@@ -1,0 +1,38 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: portainer
+  namespace: portainer
+spec:
+  interval: 1h
+  install:
+    timeout: 15m
+    remediation:
+      retries: 3
+  chart:
+    spec:
+      chart: portainer
+      version: "239.2.0"
+      sourceRef:
+        kind: HelmRepository
+        name: portainer
+        namespace: portainer
+  values:
+    annotations:
+      reloader.stakater.com/auto: "true"
+    # Must match the AGENT_SECRET the standard agents require, or agent
+    # environments (management-hub, compute-hub) are rejected with 403 (Down).
+    extraEnv:
+      - name: AGENT_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: portainer-agent-secret
+            key: AGENT_SECRET
+    service:
+      type: ClusterIP
+    ingress:
+      enabled: false
+    persistence:
+      existingClaim: portainer-data
+    adminPassword:
+      existingSecret: portainer-admin

@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - externalsecret.yaml
+  - helmrepository.yaml
+  - prometheus-helmrelease.yaml
+  - grafana-admin-externalsecret.yaml
+  - grafana-helmrelease.yaml
+  - grafana-certificate.yaml
+  - grafana-ingressroute.yaml
+  - loki-helmrelease.yaml
+  - tempo-helmrelease.yaml
+  - tempo-tailscale-service.yaml
+  - loki-tailscale-service.yaml
+  - prometheus-tailscale-service.yaml
+  - alertmanager-resend-externalsecret.yaml

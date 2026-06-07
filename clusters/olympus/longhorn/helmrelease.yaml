@@ -1,0 +1,34 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: longhorn
+  namespace: longhorn-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: longhorn
+      version: "1.8.1"
+      sourceRef:
+        kind: HelmRepository
+        name: longhorn
+        namespace: longhorn-system
+  values:
+    defaultSettings:
+      # Default replica count for volumes — 3 replicas across all nodes
+      defaultReplicaCount: 3
+      # Backup target: QNAP QuObjects S3-compatible endpoint
+      # Credentials fetched via ExternalSecret (compute-hub-qnap-s3)
+      # Format: s3://<bucket>@<region>/
+      # Update after QNAP QuObjects is configured:
+      backupTarget: ""
+      backupTargetCredentialSecret: ""
+      # Storage path on each node (uses system disk; set to secondary disk mount if available)
+      defaultDataPath: /var/lib/longhorn
+      # Allow scheduling on all 3 nodes
+      replicaSoftAntiAffinity: true
+    persistence:
+      defaultClass: true
+      defaultClassReplicaCount: 3
+    ingress:
+      enabled: false

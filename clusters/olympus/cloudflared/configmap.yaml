@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared-config
+  namespace: cloudflared
+data:
+  config.yml: |
+    tunnel: 837149ae-9c1e-4866-ad48-f7d60aac090a
+    credentials-file: /etc/cloudflared/creds/credentials.json
+    metrics: 0.0.0.0:2000
+    no-autoupdate: true
+    # NOTE: ingress is managed REMOTELY in the Cloudflare dashboard/API
+    # (this tunnel is remotely-managed; remote config takes precedence over any
+    # local ingress here). Current remote ingress catch-all:
+    #   https://traefik.traefik.svc.cluster.local:443
+    # To change routing, update the tunnel config via the Cloudflare API/dashboard,
+    # NOT this file. See: cfd_tunnel/<id>/configurations.

@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: plex-styx
+  namespace: media
+  annotations:
+    tailscale.com/funnel: "true"
+    tailscale.com/hostname: "plex"   # exposes at https://plex.raptor-mimosa.ts.net
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  ports:
+    - name: https
+      port: 443
+      targetPort: 32400
+      protocol: TCP
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: plex-styx
+  namespace: media
+subsets:
+  - addresses:
+      - ip: 100.72.84.56   # styx Tailscale IP — direct LAN peer connection, no DERP relay
+    ports:
+      - name: https
+        port: 32400
+        protocol: TCP

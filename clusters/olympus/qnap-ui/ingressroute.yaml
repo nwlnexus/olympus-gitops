@@ -1,0 +1,22 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: qnap-ui
+  namespace: qnap-ui
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    external-dns.alpha.kubernetes.io/hostname: qnap-ui.nwlnexus.net
+    external-dns.alpha.kubernetes.io/target: ing.mgmt.nwlnexus.net
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`qnap-ui.nwlnexus.net`)
+      kind: Rule
+      services:
+        - name: qnap-ui
+          port: 443
+          scheme: https
+          serversTransport: qnap-ui-transport
+  tls:
+    secretName: qnap-ui-tls

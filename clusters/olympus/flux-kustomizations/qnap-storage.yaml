@@ -1,0 +1,22 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: qnap-storage
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/qnap-storage
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    - name: external-secrets-config
+  # NOTE: the trident.qnap.io CRDs (TridentBackendConfig) and the
+  # csi.trident.qnap.io provisioner must already be installed on the cluster
+  # (via the qnap-csi-bootstrap ansible role) or this kustomization will fail
+  # with "no matches for kind TridentBackendConfig". See qnap-storage/README.md.
+  healthChecks:
+    - apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      name: qnap-iscsi
