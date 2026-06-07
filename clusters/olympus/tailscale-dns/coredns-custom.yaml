@@ -10,12 +10,3 @@ data:
         cache 30
         forward . 100.100.100.100
     }
-  portainer.server: |
-    dock.nwlnexus.net:53 {
-        errors
-        hosts {
-            100.99.162.68 dock.nwlnexus.net
-            fallthrough
-        }
-        cache 30
-    }
