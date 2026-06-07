@@ -22,6 +22,11 @@ spec:
   values:
     mode: daemonset
     fullnameOverride: otel-logs
+    tolerations:
+      - key: olympus.io/role
+        operator: Equal
+        value: management-hub
+        effect: NoSchedule
     image:
       repository: otel/opentelemetry-collector-contrib
     presets:
@@ -55,10 +60,10 @@ spec:
         resource:
           attributes:
             - key: k8s.cluster.name
-              value: compute-hub
+              value: olympus
               action: upsert
       exporters:
-        # compute-hub has node tailscaled → MagicDNS resolves obs-loki directly.
+        # olympus cluster nodes have tailscaled → MagicDNS resolves obs-loki directly.
         otlphttp/loki:
           logs_endpoint: http://obs-loki.raptor-mimosa.ts.net:3100/otlp/v1/logs
       service:

@@ -88,7 +88,7 @@ spec:
                     action: keep
                     regex: metrics
                   - target_label: cluster
-                    replacement: compute-hub
+                    replacement: olympus
               - job_name: node-exporter
                 kubernetes_sd_configs:
                   - role: endpoints
@@ -104,7 +104,7 @@ spec:
                   - source_labels: [__meta_kubernetes_pod_node_name]
                     target_label: instance
                   - target_label: cluster
-                    replacement: compute-hub
+                    replacement: olympus
               - job_name: kube-state-metrics
                 kubernetes_sd_configs:
                   - role: endpoints
@@ -118,7 +118,7 @@ spec:
                     action: keep
                     regex: http
                   - target_label: cluster
-                    replacement: compute-hub
+                    replacement: olympus
       processors:
         memory_limiter:
           check_interval: 1s
@@ -133,7 +133,7 @@ spec:
               value: traefik-edge
               action: upsert
             - key: cluster
-              value: compute-hub
+              value: olympus
               action: upsert
             - key: deployment.environment
               value: homelab
