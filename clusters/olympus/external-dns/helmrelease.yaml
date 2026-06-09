@@ -31,10 +31,10 @@ spec:
       - nwlnexus.net
       - nwlnexus.xyz
       - nwlnexus.io
-    # NOTE: temporarily upsert-only during the compute-hub→olympus owner/prefix
-    # rename so no record can be deleted mid-migration. Flip back to sync once the
-    # new `olympus-` TXT registry records are confirmed for all hosts.
-    policy: upsert-only
+    # Single-cluster (olympus) now manages these zones — management-hub retired.
+    # sync auto-prunes records when their source is removed; safe because every
+    # record carries an olympus-owned TXT registry entry (txtOwnerId/txtPrefix).
+    policy: sync
     sources:
       - service
       - ingress
