@@ -135,7 +135,4 @@ spec:
       customLabels:
         cluster: management-hub
     prometheus-node-exporter:
-      enabled: true
-      service:
-        labels:
-          cluster: management-hub
+      enabled: false
