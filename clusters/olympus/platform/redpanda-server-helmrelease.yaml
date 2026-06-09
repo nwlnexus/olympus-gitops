@@ -34,7 +34,7 @@ spec:
     storage:
       persistentVolume:
         size: "20Gi"
-        storageClass: "longhorn"
+        storageClass: "qnap-iscsi"
     listeners:
       kafka:
         port: 9092
