@@ -16,7 +16,7 @@ spec:
   values:
     nfs:
       server: qnap.nwlnexus.net
-      path: /compute-hub
+      path: /olympus-nfs-data
     storageClass:
       name: qnap-nfs
       reclaimPolicy: Delete
