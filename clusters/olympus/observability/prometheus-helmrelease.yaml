@@ -22,8 +22,8 @@ spec:
     remediation:
       retries: 3
   values:
-    # Central metrics store: receives remote-write from per-cluster agents over
-    # the tailnet AND scrapes management-hub's own targets.
+    # Central metrics store: receives remote-write from the olympus otel agent
+    # over the tailnet AND scrapes olympus's own targets.
     server:
       retention: "30d"
       persistentVolume:
@@ -133,6 +133,6 @@ spec:
       # Surface `cluster` on mgmt's kube_* series via the service-endpoints labelmap
       # (uniform with the remote clusters, whose otel relabel sets cluster).
       customLabels:
-        cluster: management-hub
+        cluster: olympus
     prometheus-node-exporter:
       enabled: false
