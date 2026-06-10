@@ -139,12 +139,14 @@ spec:
               value: homelab
               action: upsert
       exporters:
-        # Traefik/edge traces → Tempo on management-hub over the tailnet.
+        # Traefik/edge traces → Tempo in the olympus observability stack,
+        # reached via the obs-tempo tailnet Service over the tailnet.
         otlp/tempo:
           endpoint: obs-tempo.raptor-mimosa.ts.net:4317
           tls:
             insecure: true
-        # Traefik metrics → mgmt Prometheus remote-write receiver over the tailnet.
+        # Traefik metrics → olympus Prometheus remote-write receiver,
+        # reached via the obs-prometheus tailnet Service over the tailnet.
         prometheusremotewrite/mgmt:
           endpoint: http://obs-prometheus.raptor-mimosa.ts.net:9090/api/v1/write
       service:
