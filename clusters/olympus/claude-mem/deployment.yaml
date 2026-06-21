@@ -48,6 +48,9 @@ spec:
                 secretKeyRef:
                   name: claude-mem-credentials
                   key: redis-password
+            # Redis URL uses Tailscale MagicDNS hostname. Requires cluster pods to resolve
+            # and reach tailnet addresses (node-level tailscaled routing advertises pod CIDR
+            # through the tailnet). ai-hub carries tag:data-hub per olympus-tailnet ACL.
             - name: CLAUDE_MEM_REDIS_URL
               value: "redis://:$(CLAUDE_MEM_REDIS_PASSWORD)@ai-hub.raptor-mimosa.ts.net:6379"
           livenessProbe:
