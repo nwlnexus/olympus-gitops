@@ -22,3 +22,4 @@ resources:
   - flux-kustomizations/observability.yaml
   - flux-kustomizations/plex.yaml
   - flux-kustomizations/qnap-ui.yaml
+  - flux-kustomizations/claude-mem.yaml

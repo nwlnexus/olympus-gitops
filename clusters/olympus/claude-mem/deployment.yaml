@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claude-mem-server
+  namespace: claude-mem
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: claude-mem-server
+  template:
+    metadata:
+      labels:
+        app: claude-mem-server
+    spec:
+      containers:
+        - name: claude-mem-server
+          image: ghcr.io/nwlnexus/claude-mem-server:claude-mem-13.7.1
+          ports:
+            - containerPort: 37878
+          env:
+            - name: CLAUDE_MEM_RUNTIME
+              value: "server-beta"
+            - name: CLAUDE_MEM_AUTH_MODE
+              value: "api-key"
+            - name: CLAUDE_MEM_QUEUE_ENGINE
+              value: "bullmq"
+            - name: CLAUDE_MEM_CHROMA_ENABLED
+              value: "false"
+            - name: CLAUDE_MEM_WORKER_PORT
+              value: "37878"
+            - name: CLAUDE_MEM_SERVER_BETA_PROJECT_ID
+              value: "olympus"
+            - name: CLAUDE_MEM_SERVER_BETA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: claude-mem-credentials
+                  key: api-key
+            - name: CLAUDE_MEM_SERVER_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: claude-mem-credentials
+                  key: database-url
+            # CLAUDE_MEM_REDIS_URL uses Kubernetes variable substitution:
+            # CLAUDE_MEM_REDIS_PASSWORD must be declared before CLAUDE_MEM_REDIS_URL
+            - name: CLAUDE_MEM_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: claude-mem-credentials
+                  key: redis-password
+            - name: CLAUDE_MEM_REDIS_URL
+              value: "redis://:$(CLAUDE_MEM_REDIS_PASSWORD)@ai-hub.raptor-mimosa.ts.net:6379"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 37878
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 37878
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 5
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
