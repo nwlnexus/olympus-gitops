@@ -36,7 +36,7 @@ spec:
       servers:
         ai-hub:
           Name: ai-hub-postgres
-          Group: ai-hub
+          Group: Servers
           Port: 5432
           Username: postgres
           Host: ai-hub
