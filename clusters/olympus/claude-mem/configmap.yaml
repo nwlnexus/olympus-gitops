@@ -10,6 +10,7 @@ data:
       "CLAUDE_MEM_AUTH_MODE": "api-key",
       "CLAUDE_MEM_WORKER_HOST": "0.0.0.0",
       "CLAUDE_MEM_WORKER_PORT": "37877",
+      "CLAUDE_MEM_SERVER_BETA_URL": "http://0.0.0.0:37877",
       "CLAUDE_MEM_QUEUE_ENGINE": "bullmq",
       "CLAUDE_MEM_CHROMA_ENABLED": "false"
     }
