@@ -17,7 +17,7 @@ spec:
         - name: claude-mem-server
           image: ghcr.io/nwlnexus/claude-mem-server:claude-mem-13.7.1
           ports:
-            - containerPort: 37878
+            - containerPort: 37877
           env:
             - name: CLAUDE_MEM_RUNTIME
               value: "server-beta"
@@ -28,7 +28,9 @@ spec:
             - name: CLAUDE_MEM_CHROMA_ENABLED
               value: "false"
             - name: CLAUDE_MEM_WORKER_PORT
-              value: "37878"
+              value: "37877"
+            - name: CLAUDE_MEM_WORKER_HOST
+              value: "0.0.0.0"
             - name: CLAUDE_MEM_SERVER_BETA_PROJECT_ID
               value: "olympus"
             - name: CLAUDE_MEM_SERVER_BETA_API_KEY
@@ -56,14 +58,14 @@ spec:
           livenessProbe:
             httpGet:
               path: /health
-              port: 37878
+              port: 37877
             initialDelaySeconds: 60
             periodSeconds: 30
             failureThreshold: 5
           readinessProbe:
             httpGet:
               path: /health
-              port: 37878
+              port: 37877
             initialDelaySeconds: 60
             periodSeconds: 10
             failureThreshold: 5
