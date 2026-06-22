@@ -71,6 +71,9 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 10
             failureThreshold: 5
+          volumeMounts:
+            - name: settings
+              mountPath: /root/.claude-mem
           resources:
             requests:
               memory: "256Mi"
@@ -78,3 +81,7 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+      volumes:
+        - name: settings
+          configMap:
+            name: claude-mem-settings
