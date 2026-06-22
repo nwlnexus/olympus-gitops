@@ -31,6 +31,8 @@ spec:
               value: "37877"
             - name: CLAUDE_MEM_WORKER_HOST
               value: "0.0.0.0"
+            - name: HOST
+              value: "0.0.0.0"
             - name: CLAUDE_MEM_SERVER_BETA_PROJECT_ID
               value: "olympus"
             - name: CLAUDE_MEM_SERVER_BETA_API_KEY
