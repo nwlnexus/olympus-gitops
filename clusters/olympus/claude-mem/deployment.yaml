@@ -51,23 +51,6 @@ spec:
             # through the tailnet). ai-hub carries tag:data-hub per olympus-tailnet ACL.
             - name: CLAUDE_MEM_REDIS_URL
               value: "redis://:$(CLAUDE_MEM_REDIS_PASSWORD)@ai-hub.raptor-mimosa.ts.net:6379"
-          # Probes connect to 127.0.0.1 directly — server binds to loopback only
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 37877
-              host: "127.0.0.1"
-            initialDelaySeconds: 60
-            periodSeconds: 30
-            failureThreshold: 5
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 37877
-              host: "127.0.0.1"
-            initialDelaySeconds: 60
-            periodSeconds: 10
-            failureThreshold: 5
           volumeMounts:
             - name: claude-mem-data
               mountPath: /root/.claude-mem
@@ -82,7 +65,8 @@ spec:
               memory: "512Mi"
               cpu: "500m"
 
-        # socat bridges 0.0.0.0:37878 → 127.0.0.1:37877 (server-beta binds loopback only)
+        # socat bridges 0.0.0.0:37878 → 127.0.0.1:37877 (server-beta binds loopback only).
+        # Probes live here — tcpSocket on 37878 confirms socat+server are both reachable.
         - name: proxy
           image: alpine/socat:latest
           command:
@@ -91,6 +75,18 @@ spec:
             - TCP:127.0.0.1:37877
           ports:
             - containerPort: 37878
+          livenessProbe:
+            tcpSocket:
+              port: 37878
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: 37878
+            initialDelaySeconds: 90
+            periodSeconds: 10
+            failureThreshold: 3
           resources:
             requests:
               memory: "16Mi"
