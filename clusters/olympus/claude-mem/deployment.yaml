@@ -29,10 +29,6 @@ spec:
               value: "false"
             - name: CLAUDE_MEM_WORKER_PORT
               value: "37877"
-            - name: CLAUDE_MEM_WORKER_HOST
-              value: "0.0.0.0"
-            - name: HOST
-              value: "0.0.0.0"
             - name: CLAUDE_MEM_SERVER_BETA_PROJECT_ID
               value: "olympus"
             - name: CLAUDE_MEM_SERVER_BETA_API_KEY
@@ -45,8 +41,6 @@ spec:
                 secretKeyRef:
                   name: claude-mem-credentials
                   key: database-url
-            # CLAUDE_MEM_REDIS_URL uses Kubernetes variable substitution:
-            # CLAUDE_MEM_REDIS_PASSWORD must be declared before CLAUDE_MEM_REDIS_URL
             - name: CLAUDE_MEM_REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -57,10 +51,12 @@ spec:
             # through the tailnet). ai-hub carries tag:data-hub per olympus-tailnet ACL.
             - name: CLAUDE_MEM_REDIS_URL
               value: "redis://:$(CLAUDE_MEM_REDIS_PASSWORD)@ai-hub.raptor-mimosa.ts.net:6379"
+          # Probes connect to 127.0.0.1 directly — server binds to loopback only
           livenessProbe:
             httpGet:
               path: /health
               port: 37877
+              host: "127.0.0.1"
             initialDelaySeconds: 60
             periodSeconds: 30
             failureThreshold: 5
@@ -68,6 +64,7 @@ spec:
             httpGet:
               path: /health
               port: 37877
+              host: "127.0.0.1"
             initialDelaySeconds: 60
             periodSeconds: 10
             failureThreshold: 5
@@ -77,7 +74,6 @@ spec:
             - name: settings
               mountPath: /root/.claude-mem/settings.json
               subPath: settings.json
-              readOnly: true
           resources:
             requests:
               memory: "256Mi"
@@ -85,6 +81,24 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+
+        # socat bridges 0.0.0.0:37878 → 127.0.0.1:37877 (server-beta binds loopback only)
+        - name: proxy
+          image: alpine/socat:latest
+          command:
+            - socat
+            - TCP-LISTEN:37878,bind=0.0.0.0,fork,reuseaddr
+            - TCP:127.0.0.1:37877
+          ports:
+            - containerPort: 37878
+          resources:
+            requests:
+              memory: "16Mi"
+              cpu: "10m"
+            limits:
+              memory: "32Mi"
+              cpu: "50m"
+
       volumes:
         - name: claude-mem-data
           emptyDir: {}
