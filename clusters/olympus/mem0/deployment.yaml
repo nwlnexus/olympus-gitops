@@ -49,6 +49,10 @@ spec:
               value: "6333"
             - name: USER
               value: "mnemosyne"
+            # Persist the SQLite registry on the mounted volume (/data), NOT the WORKDIR
+            # (/usr/src/openmemory) which holds the app code — mounting there masks main.py.
+            - name: DATABASE_URL
+              value: "sqlite:////data/openmemory.db"
             # Present so the openai default config path (and any env: lookups) resolve;
             # not used at runtime while provider=ollama.
             - name: OPENAI_API_KEY
@@ -74,7 +78,7 @@ spec:
             failureThreshold: 5
           volumeMounts:
             - name: openmemory-data
-              mountPath: /usr/src/openmemory
+              mountPath: /data
           resources:
             requests:
               memory: "256Mi"
