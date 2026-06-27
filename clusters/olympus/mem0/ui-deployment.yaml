@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openmemory-ui
+  namespace: mem0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openmemory-ui
+  template:
+    metadata:
+      labels:
+        app: openmemory-ui
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: openmemory-ui
+          image: ghcr.io/nwlnexus/openmemory-ui:b44ce4d
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            # The UI image is environment-agnostic: entrypoint.sh sed-replaces the
+            # NEXT_PUBLIC_* placeholders baked into the built bundle with these runtime
+            # env values on container start. So the API URL is set HERE, at runtime.
+            - name: NODE_ENV
+              value: "production"
+            - name: NEXT_PUBLIC_API_URL
+              value: "http://openmemory.raptor-mimosa.ts.net:8765"
+            - name: NEXT_PUBLIC_USER_ID
+              value: "mnemosyne"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

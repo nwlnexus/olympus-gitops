@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openmemory-data
+  namespace: mem0
+spec:
+  # Persists the SQLite registry at /usr/src/openmemory/openmemory.db — the
+  # source-of-truth metadata store the MCP search relies on. Losing it orphans
+  # the Qdrant vectors from their app-level records.
+  storageClassName: longhorn
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi

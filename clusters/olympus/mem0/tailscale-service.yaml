@@ -1,0 +1,37 @@
+# Tailnet-only access for the OpenMemory API + UI. No tailscale.com/funnel.
+# Qdrant is deliberately NOT exposed — it stays cluster-internal.
+apiVersion: v1
+kind: Service
+metadata:
+  name: openmemory-ts
+  namespace: mem0
+  annotations:
+    tailscale.com/hostname: "openmemory"
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app: openmemory
+  ports:
+    - name: http
+      port: 8765
+      targetPort: 8765
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openmemory-ui-ts
+  namespace: mem0
+  annotations:
+    tailscale.com/hostname: "openmemory-ui"
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app: openmemory-ui
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP

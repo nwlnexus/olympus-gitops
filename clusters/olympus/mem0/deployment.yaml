@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openmemory
+  namespace: mem0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openmemory
+  strategy:
+    # Recreate avoids two pods racing on the single RWO Longhorn volume (the
+    # openmemory.db SQLite registry) during rollouts.
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: openmemory
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: openmemory
+          image: ghcr.io/nwlnexus/openmemory-mcp:b44ce4d
+          ports:
+            - name: http
+              containerPort: 8765
+          env:
+            # LLM + embedder run on the homelab Ollama (ai-hub). OLLAMA_BASE_URL is
+            # set explicitly to a non-localhost URL so OpenMemory's Docker host-rewrite
+            # path (host.docker.internal / bridge-gw) is bypassed and pods reach Ollama
+            # over the tailnet MagicDNS name.
+            - name: LLM_PROVIDER
+              value: "ollama"
+            - name: LLM_MODEL
+              value: "qwen3:32b"
+            - name: EMBEDDER_PROVIDER
+              value: "ollama"
+            - name: EMBEDDER_MODEL
+              value: "nomic-embed-text"
+            - name: OLLAMA_BASE_URL
+              value: "http://ai-hub.raptor-mimosa.ts.net:11434"
+            # Vector store = in-cluster Qdrant. memory.py keys off QDRANT_HOST/PORT to
+            # select the qdrant provider; the init Job (mem0-init-config) then PUTs the
+            # 768-dim override so the collection matches nomic-embed-text's output dims.
+            - name: QDRANT_HOST
+              value: "qdrant.mem0.svc.cluster.local"
+            - name: QDRANT_PORT
+              value: "6333"
+            - name: USER
+              value: "mnemosyne"
+            # Present so the openai default config path (and any env: lookups) resolve;
+            # not used at runtime while provider=ollama.
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mem0-credentials
+                  key: openai-api-key
+          # /docs (FastAPI Swagger UI) is the only always-available GET route; there is
+          # no /health endpoint. Generous initialDelay covers first-boot DB migration.
+          livenessProbe:
+            httpGet:
+              path: /docs
+              port: 8765
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /docs
+              port: 8765
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 5
+          volumeMounts:
+            - name: openmemory-data
+              mountPath: /usr/src/openmemory
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+      volumes:
+        - name: openmemory-data
+          persistentVolumeClaim:
+            claimName: openmemory-data
