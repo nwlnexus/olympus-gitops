@@ -1,0 +1,73 @@
+# RBAC for the ingress-discovery controller (issue #117).
+#
+# The controller is read-only against application resources and writes only its
+# own leader-election Lease. Rules lifted verbatim from the controller package
+# docs: packages/ingress-discovery/docs/RBAC.md (olympus-sdk).
+#
+#   - ClusterRole (cluster-wide, read-only): get/list/watch on
+#     traefik.io/ingressroutes ONLY. HTTPRoute/Ingress left commented out (v1 is
+#     IngressRoute-only — design §6).
+#   - Role (namespaced to ingress-discovery): get/create/update on
+#     coordination.k8s.io/leases. NO delete (release uses a CAS-guarded update),
+#     NO patch.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ingress-discovery
+  namespace: ingress-discovery
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ingress-discovery
+rules:
+  - apiGroups: ["traefik.io"]
+    resources: ["ingressroutes"]
+    verbs: ["get", "list", "watch"]
+  # v1 is IngressRoute-only. Uncomment if/when these ever need discovery:
+  # - apiGroups: ["networking.k8s.io"]
+  #   resources: ["ingresses"]
+  #   verbs: ["get", "list", "watch"]
+  # - apiGroups: ["gateway.networking.k8s.io"]
+  #   resources: ["httproutes"]
+  #   verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ingress-discovery
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ingress-discovery
+subjects:
+  - kind: ServiceAccount
+    name: ingress-discovery
+    namespace: ingress-discovery
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ingress-discovery-leader
+  namespace: ingress-discovery
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    # get (read for CAS), create (first claim), update (replace = renew/release).
+    # `patch`/`delete` are deliberately NOT granted.
+    verbs: ["get", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ingress-discovery-leader
+  namespace: ingress-discovery
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ingress-discovery-leader
+subjects:
+  - kind: ServiceAccount
+    name: ingress-discovery
+    namespace: ingress-discovery

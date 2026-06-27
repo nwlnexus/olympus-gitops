@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingress-discovery
+  namespace: ingress-discovery
+spec:
+  # Single replica to start. Safe to bump to 2 for HA — the controller is
+  # leader-elected (coordination.k8s.io Lease `ingress-discovery-leader`), so
+  # only the leader publishes; followers stay warm and report healthy.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingress-discovery
+  template:
+    metadata:
+      labels:
+        app: ingress-discovery
+    spec:
+      serviceAccountName: ingress-discovery
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ingress-discovery
+          # Pinned by tag (matches mem0's tag-pin convention). The pushed tag is
+          # the short commit sha from olympus-sdk. Immutable digest equivalent:
+          #   sha256:1e439266b0d70f2efa2359f233dfd84cc5a0003ec7a300885951475006717f1a
+          image: ghcr.io/nwlnexus/ingress-discovery:8977a56
+          ports:
+            - name: health
+              containerPort: 8080
+          env:
+            # Hermes is a Cloudflare Worker (NOT in-cluster). HERMES_URL is the
+            # full GraphQL endpoint — the publisher POSTs the mutation directly
+            # to this URL (no path is appended).
+            - name: HERMES_URL
+              value: "https://api.nwlnexus.net/graphql"
+            # Bearer token carrying the `publish:app-launchers` capability.
+            # Mounted from the ExternalSecret-managed Secret; never logged.
+            - name: HERMES_PUBLISH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: ingress-discovery-credentials
+                  key: hermes-publish-token
+            # Leader-election lease lives in THIS namespace (downward API).
+            - name: LEASE_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # Stable per-pod leader identity (downward API → pod name).
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HEALTH_PORT
+              value: "8080"
+            # Read by the tracing subscriber (NOT Config::from_env).
+            - name: RUST_LOG
+              value: "info"
+          # GET /healthz → 200 whenever the reconcile loop is alive (followers
+          # included — health is NOT gated on leadership).
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "25m"
+            limits:
+              memory: "128Mi"
+              cpu: "250m"

@@ -23,3 +23,4 @@ resources:
   - flux-kustomizations/plex.yaml
   - flux-kustomizations/qnap-ui.yaml
   - flux-kustomizations/mem0.yaml
+  - flux-kustomizations/ingress-discovery.yaml
