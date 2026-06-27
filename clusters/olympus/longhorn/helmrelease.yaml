@@ -28,7 +28,11 @@ spec:
       # Allow scheduling on all 3 nodes
       replicaSoftAntiAffinity: true
     persistence:
-      defaultClass: true
+      # Not the cluster default StorageClass — k3s built-in local-path is the
+      # single default. Two defaults (local-path + longhorn) is ambiguous; opt
+      # into replicated block storage explicitly via storageClassName: longhorn.
+      # (olympus-sdk#133)
+      defaultClass: false
       defaultClassReplicaCount: 3
     ingress:
       enabled: false
