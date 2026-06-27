@@ -7,6 +7,11 @@ metadata:
     kubernetes.io/ingress.class: traefik
     external-dns.alpha.kubernetes.io/hostname: grafana.nwlnexus.net
     external-dns.alpha.kubernetes.io/target: ing.compute.nwlnexus.net
+    # App-launcher discovery (issue #117) — canary opt-in.
+    launcher.olympus.io/enabled: "true"
+    launcher.olympus.io/display-name: "Grafana"
+    launcher.olympus.io/group: "Observability"
+    launcher.olympus.io/icon: "gauge"
 spec:
   entryPoints:
     - websecure

@@ -1,0 +1,19 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ingress-discovery
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/ingress-discovery
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    # ExternalSecrets (publish token + ghcr-pull) resolve via the
+    # onepassword-connect ClusterSecretStore created by external-secrets-config.
+    - name: external-secrets-config
+    # The controller fail-fasts at startup if the traefik.io IngressRoute CRD is
+    # not served, so the Traefik CRDs must be installed first.
+    - name: traefik-config
