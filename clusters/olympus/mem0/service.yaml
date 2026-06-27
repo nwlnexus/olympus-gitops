@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: openmemory
+  namespace: mem0
+spec:
+  selector:
+    app: openmemory
+  ports:
+    - name: http
+      port: 8765
+      targetPort: 8765
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openmemory-ui
+  namespace: mem0
+spec:
+  selector:
+    app: openmemory-ui
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: mem0
+spec:
+  selector:
+    app: qdrant
+  ports:
+    - name: rest
+      port: 6333
+      targetPort: 6333
+      protocol: TCP
+    - name: grpc
+      port: 6334
+      targetPort: 6334
+      protocol: TCP

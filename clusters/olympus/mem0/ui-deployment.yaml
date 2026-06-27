@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openmemory-ui
+  namespace: mem0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openmemory-ui
+  template:
+    metadata:
+      labels:
+        app: openmemory-ui
+    spec:
+      containers:
+        - name: openmemory-ui
+          image: ghcr.io/nwlnexus/openmemory-ui:b44ce4d
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            # NEXT_PUBLIC_* values are baked at image build time (Next.js), so the API
+            # URL is fixed in the image — only NODE_ENV is meaningful at runtime here.
+            - name: NODE_ENV
+              value: "production"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
