@@ -20,10 +20,15 @@ spec:
             - name: http
               containerPort: 3000
           env:
-            # NEXT_PUBLIC_* values are baked at image build time (Next.js), so the API
-            # URL is fixed in the image — only NODE_ENV is meaningful at runtime here.
+            # The UI image is environment-agnostic: entrypoint.sh sed-replaces the
+            # NEXT_PUBLIC_* placeholders baked into the built bundle with these runtime
+            # env values on container start. So the API URL is set HERE, at runtime.
             - name: NODE_ENV
               value: "production"
+            - name: NEXT_PUBLIC_API_URL
+              value: "http://openmemory.raptor-mimosa.ts.net:8765"
+            - name: NEXT_PUBLIC_USER_ID
+              value: "mnemosyne"
           resources:
             requests:
               memory: "128Mi"
