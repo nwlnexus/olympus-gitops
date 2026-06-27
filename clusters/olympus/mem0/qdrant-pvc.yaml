@@ -4,7 +4,10 @@ metadata:
   name: qdrant-storage
   namespace: mem0
 spec:
-  storageClassName: longhorn
+  # qnap-iscsi (Trident) — the proven SC on this cluster (all existing PVCs use it).
+  # Longhorn (default SC) fails to format volumes on these nodes
+  # ("/dev/longhorn/... in use by the system"); tracked separately.
+  storageClassName: qnap-iscsi
   accessModes:
     - ReadWriteOnce
   resources:
