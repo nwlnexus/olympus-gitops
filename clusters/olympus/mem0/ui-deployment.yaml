@@ -13,6 +13,8 @@ spec:
       labels:
         app: openmemory-ui
     spec:
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: openmemory-ui
           image: ghcr.io/nwlnexus/openmemory-ui:b44ce4d
