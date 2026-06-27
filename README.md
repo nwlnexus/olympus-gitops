@@ -10,7 +10,6 @@ clusters/
     external-secrets/  # ESO operator + ClusterSecretStore → 1Password Connect (wave 0)
     cert-manager/      # cert-manager + Let's Encrypt DNS-01/Cloudflare issuer (wave 1)
     traefik/           # Traefik ingress controller (wave 2)
-    vibe-kanban/       # Vibe Kanban + PostgreSQL (wave 3)
 ```
 
 ## ArgoCD Applications
@@ -28,11 +27,9 @@ Each app points to its directory here, syncs automatically, and creates its name
 2. ArgoCD syncs `external-secrets` (wave 0) → ESO operator + ClusterSecretStore ready
 3. ArgoCD syncs `cert-manager` (wave 1) → ESO creates `cloudflare-api-token` Secret → ClusterIssuer ready
 4. ArgoCD syncs `traefik` (wave 2) → ingress controller ready
-5. ArgoCD syncs `vibe-kanban` (wave 3) → ESO creates app secrets → Vibe Kanban up
 
 ## 1Password items required
 
 | Item name           | Fields              | Used by           |
 |---------------------|---------------------|-------------------|
 | `Cloudflare API Token` | `credential`     | cert-manager DNS-01 |
-| `Vibe Kanban`       | `db-password`, `jwt-secret` | vibe-kanban |

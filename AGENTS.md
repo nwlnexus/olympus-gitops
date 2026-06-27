@@ -33,7 +33,7 @@ clusters/<cluster>/
 
 | Cluster | Ingress tunnel | Domain(s) | Apps |
 |---|---|---|---|
-| management-hub | `ing.mgmt.nwlnexus.net` | `*.nwlnexus.net`, `*.nwlnexus.xyz` | headlamp, qnap-ui, litellm, vibe-kanban, connect-ingress, kubeconfig-merger, tailscale-operator |
+| management-hub | `ing.mgmt.nwlnexus.net` | `*.nwlnexus.net`, `*.nwlnexus.xyz` | headlamp, qnap-ui, litellm, connect-ingress, kubeconfig-merger, tailscale-operator |
 | compute-hub | `ing.compute.nwlnexus.net` | `*.nwlnexus.xyz` | longhorn, democratic-csi, obsidian, whoami, tailscale-operator |
 
 ## Dependency Ordering
