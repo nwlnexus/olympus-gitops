@@ -1,31 +1,34 @@
 # mem0-init-config — one-shot post-deploy reconciler for the OpenMemory backend config.
 #
 # WHY THIS EXISTS:
-#   OpenMemory selects the Qdrant vector store from the QDRANT_HOST/QDRANT_PORT env
-#   vars, but env alone leaves embedding_model_dims at mem0's hardcoded default of 1536.
-#   The configured embedder (Ollama nomic-embed-text) emits 768-dim vectors, so without
-#   this override the Qdrant collection is created with the wrong dimensionality and every
-#   add/search silently mismatches. Setting embedding_model_dims is only possible via the
-#   config API; this Job sets it once the API is reachable.
+#   The 768-dim embedding setting (nomic-embed-text) can ONLY be set via the config
+#   API — env vars leave embedding_model_dims at mem0's default 1536, so the Qdrant
+#   collection would be created with the wrong dimensionality and every add/search
+#   silently mismatches.
 #
-# WHY THE /mem0/vector_store SUB-ENDPOINT (not the root PUT /api/v1/config):
-#   In this OpenMemory revision (b44ce4d) the root PUT handler (update_configuration in
-#   api/app/routers/config.py) has a bug: it computes the merged config but never calls
-#   save_config_to_db / reset_memory_client and never returns — the save+reset+return
-#   lines actually belong to the following patch handler. So the root PUT is a silent
-#   no-op. The dedicated PUT /api/v1/config/mem0/vector_store handler DOES persist
-#   (save_config_to_db + reset_memory_client) and is what the upstream run.sh uses.
-#   llm/embedder do not need to be sent: get_memory_client() builds them from the
-#   LLM_PROVIDER/LLM_MODEL/EMBEDDER_PROVIDER/EMBEDDER_MODEL env on the Deployment; only
-#   the vector_store dims are unreachable via env, which is exactly what we set here.
+# WHY ALL THREE SECTIONS (llm + embedder + vector_store), not just vector_store:
+#   Verified the hard way on the first deploy. get_memory_client() builds config from
+#   env (LLM_PROVIDER/EMBEDDER_PROVIDER=ollama) ONLY when there is no DB config row.
+#   The moment ANY sub-endpoint is written, a DB "main" config row exists and OVERRIDES
+#   env per-section — and writing only vector_store left llm+embedder persisted as the
+#   OpenAI defaults (gpt-4o-mini / text-embedding-3-small), so embedding hit OpenAI and
+#   failed with "401 Incorrect API key: sk-dummy". Setting all three makes the DB row
+#   complete and authoritative (and matches the Deployment env, kept in sync here).
 #
-# IDEMPOTENT: the PUT body is fixed, so re-running drives the config to the same state.
-# backoffLimit 10 + restartPolicy OnFailure tolerate the API not being ready yet.
+# WHY THE /mem0/<section> SUB-ENDPOINTS (not the root PUT /api/v1/config):
+#   In this OpenMemory revision (b44ce4d) the root PUT handler is a silent no-op
+#   (its save_config_to_db/reset_memory_client/return lines belong to the next handler).
+#   The dedicated PUT /api/v1/config/mem0/{llm,embedder,vector_store} handlers DO persist
+#   (save + reset memory client) and are what upstream run.sh uses.
 #
-# ORDERING CAVEAT: if any memory write reaches OpenMemory before this Job runs, Qdrant
-# creates the "openmemory" collection at the 1536 default and mem0 reuses the existing
-# collection rather than recreating it. On a fresh deploy the Job runs before any client
-# traffic, so this is low-risk; if it ever happens, drop the collection and re-run the Job.
+# IDEMPOTENT: fixed PUT bodies → re-running drives config to the same state.
+# backoffLimit + OnFailure tolerate the API not being ready yet. curl has explicit
+# --connect-timeout/--max-time so probes fail fast instead of hanging ~134s on a
+# blackholed ClusterIP while the API is still starting.
+#
+# ORDERING CAVEAT: if a memory write reaches OpenMemory before this Job sets dims,
+# Qdrant creates "openmemory" at 1536 and mem0 reuses it. Fresh deploys run the Job
+# before client traffic; if it ever happens, drop the collection and re-run the Job.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -48,10 +51,11 @@ spec:
             - |
               set -eu
               API="http://openmemory.mem0.svc.cluster.local:8765"
+              OLLAMA="http://ai-hub.raptor-mimosa.ts.net:11434"
 
               echo "Waiting for OpenMemory API at ${API}/docs ..."
               i=0
-              until curl -fsS -o /dev/null "${API}/docs"; do
+              until curl -fsS --connect-timeout 5 --max-time 15 -o /dev/null "${API}/docs"; do
                 i=$((i + 1))
                 if [ "$i" -ge 60 ]; then
                   echo "API not ready after ${i} attempts; failing so the Job retries."
@@ -60,25 +64,21 @@ spec:
                 echo "  not ready yet (attempt ${i}); sleeping 5s"
                 sleep 5
               done
-              echo "API is up. Setting Qdrant vector_store (dims=768) via the sub-endpoint."
+              echo "API is up. Applying mem0 config: embedder + llm + vector_store (ollama/qdrant)."
 
-              # Only the vector_store object: this handler merges it into the persisted
-              # config without clobbering llm/embedder (which come from env), and unlike
-              # the root PUT it actually saves + resets the memory client.
-              curl -fsS -X PUT "${API}/api/v1/config/mem0/vector_store" \
+              curl -fsS --max-time 20 -X PUT "${API}/api/v1/config/mem0/embedder" \
                 -H 'Content-Type: application/json' \
-                -d '{
-                  "provider": "qdrant",
-                  "config": {
-                    "collection_name": "openmemory",
-                    "embedding_model_dims": 768,
-                    "host": "qdrant.mem0.svc.cluster.local",
-                    "port": 6333
-                  }
-                }'
-
+                -d "{\"provider\":\"ollama\",\"config\":{\"model\":\"nomic-embed-text\",\"ollama_base_url\":\"${OLLAMA}\"}}"
               echo
-              echo "Vector store applied. Verifying (non-fatal) ..."
-              curl -fsS "${API}/api/v1/config/mem0/vector_store" || true
+              curl -fsS --max-time 20 -X PUT "${API}/api/v1/config/mem0/llm" \
+                -H 'Content-Type: application/json' \
+                -d "{\"provider\":\"ollama\",\"config\":{\"model\":\"qwen3:32b\",\"temperature\":0.1,\"max_tokens\":2000,\"ollama_base_url\":\"${OLLAMA}\"}}"
+              echo
+              curl -fsS --max-time 20 -X PUT "${API}/api/v1/config/mem0/vector_store" \
+                -H 'Content-Type: application/json' \
+                -d "{\"provider\":\"qdrant\",\"config\":{\"collection_name\":\"openmemory\",\"embedding_model_dims\":768,\"host\":\"qdrant.mem0.svc.cluster.local\",\"port\":6333}}"
+              echo
+              echo "Config applied. Verifying (non-fatal) ..."
+              curl -fsS --max-time 10 "${API}/api/v1/config/mem0/embedder" || true
               echo
               echo "mem0-init-config complete."
