@@ -7,6 +7,10 @@ metadata:
     kubernetes.io/ingress.class: traefik
     external-dns.alpha.kubernetes.io/hostname: dock.nwlnexus.net
     external-dns.alpha.kubernetes.io/target: ing.compute.nwlnexus.net
+    launcher.olympus.io/enabled: "true"
+    launcher.olympus.io/display-name: "Portainer"
+    launcher.olympus.io/group: "Platform"
+    launcher.olympus.io/icon: "container"
 spec:
   entryPoints:
     - websecure

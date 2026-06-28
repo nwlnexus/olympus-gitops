@@ -7,6 +7,10 @@ metadata:
     kubernetes.io/ingress.class: traefik
     external-dns.alpha.kubernetes.io/hostname: chui.nwlnexus.io
     external-dns.alpha.kubernetes.io/target: ing.compute.nwlnexus.net
+    launcher.olympus.io/enabled: "true"
+    launcher.olympus.io/display-name: "ClickHouse"
+    launcher.olympus.io/group: "Data"
+    launcher.olympus.io/icon: "bar-chart-3"
 spec:
   entryPoints:
     - websecure

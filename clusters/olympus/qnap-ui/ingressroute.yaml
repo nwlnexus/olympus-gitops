@@ -7,6 +7,10 @@ metadata:
     kubernetes.io/ingress.class: traefik
     external-dns.alpha.kubernetes.io/hostname: qnap-ui.nwlnexus.net
     external-dns.alpha.kubernetes.io/target: ing.compute.nwlnexus.net
+    launcher.olympus.io/enabled: "true"
+    launcher.olympus.io/display-name: "QNAP"
+    launcher.olympus.io/group: "Storage"
+    launcher.olympus.io/icon: "hard-drive"
 spec:
   entryPoints:
     - websecure
