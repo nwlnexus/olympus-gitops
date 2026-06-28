@@ -21,7 +21,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: openmemory
-          image: ghcr.io/nwlnexus/openmemory-mcp:sha-cfa5527
+          image: ghcr.io/nwlnexus/openmemory-mcp:sha-1bae887
           ports:
             - name: http
               containerPort: 8765
@@ -53,23 +53,29 @@ spec:
             # (/usr/src/openmemory) which holds the app code — mounting there masks main.py.
             - name: DATABASE_URL
               value: "sqlite:////data/openmemory.db"
-            # Present so OpenMemory's openai.OpenAI() client constructs at import
-            # (app/utils/categorization.py instantiates it module-level) — without it
-            # the import raises and the app won't start. The key itself is a dummy and
-            # is never used at runtime while categorization is disabled (below) and
-            # LLM/embedder run on Ollama.
+            # OpenMemory's openai.OpenAI() client (app/utils/categorization.py) is
+            # pointed at the cluster Ollama via OPENAI_BASE_URL below. The key is a
+            # dummy that Ollama ignores, but must be non-empty so OpenAI() constructs
+            # at import (else the app won't start). Only categorization uses this
+            # client; the mem0 LLM/embedder are configured separately (ollama).
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: mem0-credentials
                   key: openai-api-key
-            # Disable per-add LLM categorization. Each insert triggers a SQLAlchemy
-            # listener (models.py:categorize_memory) that calls OpenAI gpt-4o-mini with
-            # a 3x exponential backoff; with only a dummy key it 401s and burns ~12-30s
-            # PER add. The image patch (olympus-sdk openmemory.yml) gates that call on
-            # this flag. Flip to "false"/remove once categorization is routed at Ollama.
+            # Route categorization's OpenAI client at the cluster Ollama's
+            # OpenAI-compatible endpoint (/v1). Affects categorization.py only.
+            - name: OPENAI_BASE_URL
+              value: "http://ai-hub.raptor-mimosa.ts.net:11434/v1"
+            # Per-add categorization runs synchronously on every insert
+            # (models.py:categorize_memory). ENABLED, routed at Ollama with a small
+            # fast model (llama3.2:3b, ~0.5s/add, structured-output verified). Flip to
+            # "true" to turn it off. CATEGORIZATION_MODEL is read by the image patch
+            # (olympus-sdk openmemory.yml) and must be a model Ollama has pulled.
             - name: DISABLE_CATEGORIZATION
-              value: "true"
+              value: "false"
+            - name: CATEGORIZATION_MODEL
+              value: "llama3.2:3b"
           # /docs (FastAPI Swagger UI) is the only always-available GET route; there is
           # no /health endpoint. Generous initialDelay covers first-boot DB migration.
           livenessProbe:
