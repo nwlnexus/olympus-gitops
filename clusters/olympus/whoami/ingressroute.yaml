@@ -7,6 +7,10 @@ metadata:
     kubernetes.io/ingress.class: traefik
     external-dns.alpha.kubernetes.io/hostname: whoami.nwlnexus.xyz
     external-dns.alpha.kubernetes.io/target: ing.compute.nwlnexus.net
+    launcher.olympus.io/enabled: "true"
+    launcher.olympus.io/display-name: "whoami"
+    launcher.olympus.io/group: "Platform"
+    launcher.olympus.io/icon: "globe"
 spec:
   entryPoints:
     - websecure
