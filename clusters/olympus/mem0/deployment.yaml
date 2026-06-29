@@ -77,21 +77,32 @@ spec:
             - name: CATEGORIZATION_MODEL
               value: "llama3.2:3b"
           # /docs (FastAPI Swagger UI) is the only always-available GET route; there is
-          # no /health endpoint. Generous initialDelay covers first-boot DB migration.
+          # no /health endpoint, and it shares the single uvicorn event loop with the
+          # synchronous mem0 add path (embed + categorization, ~2.6s/add). Under bulk
+          # migration load /docs answers in 1.3-1.9s, so the k8s-default timeoutSeconds:1
+          # was failing both probes and (a) depooling the only replica via readiness, so
+          # the Service / tailscale proxy returned "Connection refused", and (b) SIGKILLing
+          # the pod via liveness (risking SQLite-on-RWO corruption mid-write). Fix below:
+          #   - startupProbe gates the first-boot DB migration window.
+          #   - liveness is lenient (5s timeout, 6 failures = ~3min) so only a genuine
+          #     hang restarts it, not a merely-busy server.
+          #   - readiness is intentionally removed: for a single replica, depooling turns
+          #     "busy" into "refused" with nowhere else to route. startupProbe still gates
+          #     initial endpoint registration until the server first answers.
+          startupProbe:
+            httpGet:
+              path: /docs
+              port: 8765
+            periodSeconds: 10
+            failureThreshold: 18 # up to ~180s for first-boot DB migration
+            timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /docs
               port: 8765
-            initialDelaySeconds: 60
             periodSeconds: 30
-            failureThreshold: 5
-          readinessProbe:
-            httpGet:
-              path: /docs
-              port: 8765
-            initialDelaySeconds: 60
-            periodSeconds: 10
-            failureThreshold: 5
+            timeoutSeconds: 5
+            failureThreshold: 6
           volumeMounts:
             - name: openmemory-data
               mountPath: /data
