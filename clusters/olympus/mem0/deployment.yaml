@@ -33,7 +33,7 @@ spec:
             - name: LLM_PROVIDER
               value: "ollama"
             - name: LLM_MODEL
-              value: "qwen3:32b"
+              value: "qwen3.6:27b-mlx"
             - name: EMBEDDER_PROVIDER
               value: "ollama"
             - name: EMBEDDER_MODEL
