@@ -32,8 +32,13 @@ spec:
             # over the tailnet MagicDNS name.
             - name: LLM_PROVIDER
               value: "ollama"
+            # Fast NON-thinking extraction model. qwen3.6:27b-mlx (the coding model)
+            # is a thinking model whose ~28s+/call extraction blocks OpenMemory's single
+            # uvicorn worker past the liveness probe (~180s) → pod SIGKILL. qwen2.5:7b
+            # extracts in seconds, never trips the probe. mem0 can't send think:false
+            # (mem0/llms/ollama.py forwards only temperature/num_predict/top_p).
             - name: LLM_MODEL
-              value: "qwen3.6:27b-mlx"
+              value: "qwen2.5:7b-instruct"
             - name: EMBEDDER_PROVIDER
               value: "ollama"
             - name: EMBEDDER_MODEL
