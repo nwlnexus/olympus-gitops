@@ -21,7 +21,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: openmemory
-          image: ghcr.io/nwlnexus/openmemory-mcp:sha-1ee5f42
+          image: ghcr.io/nwlnexus/openmemory-mcp:sha-4fbecc0
           ports:
             - name: http
               containerPort: 8765
