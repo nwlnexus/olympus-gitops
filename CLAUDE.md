@@ -4,22 +4,20 @@
 
 ## Key Flux Commands
 
+There is one gitops-managed cluster; its kube-context is `compute-hub` (there is
+no `olympus` context — despite the repo path being `clusters/olympus`).
+
 ```bash
 # Force-sync a specific kustomization (after pushing a change)
-flux --context management-hub reconcile source git flux-system
-flux --context management-hub reconcile kustomization <name>
+flux --context compute-hub reconcile source git flux-system
+flux --context compute-hub reconcile kustomization <name>
 
 # Force-sync a HelmRelease
-flux --context management-hub reconcile helmrelease <name> -n <namespace>
+flux --context compute-hub reconcile helmrelease <name> -n <namespace>
 
 # Check all kustomization status
-kubectl --context management-hub get kustomization -n flux-system
-kubectl --context management-hub get helmrelease -A
-
-# compute-hub — use extracted kubeconfig (no direct context in local kubeconfig)
-kubectl --context management-hub get secret -n headlamp headlamp-combined-kubeconfig \
-  -o jsonpath='{.data.kubeconfig}' | base64 -d > /tmp/compute-hub.yaml
-flux --kubeconfig /tmp/compute-hub.yaml --context compute-hub reconcile source git flux-system
+kubectl --context compute-hub get kustomization -n flux-system
+kubectl --context compute-hub get helmrelease -A
 ```
 
 ## Dependency Chain Reference
@@ -36,7 +34,7 @@ external-secrets
 
 ## Reloader — Auto-restart on Secret/ConfigMap Changes
 
-[Stakater Reloader](https://github.com/stakater/Reloader) is deployed on all three clusters (`reloader` namespace). It watches Secrets and ConfigMaps and triggers rolling restarts of Deployments/StatefulSets/DaemonSets that are annotated to use them.
+[Stakater Reloader](https://github.com/stakater/Reloader) is deployed on compute-hub (`reloader` namespace). It watches Secrets and ConfigMaps and triggers rolling restarts of Deployments/StatefulSets/DaemonSets that are annotated to use them.
 
 **Why this matters for ESO**: ExternalSecrets sync changes from 1Password automatically, but Kubernetes does not restart pods when a Secret value changes. Reloader bridges that gap.
 
@@ -55,7 +53,7 @@ metadata:
     configmap.reloader.stakater.com/reload: "my-configmap"
 ```
 
-`watchGlobally: false` is set in all clusters — Reloader only acts on annotated workloads.
+`watchGlobally: false` is set — Reloader only acts on annotated workloads.
 
 ### Checklist for existing deployments
 

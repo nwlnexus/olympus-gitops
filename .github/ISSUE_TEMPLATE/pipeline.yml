@@ -1,0 +1,43 @@
+name: Pipeline Improvement
+description: Propose a CI/CD or GitOps pipeline improvement
+labels: ["ci"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for GitOps/CI changes: Flux reconciliation, manifest validation, or automation improvements.
+
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current Behavior
+      description: How does the pipeline currently work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: desired-behavior
+    attributes:
+      label: Desired Behavior
+      description: How should it work instead?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: affected-workflows
+    attributes:
+      label: Affected Areas
+      description: Which parts of the delivery pipeline are affected?
+      options:
+        - label: flux reconciliation (Kustomizations / HelmReleases)
+        - label: kustomize build / manifest validation
+        - label: pre-commit / linting
+        - label: dependency updates (renovate / image tags)
+
+  - type: textarea
+    id: performance-impact
+    attributes:
+      label: Impact
+      description: Expected impact on reconcile times, reliability, or maintenance burden
+    validations:
+      required: false

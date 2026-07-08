@@ -2,8 +2,7 @@
 
 This directory is the **GitOps-controlled side** of QNAP iSCSI storage: it
 defines the Trident backend, the StorageClass, and the credential
-ExternalSecret. It mirrors `clusters/ai-hub/qnap-storage/` with per-cluster
-values.
+ExternalSecret for the compute-hub cluster.
 
 `qnap-iscsi` is **not** the default StorageClass on this cluster (local-path
 is). Workloads must set `storageClassName: qnap-iscsi` explicitly.
@@ -16,11 +15,11 @@ is). Workloads must set `storageClassName: qnap-iscsi` explicitly.
 | `trident-backend.yaml` | `TridentBackendConfig` (driver `qnap-iscsi`, CHAP, `location=compute-hub` label) |
 | `storageclass.yaml` | `qnap-iscsi` StorageClass selecting `location=compute-hub`, non-default |
 
-## Prerequisites NOT managed here (bare-metal, vs ai-hub's Colima)
+## Prerequisites NOT managed here (bare-metal)
 
-ai-hub ran k3s inside a Colima Lima VM, so iSCSI/multipath packages and the
-CSI plugin were handled in the Colima provision script + ansible. These hubs
-are **bare-metal k3s**, so the equivalent must be done on the real nodes:
+compute-hub is **bare-metal k3s**, so the iSCSI/multipath packages and the CSI
+plugin can't be baked into a VM image — they must be provisioned on the real
+nodes (ansible / host-level):
 
 1. **Node packages on every k3s node** (ansible / host-level):
    - `open-iscsi`, `multipath-tools`, `lsscsi`, `sg3-utils`
@@ -61,17 +60,15 @@ self-heal on the next reconcile once the plugin is installed.
 
 The `qnap-trident-backend-creds` Secret sets `https: "false"` / `port: 8080`,
 so the QNAP admin credentials traverse the LAN in cleartext between the k3s
-nodes and the NAS. This is a deliberate carry-over from the proven ai-hub
-config: the QNAP CSI/Trident TLS path hardcodes port 443 and had cert-trust
-issues during ai-hub bring-up, so we use the HTTP mgmt API. Traffic is
-confined to the storage L2 LAN (not routed, not over Tailscale/WAN).
+nodes and the NAS. This is deliberate: the QNAP CSI/Trident TLS path hardcodes
+port 443 and had cert-trust issues during bring-up, so we use the HTTP mgmt
+API. Traffic is confined to the storage L2 LAN (not routed, not over
+Tailscale/WAN).
 
-This is a known platform-wide tradeoff, not unique to these clusters. Revisit
-when moving the QNAP mgmt API to validated HTTPS (set `https: "true"`,
-`port: 443`, and configure Trident cert trust) — track alongside the ai-hub
-backend, since all three clusters share this pattern.
+Revisit when moving the QNAP mgmt API to validated HTTPS (set `https: "true"`,
+`port: 443`, and configure Trident cert trust).
 
-## Lessons carried over from ai-hub
+## QNAP CSI/Trident notes
 
 - Driver `qnap-iscsi` (the `qnap-nas` driver SIGSEGVs on ARM64; on amd64 it
   works but we standardize on `qnap-iscsi`).
