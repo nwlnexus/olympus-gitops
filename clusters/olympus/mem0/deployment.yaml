@@ -81,10 +81,17 @@ spec:
               value: "false"
             - name: CATEGORIZATION_MODEL
               value: "llama3.2:3b"
-          # /health (added via the openmemory.yml image patch) is a dependency-free route
-          # that returns 200 iff the event loop is responsive. With the blocking add now
-          # offloaded to a threadpool, /health answers <10ms even under add load, so a
-          # readiness probe is safe again (it no longer false-depools a merely-busy replica).
+          # /health (added via the openmemory.yml image patch) is meant to be a
+          # dependency-free route returning 200 iff the event loop is responsive.
+          # REALITY (issue #43, verified on compute-hub 2026-07-08): an `add` still
+          # blocks the single uvicorn worker (synchronous LLM extraction + categorization
+          # + embed against ai-hub Ollama) long enough that /health itself times out —
+          # liveness failed 52x / readiness 186x over 46h → 8 SIGKILL restarts (exitCode
+          # 137, NOT OOM: usage ~164Mi/1Gi). Readiness de-pooling a single-replica Service
+          # turns "busy" into "unreachable", which is what broke mnemosyne recall.
+          # These probes are therefore relaxed to only act on a genuinely-wedged pod;
+          # the real fix is making `add` non-blocking in the image (olympus-sdk
+          # openmemory.yml) so /health stays fast — track/tighten again once that lands.
           startupProbe:
             httpGet:
               path: /health
@@ -92,20 +99,22 @@ spec:
             periodSeconds: 10
             failureThreshold: 18 # up to ~180s for first-boot DB migration
             timeoutSeconds: 5
+          # ~6min unresponsive before restart — kill only a truly wedged worker, not a busy one.
           livenessProbe:
             httpGet:
               path: /health
               port: 8765
             periodSeconds: 30
-            timeoutSeconds: 5
-            failureThreshold: 6
+            timeoutSeconds: 10
+            failureThreshold: 12
+          # ~2min grace before de-pooling. Single replica: aggressive de-pool = self-inflicted outage.
           readinessProbe:
             httpGet:
               path: /health
               port: 8765
-            periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 3
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 8
           volumeMounts:
             - name: openmemory-data
               mountPath: /data
