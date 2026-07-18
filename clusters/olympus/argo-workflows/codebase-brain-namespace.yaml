@@ -1,0 +1,9 @@
+# Created early so argo-workflows HelmRelease can bind controller RBAC into
+# this namespace via controller.workflowNamespaces. The codebase-brain Flux
+# app owns the rest of the resources in this namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: codebase-brain
+  labels:
+    app.kubernetes.io/part-of: codebase-brain
