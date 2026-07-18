@@ -1,0 +1,19 @@
+# Allowlist sourced from nix-darwin-hm modules/repomix/repos.toml [groups.personal].
+# Regenerate when that group changes (PR in nix-darwin-hm → PR here).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: codebase-brain-allowlist
+  namespace: codebase-brain
+data:
+  owner: nwlnexus
+  repos: |
+    olympus-sdk
+    olympus-gitops
+    olympus-infra
+    nix-darwin-hm
+    moneta
+    nix-op-secrets
+    second-brain
+    olympus-tailnet
+    homebrew-olympus

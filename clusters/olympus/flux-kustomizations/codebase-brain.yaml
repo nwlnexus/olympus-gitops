@@ -1,0 +1,20 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: codebase-brain
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/codebase-brain
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    - name: argo-workflows
+    - name: argo-events
+    - name: external-secrets-config
+    - name: cert-manager-config
+    - name: qnap-storage
+    - name: external-dns
+    - name: traefik-config

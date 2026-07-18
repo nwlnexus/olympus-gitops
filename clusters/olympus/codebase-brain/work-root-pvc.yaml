@@ -1,0 +1,14 @@
+# Shared work-root for clone / gitnexus / openwiki / brain checkout caches.
+# Per-repo mutex brain-{owner}-{repo} serializes mounts (RWO).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: codebase-brain-work
+  namespace: codebase-brain
+spec:
+  storageClassName: qnap-iscsi
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi

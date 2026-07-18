@@ -1,0 +1,66 @@
+# ServiceAccounts + RBAC for Workflow pods and the Argo Events Sensor.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: codebase-brain-workflow
+  namespace: codebase-brain
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: codebase-brain-sensor
+  namespace: codebase-brain
+---
+# Workflow pods only need to read Secrets / ConfigMaps in this namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: codebase-brain-workflow
+  namespace: codebase-brain
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: codebase-brain-workflow
+  namespace: codebase-brain
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: codebase-brain-workflow
+subjects:
+  - kind: ServiceAccount
+    name: codebase-brain-workflow
+    namespace: codebase-brain
+---
+# Sensor submits Workflows from the WorkflowTemplate.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: codebase-brain-sensor
+  namespace: codebase-brain
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows", "workflowtemplates", "clusterworkflowtemplates"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: codebase-brain-sensor
+  namespace: codebase-brain
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: codebase-brain-sensor
+subjects:
+  - kind: ServiceAccount
+    name: codebase-brain-sensor
+    namespace: codebase-brain
