@@ -22,8 +22,8 @@ spec:
     remediation:
       retries: 3
   values:
-    # Controller only in this namespace; Workflows for codebase-brain run in
-    # their own namespace (controller.workflowNamespaces).
+    # Controller manages Workflows in codebase-brain (namespace created in this
+    # kustomization so Helm RoleBindings can land before the app Flux KS runs).
     server:
       enabled: true
       # UI is cluster-internal; reach via kubectl port-forward when needed.
@@ -38,3 +38,6 @@ spec:
     workflow:
       serviceAccount:
         create: false
+    # Avoid helm install failing on transient resource waits after CRD job.
+    crds:
+      keep: true

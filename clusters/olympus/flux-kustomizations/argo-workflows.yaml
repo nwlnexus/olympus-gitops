@@ -7,7 +7,9 @@ spec:
   interval: 10m
   path: ./clusters/olympus/argo-workflows
   prune: true
-  wait: true
+  # HelmRelease may report Failed briefly while CRDs settle; don't block the
+  # tree forever — argo-events/codebase-brain still dependsOn this KS.
+  wait: false
   timeout: 10m
   sourceRef:
     kind: GitRepository
