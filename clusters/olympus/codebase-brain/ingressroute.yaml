@@ -1,0 +1,25 @@
+# Public webhook endpoint for GitHub push → Argo Events EventSource.
+# Point the org/repo webhook at:
+#   https://brain-events.nwlnexus.net/push
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: codebase-brain-events
+  namespace: codebase-brain
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    external-dns.alpha.kubernetes.io/hostname: brain-events.nwlnexus.net
+    external-dns.alpha.kubernetes.io/target: ing.compute.nwlnexus.net
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`brain-events.nwlnexus.net`)
+      kind: Rule
+      services:
+        # EventSource webhook service name follows argo-events convention:
+        # <eventsource-name>-eventsource-svc
+        - name: github-push-eventsource-svc
+          port: 12000
+  tls:
+    secretName: codebase-brain-events-tls

@@ -1,0 +1,12 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: codebase-brain-events-tls
+  namespace: codebase-brain
+spec:
+  secretName: codebase-brain-events-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - brain-events.nwlnexus.net

@@ -127,6 +127,19 @@ compute-hub runs external-dns with `txtOwnerId: olympus`. Domain filters:
 `nwlnexus.net`, `nwlnexus.xyz`, `nwlnexus.io`. Each managed record carries an
 olympus-owned TXT registry entry so external-dns only touches records it owns.
 
+## Codebase Brain
+
+App path: `clusters/olympus/codebase-brain/` (depends on `argo-workflows`, `argo-events`).
+
+- Webhook: `https://brain-events.nwlnexus.net/push`
+- Job image: `ghcr.io/nwlnexus/codebase-brain:<sha>` (pinned in `workflowtemplate.yaml`)
+- Secrets: 1Password Dev → ExternalSecrets (see `codebase-brain/README.md`); Job `GH_TOKEN`
+  is minted per Workflow from GitHub App item `codebase-docs-pipeline-gh-app`
+- Allowlist: personal `nwlnexus` repos only (mirrors nix-darwin-hm `repos.toml` `[groups.personal]`)
+- Brain PRs on `second-brain` must never auto-merge
+
+kubectl context for this cluster is `olympus` (AGENTS topology name: compute-hub).
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

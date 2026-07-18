@@ -1,0 +1,79 @@
+# Sensor: push → main + allowlisted repo → Workflow from WorkflowTemplate.
+# Soft coalesce via rateLimit; Workflow also exits early if SHA is no longer tip of main.
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: codebase-brain-push
+  namespace: codebase-brain
+spec:
+  template:
+    serviceAccountName: codebase-brain-sensor
+  dependencies:
+    - name: github-push-main
+      eventSourceName: github-push
+      eventName: push
+      filters:
+        data:
+          - path: body.ref
+            type: string
+            value:
+              - refs/heads/main
+          - path: body.repository.owner.login
+            type: string
+            value:
+              - nwlnexus
+          - path: body.repository.name
+            type: string
+            value:
+              - olympus-sdk
+              - olympus-gitops
+              - olympus-infra
+              - nix-darwin-hm
+              - moneta
+              - nix-op-secrets
+              - second-brain
+              - olympus-tailnet
+              - homebrew-olympus
+  triggers:
+    - template:
+        name: codebase-brain-workflow
+        k8s:
+          operation: create
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: brain-
+                namespace: codebase-brain
+              spec:
+                workflowTemplateRef:
+                  name: codebase-brain
+                arguments:
+                  parameters:
+                    - name: owner
+                      value: placeholder
+                    - name: repo
+                      value: placeholder
+                    - name: sha
+                      value: placeholder
+          parameters:
+            - src:
+                dependencyName: github-push-main
+                dataKey: body.repository.owner.login
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: github-push-main
+                dataKey: body.repository.name
+              dest: spec.arguments.parameters.1.value
+            - src:
+                dependencyName: github-push-main
+                dataKey: body.after
+              dest: spec.arguments.parameters.2.value
+      # Soft coalesce: at most one Workflow submit per minute for this Sensor.
+      # Mutex + stale-SHA exit handle backlog correctness.
+      rateLimit:
+        unit: Minute
+        requestsPerUnit: 1
+      retryStrategy:
+        steps: 3

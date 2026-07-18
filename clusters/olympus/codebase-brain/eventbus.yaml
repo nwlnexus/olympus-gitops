@@ -1,0 +1,11 @@
+# Native EventBus (NATS) for EventSources / Sensors in this namespace.
+apiVersion: argoproj.io/v1alpha1
+kind: EventBus
+metadata:
+  name: default
+  namespace: codebase-brain
+spec:
+  nats:
+    native:
+      replicas: 1
+      auth: none

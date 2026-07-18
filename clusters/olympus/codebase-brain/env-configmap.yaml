@@ -1,0 +1,10 @@
+# Non-secret Job defaults (bucket name, model pin). Secrets stay in ExternalSecrets.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: codebase-brain-env
+  namespace: codebase-brain
+data:
+  BRAIN_R2_BUCKET: nwl-codebase-brain
+  # Optional openwiki model override; empty → openwiki default.
+  OPENWIKI_MODEL_ID: ""

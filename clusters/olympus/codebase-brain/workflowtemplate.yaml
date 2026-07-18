@@ -1,0 +1,213 @@
+# WorkflowTemplate: mint GH_TOKEN → skip if SHA stale → run Job (--phase all).
+# Image tag pinned to nix-darwin-hm merge that ships the Job; bump via PR after rebuilds.
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: codebase-brain
+  namespace: codebase-brain
+spec:
+  entrypoint: main
+  serviceAccountName: codebase-brain-workflow
+  activeDeadlineSeconds: 10800
+  imagePullSecrets:
+    - name: ghcr-pull
+  arguments:
+    parameters:
+      - name: owner
+      - name: repo
+      - name: sha
+      - name: phase
+        value: "all"
+  # Per-repo mutex — shared work-root clone/openwiki tree must not race.
+  synchronization:
+    mutexes:
+      - name: "brain-{{workflow.parameters.owner}}-{{workflow.parameters.repo}}"
+  volumeClaimTemplates: []
+  volumes:
+    - name: work-root
+      persistentVolumeClaim:
+        claimName: codebase-brain-work
+    - name: github-app
+      secret:
+        secretName: codebase-brain-github-app
+  onExit: exit-handler
+  templates:
+    - name: main
+      retryStrategy:
+        limit: "1"
+        retryPolicy: Always
+      steps:
+        - - name: mint-gh-token
+            template: mint-gh-token
+        - - name: skip-if-stale
+            template: skip-if-stale
+            arguments:
+              parameters:
+                - name: gh-token
+                  value: "{{steps.mint-gh-token.outputs.parameters.token}}"
+        - - name: run
+            template: run
+            when: "{{steps.skip-if-stale.outputs.parameters.proceed}} == true"
+            arguments:
+              parameters:
+                - name: gh-token
+                  value: "{{steps.mint-gh-token.outputs.parameters.token}}"
+
+    - name: mint-gh-token
+      outputs:
+        parameters:
+          - name: token
+            valueFrom:
+              path: /tmp/gh_token
+      script:
+        image: python:3.12-slim
+        command: [bash]
+        source: |
+          set -euo pipefail
+          pip install -q --root-user-action=ignore PyJWT cryptography
+          python <<'PY'
+          import os, time, json, urllib.request
+          import jwt
+
+          app_id = open("/github-app/app-id").read().strip()
+          installation_id = open("/github-app/installation-id").read().strip()
+          private_key = open("/github-app/private-key.pem").read()
+          now = int(time.time())
+          payload = {"iat": now - 60, "exp": now + 540, "iss": app_id}
+          encoded = jwt.encode(payload, private_key, algorithm="RS256")
+          if isinstance(encoded, bytes):
+              encoded = encoded.decode()
+          req = urllib.request.Request(
+              f"https://api.github.com/app/installations/{installation_id}/access_tokens",
+              method="POST",
+              headers={
+                  "Authorization": f"Bearer {encoded}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "User-Agent": "olympus-codebase-brain",
+              },
+              data=b"",
+          )
+          with urllib.request.urlopen(req) as resp:
+              token = json.load(resp)["token"]
+          open("/tmp/gh_token", "w").write(token)
+          print("minted installation access token", flush=True)
+          PY
+        volumeMounts:
+          - name: github-app
+            mountPath: /github-app
+            readOnly: true
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 256Mi
+
+    - name: skip-if-stale
+      inputs:
+        parameters:
+          - name: gh-token
+      outputs:
+        parameters:
+          - name: proceed
+            valueFrom:
+              path: /tmp/proceed
+      script:
+        image: alpine/git:2.47.2
+        command: [sh]
+        source: |
+          set -euo pipefail
+          OWNER="{{workflow.parameters.owner}}"
+          REPO="{{workflow.parameters.repo}}"
+          SHA="{{workflow.parameters.sha}}"
+          TOKEN="{{inputs.parameters.gh-token}}"
+          TIP=$(git ls-remote "https://x-access-token:${TOKEN}@github.com/${OWNER}/${REPO}.git" refs/heads/main | awk '{print $1}')
+          if [ -z "$TIP" ]; then
+            echo "unable to resolve tip of main; proceeding cautiously" >&2
+            echo true > /tmp/proceed
+            exit 0
+          fi
+          if [ "$TIP" != "$SHA" ]; then
+            echo "skip stale SHA ${SHA}; tip of main is ${TIP}" >&2
+            echo false > /tmp/proceed
+          else
+            echo "SHA ${SHA} is tip of main; proceeding" >&2
+            echo true > /tmp/proceed
+          fi
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+
+    - name: run
+      inputs:
+        parameters:
+          - name: gh-token
+      container:
+        image: ghcr.io/nwlnexus/codebase-brain:516d664
+        command: ["bun", "run", "src/index.ts"]
+        args:
+          - --owner
+          - "{{workflow.parameters.owner}}"
+          - --repo
+          - "{{workflow.parameters.repo}}"
+          - --sha
+          - "{{workflow.parameters.sha}}"
+          - --phase
+          - "{{workflow.parameters.phase}}"
+          - --work-root
+          - /tmp/codebase-brain-job
+        env:
+          - name: GH_TOKEN
+            value: "{{inputs.parameters.gh-token}}"
+          - name: BRAIN_R2_BUCKET
+            valueFrom:
+              configMapKeyRef:
+                name: codebase-brain-env
+                key: BRAIN_R2_BUCKET
+        envFrom:
+          - secretRef:
+              name: codebase-brain-secrets
+        volumeMounts:
+          - name: work-root
+            mountPath: /tmp/codebase-brain-job
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2Gi
+          limits:
+            memory: 8Gi
+
+    - name: exit-handler
+      container:
+        image: curlimages/curl:8.12.1
+        command: [sh, -c]
+        args:
+          - |
+            set -eu
+            STATUS="{{workflow.status}}"
+            if [ "$STATUS" = "Succeeded" ]; then
+              echo "workflow Succeeded; no Slack alert"
+              exit 0
+            fi
+            URL="${SLACK_WEBHOOK_URL:-}"
+            if [ -z "$URL" ]; then
+              echo "SLACK_WEBHOOK_URL unset; skip notify for status=$STATUS" >&2
+              exit 0
+            fi
+            # Minimal JSON (workflow name/params are k8s-safe; no user-controlled quotes).
+            curl -fsS -X POST -H 'Content-type: application/json' \
+              --data "{\"text\":\"codebase-brain {{workflow.name}} status=${STATUS} {{workflow.parameters.owner}}/{{workflow.parameters.repo}}@{{workflow.parameters.sha}}\"}" \
+              "$URL"
+        envFrom:
+          - secretRef:
+              name: codebase-brain-secrets
+        resources:
+          requests:
+            cpu: 20m
+            memory: 32Mi
+          limits:
+            memory: 64Mi

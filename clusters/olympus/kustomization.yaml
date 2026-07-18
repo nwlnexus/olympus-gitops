@@ -24,3 +24,6 @@ resources:
   - flux-kustomizations/qnap-ui.yaml
   - flux-kustomizations/mem0.yaml
   - flux-kustomizations/ingress-discovery.yaml
+  - flux-kustomizations/argo-workflows.yaml
+  - flux-kustomizations/argo-events.yaml
+  - flux-kustomizations/codebase-brain.yaml
