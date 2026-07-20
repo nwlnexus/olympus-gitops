@@ -35,7 +35,7 @@ docker push ghcr.io/nwlnexus/codebase-brain:<git-sha>
 | --- | --- | --- |
 | `docs-api-key` | `credential`, `r2-endpoint`, `r2-access-key-id`, `r2-secret-access-key`, `webhook-secret` | Anthropic, R2/`AWS_*`, GitHub webhook HMAC |
 | `automation-slack-bot` | `slack_webhook` | failure Slack notify |
-| `codebase-docs-pipeline-gh-app` | `app-id`, `installation-id`, **`private-key`** (concealed field with PEM text — Connect cannot read file attachments) | App → `GH_TOKEN` mint |
+| `codebase-docs-pipeline-gh-app` | `app-id`, `installation-id`, **`private-key`** (concealed field with PEM text — Connect cannot read file attachments; prefer real newlines, mint step also accepts single-line paste) | App → `GH_TOKEN` mint |
 | `gh-pull-secret` | `username`, `credential` | GHCR pull (existing) |
 
 No `codebase-brain-github-webhook` 1Password item — HMAC is read from `docs-api-key`.

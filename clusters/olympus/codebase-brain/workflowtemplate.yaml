@@ -66,12 +66,29 @@ spec:
           set -euo pipefail
           pip install -q --root-user-action=ignore PyJWT cryptography
           python <<'PY'
-          import os, time, json, urllib.request
+          import re, time, json, urllib.request
           import jwt
+
+          def normalize_pem(raw: str) -> str:
+              """Accept multiline PEM or 1Password single-line paste (spaces for newlines)."""
+              s = raw.strip()
+              if "\n" in s:
+                  return s if s.endswith("\n") else s + "\n"
+              m = re.match(
+                  r"(-----BEGIN [^-]+-----)\s+(.+?)\s+(-----END [^-]+-----)\s*\Z",
+                  s,
+                  re.DOTALL,
+              )
+              if not m:
+                  return s + ("\n" if not s.endswith("\n") else "")
+              header, body, footer = m.groups()
+              body = "".join(body.split())
+              chunks = [body[i : i + 64] for i in range(0, len(body), 64)]
+              return "\n".join([header, *chunks, footer, ""])
 
           app_id = open("/github-app/app-id").read().strip()
           installation_id = open("/github-app/installation-id").read().strip()
-          private_key = open("/github-app/private-key.pem").read()
+          private_key = normalize_pem(open("/github-app/private-key.pem").read())
           now = int(time.time())
           payload = {"iat": now - 60, "exp": now + 540, "iss": app_id}
           encoded = jwt.encode(payload, private_key, algorithm="RS256")
