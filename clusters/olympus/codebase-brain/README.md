@@ -11,7 +11,7 @@ Checklist: `nix-darwin-hm` → `docs/superpowers/plans/2026-07-17-codebase-brain
 | --- | --- |
 | Namespace `codebase-brain` | Isolation |
 | WorkflowTemplate `codebase-brain` | Mint App install token → skip stale SHA → Job `--phase all` |
-| EventBus + EventSource `github-push` | GitHub `push` webhook (HMAC) |
+| EventBus + EventSource `github-push` | GitHub `push` webhook (HMAC only; hook owned in GitHub UI) |
 | Sensor `codebase-brain-push` | Filter main + allowlist → submit Workflow |
 | PVC `codebase-brain-work` (50Gi, qnap-iscsi) | Shared `--work-root` cache (mutex-serialized) |
 | IngressRoute + Certificate | `https://brain-events.nwlnexus.net/push` |
@@ -31,29 +31,29 @@ docker push ghcr.io/nwlnexus/codebase-brain:<git-sha>
 
 ## 1Password (Dev vault) prerequisites
 
-Create before Flux can sync ExternalSecrets successfully:
-
 | Item | Fields | Consumed as |
 | --- | --- | --- |
-| `docs-api-key` | `credential` | `ANTHROPIC_API_KEY` |
-| `codebase-brain-r2` | `endpoint`, `access-key-id`, `secret-access-key` | `AWS_*` |
-| `codebase-brain-slack` | `webhook-url` | failure Slack notify |
+| `docs-api-key` | `credential`, `r2-endpoint`, `r2-access-key-id`, `r2-secret-access-key`, `webhook-secret` | Anthropic, R2/`AWS_*`, GitHub webhook HMAC |
+| `automation-slack-bot` | `slack_webhook` | failure Slack notify |
 | `codebase-docs-pipeline-gh-app` | `app-id`, `installation-id`, document `private-key.pem` | App → `GH_TOKEN` mint |
-| `codebase-brain-github-webhook` | `secret`, `token` | EventSource HMAC + hook API |
 | `gh-pull-secret` | `username`, `credential` | GHCR pull (existing) |
+
+No `codebase-brain-github-webhook` 1Password item — HMAC is read from `docs-api-key`.
 
 **Never** put a personal PAT in the Job `GH_TOKEN` path — Workflow mints an installation
 token from the App PEM each run.
 
 ## GitHub webhook
 
-Target: `https://brain-events.nwlnexus.net/push`  
-Content type: `application/json`  
-Events: `push`  
-Secret: value of 1Password `codebase-brain-github-webhook` / `secret`
+Create once in the **org** UI (not via Argo):
 
-Prefer an **org webhook** filtered by the Sensor allowlist, or per-repo webhooks on the
-personal-group repos only. Install the GitHub App on those repos + `second-brain`.
+- Target: `https://brain-events.nwlnexus.net/push`
+- Content type: `application/json`
+- Events: **Just the push event**
+- Secret: 1Password `docs-api-key` / `webhook-secret`
+
+Sensor filters to `refs/heads/main` + personal allowlist. Install the GitHub App on those
+repos + `second-brain`.
 
 ## Allowlist
 

@@ -1,8 +1,6 @@
-# GitHub push EventSource — HMAC verified; Sensor filters to main + allowlist.
+# GitHub push EventSource — HMAC only (org webhook created in GitHub UI).
+# No apiToken: Argo does not create/manage hooks. Secret = docs-api-key/webhook-secret.
 # Webhook URL: https://brain-events.nwlnexus.net/push
-#
-# Create the org (or per-repo) webhook in GitHub UI once, OR let EventSource
-# create it via apiToken (field `token` on 1Password item codebase-brain-github-webhook).
 apiVersion: argoproj.io/v1alpha1
 kind: EventSource
 metadata:
@@ -30,12 +28,9 @@ spec:
         endpoint: /push
         port: "12000"
         method: POST
-        url: https://brain-events.nwlnexus.net
       events:
         - push
-      apiToken:
-        name: codebase-brain-github-webhook
-        key: token
+      # +optional apiToken omitted — webhook is managed outside the cluster
       webhookSecret:
         name: codebase-brain-github-webhook
         key: secret
