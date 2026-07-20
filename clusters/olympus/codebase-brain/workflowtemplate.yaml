@@ -164,7 +164,7 @@ spec:
         parameters:
           - name: gh-token
       container:
-        image: ghcr.io/nwlnexus/codebase-brain:516d664
+        image: ghcr.io/nwlnexus/codebase-brain:a4d84cb
         command: ["bun", "run", "src/index.ts"]
         args:
           - --owner

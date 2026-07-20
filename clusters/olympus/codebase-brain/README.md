@@ -18,16 +18,11 @@ Checklist: `nix-darwin-hm` → `docs/superpowers/plans/2026-07-17-codebase-brain
 
 ## Image pin
 
-WorkflowTemplate image: `ghcr.io/nwlnexus/codebase-brain:516d664`
+WorkflowTemplate image: `ghcr.io/nwlnexus/codebase-brain:a4d84cb`
 
-Bump the tag in `workflowtemplate.yaml` after building/pushing a new Job image from
-`nix-darwin-hm` repo root:
-
-```bash
-docker build -f scripts/codebase-brain/Containerfile \
-  -t ghcr.io/nwlnexus/codebase-brain:<git-sha> .
-docker push ghcr.io/nwlnexus/codebase-brain:<git-sha>
-```
+Bump the tag in `workflowtemplate.yaml` after a successful
+`nix-darwin-hm` workflow `codebase-brain-image` run (GHCR publish via Actions,
+same pattern as olympus-sdk `ingress-discovery` / `openmemory`).
 
 ## 1Password (Dev vault) prerequisites
 
