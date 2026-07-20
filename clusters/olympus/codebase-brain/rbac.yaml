@@ -12,7 +12,7 @@ metadata:
   name: codebase-brain-sensor
   namespace: codebase-brain
 ---
-# Workflow pods only need to read Secrets / ConfigMaps in this namespace.
+# Workflow pods: read Secrets/ConfigMaps/PVCs + emit Argo WorkflowTaskResults.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -22,6 +22,9 @@ rules:
   - apiGroups: [""]
     resources: ["secrets", "configmaps", "persistentvolumeclaims"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflowtaskresults"]
+    verbs: ["create", "get", "list", "watch", "patch", "update", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
