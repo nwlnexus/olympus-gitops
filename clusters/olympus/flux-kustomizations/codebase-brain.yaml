@@ -16,5 +16,5 @@ spec:
     - name: external-secrets-config
     - name: cert-manager-config
     - name: qnap-storage
-    - name: external-dns
-    - name: traefik-config
+  # Ingress/DNS already live; avoid stalling app sync when traefik/external-dns
+  # report transient not-ready during unrelated upgrades.
