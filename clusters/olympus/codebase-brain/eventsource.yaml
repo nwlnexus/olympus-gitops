@@ -13,24 +13,16 @@ spec:
         targetPort: 12000
   github:
     push:
-      owner: nwlnexus
-      repositories:
-        - olympus-sdk
-        - olympus-gitops
-        - olympus-infra
-        - nix-darwin-hm
-        - moneta
-        - nix-op-secrets
-        - second-brain
-        - olympus-tailnet
-        - homebrew-olympus
+      # Org-level webhook delivers all repos; Sensor allowlist filters.
+      organizations:
+        - nwlnexus
       webhook:
         endpoint: /push
         port: "12000"
         method: POST
       events:
         - push
-      # +optional apiToken omitted — webhook is managed outside the cluster
+      # apiToken omitted — webhook is managed in the GitHub org UI
       webhookSecret:
         name: codebase-brain-github-webhook
         key: secret
