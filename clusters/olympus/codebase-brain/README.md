@@ -16,6 +16,10 @@ Checklist: `nix-darwin-hm` → `docs/superpowers/plans/2026-07-17-codebase-brain
 | PVC `codebase-brain-work` (50Gi, qnap-iscsi) | Shared `--work-root` cache (mutex-serialized) |
 | IngressRoute + Certificate | `https://brain-events.nwlnexus.net/push` |
 
+## R2
+
+ConfigMap `codebase-brain-env` → `BRAIN_R2_BUCKET=second-brain-docs` (graphs under prefix `graphs/`).
+
 ## Image pin
 
 WorkflowTemplate image: `ghcr.io/nwlnexus/codebase-brain:a4d84cb`
