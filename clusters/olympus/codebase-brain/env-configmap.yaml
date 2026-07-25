@@ -5,6 +5,6 @@ metadata:
   name: codebase-brain-env
   namespace: codebase-brain
 data:
-  BRAIN_R2_BUCKET: nwl-codebase-brain
+  BRAIN_R2_BUCKET: second-brain-docs
   # Optional openwiki model override; empty → openwiki default.
   OPENWIKI_MODEL_ID: ""
