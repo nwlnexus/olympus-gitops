@@ -127,6 +127,27 @@ compute-hub runs external-dns with `txtOwnerId: olympus`. Domain filters:
 `nwlnexus.net`, `nwlnexus.xyz`, `nwlnexus.io`. Each managed record carries an
 olympus-owned TXT registry entry so external-dns only touches records it owns.
 
+## Codebase Brain
+
+App path: `clusters/olympus/codebase-brain/`. Live runbook:
+[`clusters/olympus/codebase-brain/README.md`](clusters/olympus/codebase-brain/README.md).
+
+- Webhook: `https://brain-events.nwlnexus.net/push`
+- Job image: `ghcr.io/nwlnexus/codebase-brain:a4d84cb` (pinned in `workflowtemplate.yaml`)
+- Flux deps: `argo-workflows`, `argo-events`, `external-secrets-config`,
+  `cert-manager-config`, and `qnap-storage`. It intentionally omits
+  `external-dns` / `traefik-config` because ingress/DNS are already live.
+- Secrets: 1Password Dev → ExternalSecrets (see `codebase-brain/README.md`); Job `GH_TOKEN`
+  is minted per Workflow from GitHub App item `codebase-docs-pipeline-gh-app`
+- Allowlist: personal `nwlnexus` repos only. The live gate is `sensor.yaml`;
+  `allowlist-configmap.yaml` is only a mirror of nix-darwin-hm `repos.toml`
+  `[groups.personal]` until it is wired into the Sensor.
+- Workflow controls: one submit/minute, per-repo mutex, stale-SHA skip, one retry,
+  three-hour deadline, and Slack on non-success.
+- Brain PRs on `second-brain` must never auto-merge
+
+kubectl context for this cluster is `olympus` (AGENTS topology name: compute-hub).
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
