@@ -59,6 +59,18 @@ external-secrets → cert-manager → cert-manager-config → apps
                 → cloudflared
 ```
 
+Codebase Brain has an additional Argo chain:
+
+```text
+argo-workflows → argo-events → codebase-brain
+```
+
+`argo-workflows` creates the `codebase-brain` namespace early so the Argo
+Workflows Helm chart can bind controller RBAC there before the app Flux
+Kustomization reconciles. `codebase-brain` intentionally does not depend on
+`traefik-config` or `external-dns`; those controllers are already live, and
+transient ingress/DNS readiness should not block Workflow/EventSource changes.
+
 When adding a new app: check what it needs (secrets? certs? storage?) and set `dependsOn` accordingly.
 
 ## Adding a New App
@@ -133,10 +145,12 @@ App path: `clusters/olympus/codebase-brain/` (depends on `argo-workflows`, `argo
 
 - Webhook: `https://brain-events.nwlnexus.net/push`
 - Job image: `ghcr.io/nwlnexus/codebase-brain:<sha>` (pinned in `workflowtemplate.yaml`)
+- R2 bucket: `second-brain-docs`
 - Secrets: 1Password Dev → ExternalSecrets (see `codebase-brain/README.md`); Job `GH_TOKEN`
   is minted per Workflow from GitHub App item `codebase-docs-pipeline-gh-app`
 - Allowlist: personal `nwlnexus` repos only (mirrors nix-darwin-hm `repos.toml` `[groups.personal]`)
 - Brain PRs on `second-brain` must never auto-merge
+- Operator runbook and troubleshooting: `clusters/olympus/codebase-brain/README.md`
 
 kubectl context for this cluster is `olympus` (AGENTS topology name: compute-hub).
 
