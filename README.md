@@ -1,35 +1,109 @@
 # olympus-gitops
 
-GitOps manifests for the Olympus homelab, managed by ArgoCD running on the management host.
+GitOps manifests for the Olympus homelab. Flux CD reconciles this repository
+onto the single managed cluster, `compute-hub`, from the path
+`./clusters/olympus`.
 
-## Structure
+## Current topology
 
-```
+| Name | Role |
+| --- | --- |
+| `compute-hub` | The only GitOps-managed Kubernetes cluster. Flux watches `clusters/olympus/` and applies every Flux `Kustomization` listed there. |
+| QNAP | Out-of-band storage provider. It exposes iSCSI volumes through Trident; the live StorageClass is `qnap-iscsi`. |
+| `ai-hub` | A macOS host, not a Kubernetes cluster. Manifests may reference its native services, but Flux does not manage it. |
+
+The retired ArgoCD/OrbStack `mac-studio` layout is no longer used.
+
+## Repository structure
+
+```text
 clusters/
-  mac-studio/          # OrbStack Kubernetes cluster on Mac Studio (M1 Max)
-    external-secrets/  # ESO operator + ClusterSecretStore → 1Password Connect (wave 0)
-    cert-manager/      # cert-manager + Let's Encrypt DNS-01/Cloudflare issuer (wave 1)
-    traefik/           # Traefik ingress controller (wave 2)
+└── olympus/
+    ├── flux-system/              # Flux bootstrap; gotk-sync points here
+    ├── flux-kustomizations/      # One Flux Kustomization CR per app
+    ├── kustomization.yaml        # Root list of Flux Kustomizations
+    └── <app>/                    # App manifests rendered by Kustomize
 ```
 
-## ArgoCD Applications
+Common app directories include:
 
-Applications are created by Ansible during the mac-studio bootstrap (`make mac-studio-bootstrap`).
-They are NOT stored in this repo — Ansible manages them via `argocd app create --upsert`.
+- `namespace.yaml` for workload isolation.
+- `helmrepository.yaml` and `helmrelease.yaml` for Helm-managed apps.
+- `externalsecret*.yaml` for 1Password-sourced secrets.
+- `certificate.yaml` for cert-manager DNS-01 certificates.
+- `ingressroute.yaml` for Traefik v3 routes.
 
-Each app points to its directory here, syncs automatically, and creates its namespace if missing.
+## Reconciliation model
 
-## Bootstrap sequence
+1. Flux bootstraps from `clusters/olympus/flux-system`.
+2. The root `clusters/olympus/kustomization.yaml` applies the Flux
+   `Kustomization` objects under `clusters/olympus/flux-kustomizations/`.
+3. Each Flux `Kustomization` points at one app directory and declares
+   `dependsOn` for prerequisites such as External Secrets, cert-manager, Argo,
+   QNAP storage, or ingress.
+4. Flux prunes removed resources for app directories where `spec.prune: true`.
 
-1. Ansible push seeds two secrets into the OrbStack cluster before ArgoCD syncs:
-   - `eso-op-connect-token` in `external-secrets` ns (1Password Connect token for ESO)
-   - `cloudflared-creds` in `cloudflared` ns (tunnel token, managed by Ansible directly)
-2. ArgoCD syncs `external-secrets` (wave 0) → ESO operator + ClusterSecretStore ready
-3. ArgoCD syncs `cert-manager` (wave 1) → ESO creates `cloudflare-api-token` Secret → ClusterIssuer ready
-4. ArgoCD syncs `traefik` (wave 2) → ingress controller ready
+The baseline dependency chain is:
 
-## 1Password items required
+```text
+external-secrets -> cert-manager -> cert-manager-config -> apps
+                 -> external-dns
+                 -> traefik-config
+                 -> cloudflared
+```
 
-| Item name           | Fields              | Used by           |
-|---------------------|---------------------|-------------------|
-| `Cloudflare API Token` | `credential`     | cert-manager DNS-01 |
+Individual apps can add stricter dependencies. For example,
+`codebase-brain` waits for Argo Workflows, Argo Events, External Secrets,
+cert-manager config, and QNAP storage.
+
+## Secrets and certificates
+
+All Kubernetes secrets are expected to come from 1Password through External
+Secrets Operator unless a directory documents an exception. A typical secret
+shape is:
+
+```yaml
+spec:
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    name: <kubernetes-secret-name>
+  data:
+    - secretKey: <target-key>
+      remoteRef:
+        key: <1password-item-title>
+        property: <field-name>
+```
+
+TLS certificates use cert-manager DNS-01 with the `letsencrypt-prod`
+ClusterIssuer. Public HTTP(S) ingress uses Traefik `IngressRoute` resources and
+external-dns annotations for `nwlnexus.net`, `nwlnexus.xyz`, and `nwlnexus.io`.
+
+## Operations
+
+Use the live cluster context when inspecting reconciliation:
+
+```bash
+CTX=compute-hub # use your local alias, such as olympus, if different
+flux --context "$CTX" get kustomizations -A
+flux --context "$CTX" reconcile kustomization <name> --with-source
+kubectl --context "$CTX" get kustomization -n flux-system <name>
+kubectl --context "$CTX" describe kustomization -n flux-system <name>
+```
+
+For app-specific runbooks, prefer the README in the app directory. Current
+specialized docs include:
+
+- `clusters/olympus/codebase-brain/README.md`
+- `clusters/olympus/ingress-discovery/README.md`
+- `clusters/olympus/qnap-storage/README.md`
+- `clusters/olympus/mem0/RUNBOOK-bulk-migration.md`
+
+## Adding an app
+
+1. Create `clusters/olympus/<app>/` with the app manifests.
+2. Add `clusters/olympus/flux-kustomizations/<app>.yaml`.
+3. Add that Flux `Kustomization` to `clusters/olympus/kustomization.yaml`.
+4. Set `dependsOn` based on the app's real prerequisites.
+5. Commit and push; Flux reconciles from Git.
