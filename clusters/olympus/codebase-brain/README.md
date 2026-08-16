@@ -104,8 +104,11 @@ repos + `second-brain`.
 
 ## Allowlist
 
-`allowlist-configmap.yaml` mirrors `modules/repomix/repos.toml` `[groups.personal]`
-(no work/`dtlr` repos). Keep Sensor + EventSource repo lists in sync when regenerating.
+The runtime webhook gate is the `body.repository.name` filter in `sensor.yaml`.
+`allowlist-configmap.yaml` mirrors that list for the Job and should match
+`modules/repomix/repos.toml` `[groups.personal]` (no work/`dtlr` repos). When
+regenerating, update the Sensor filter and ConfigMap together; EventSource stays
+org-scoped to `nwlnexus`.
 
 The active allowlist is currently:
 

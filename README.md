@@ -19,7 +19,7 @@ The retired ArgoCD/OrbStack `mac-studio` layout is no longer used.
 ```text
 clusters/
 └── olympus/
-    ├── flux-system/              # Flux bootstrap; gotk-sync points here
+    ├── flux-system/              # Flux bootstrap; gotk-sync points at ./clusters/olympus
     ├── flux-kustomizations/      # One Flux Kustomization CR per app
     ├── kustomization.yaml        # Root list of Flux Kustomizations
     └── <app>/                    # App manifests rendered by Kustomize
