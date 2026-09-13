@@ -1,35 +1,70 @@
 # olympus-gitops
 
-GitOps manifests for the Olympus homelab, managed by ArgoCD running on the management host.
+Flux CD manifests for the Olympus homelab. There is one managed Kubernetes
+cluster: the `compute-hub` k3s cluster, reconciled from `./clusters/olympus`.
 
 ## Structure
 
-```
+```text
 clusters/
-  mac-studio/          # OrbStack Kubernetes cluster on Mac Studio (M1 Max)
-    external-secrets/  # ESO operator + ClusterSecretStore → 1Password Connect (wave 0)
-    cert-manager/      # cert-manager + Let's Encrypt DNS-01/Cloudflare issuer (wave 1)
-    traefik/           # Traefik ingress controller (wave 2)
+└── olympus/
+    ├── flux-system/            # Flux bootstrap; gotk-sync points here
+    ├── flux-kustomizations/    # One Flux Kustomization CRD per app
+    ├── external-secrets/       # External Secrets Operator
+    ├── cert-manager/           # cert-manager and issuers
+    ├── traefik/                # Ingress controller and routes
+    ├── cloudflared/            # Cluster Cloudflare tunnel
+    └── <app>/                  # App namespace, HelmRelease, secrets, ingress
 ```
 
-## ArgoCD Applications
+`AGENTS.md` is the operator reference for topology, dependency ordering, and
+manifest conventions.
 
-Applications are created by Ansible during the mac-studio bootstrap (`make mac-studio-bootstrap`).
-They are NOT stored in this repo — Ansible manages them via `argocd app create --upsert`.
+## Reconciliation model
 
-Each app points to its directory here, syncs automatically, and creates its namespace if missing.
+- Flux syncs this repository path: `./clusters/olympus`.
+- Add an app by creating `clusters/olympus/<app>/`, adding
+  `clusters/olympus/flux-kustomizations/<app>.yaml`, and listing that
+  Kustomization from `clusters/olympus/kustomization.yaml`.
+- Dependency order is expressed with Flux `dependsOn`; do not rely on directory
+  order.
+- Commit and push changes to the default branch; Flux reconciles them
+  automatically.
 
-## Bootstrap sequence
+Base ordering:
 
-1. Ansible push seeds two secrets into the OrbStack cluster before ArgoCD syncs:
-   - `eso-op-connect-token` in `external-secrets` ns (1Password Connect token for ESO)
-   - `cloudflared-creds` in `cloudflared` ns (tunnel token, managed by Ansible directly)
-2. ArgoCD syncs `external-secrets` (wave 0) → ESO operator + ClusterSecretStore ready
-3. ArgoCD syncs `cert-manager` (wave 1) → ESO creates `cloudflare-api-token` Secret → ClusterIssuer ready
-4. ArgoCD syncs `traefik` (wave 2) → ingress controller ready
+```text
+external-secrets -> cert-manager -> cert-manager-config -> apps
+                 -> external-dns
+                 -> traefik-config
+                 -> cloudflared
+```
 
-## 1Password items required
+Codebase Brain extends this with:
 
-| Item name           | Fields              | Used by           |
-|---------------------|---------------------|-------------------|
-| `Cloudflare API Token` | `credential`     | cert-manager DNS-01 |
+```text
+argo-workflows -> argo-events -> codebase-brain
+```
+
+## Secrets and ingress
+
+- Secrets come from 1Password via External Secrets Operator and
+  `ClusterSecretStore/onepassword-connect`.
+- Public ingress uses Traefik `IngressRoute` resources with cert-manager
+  DNS-01 certificates.
+- DNS records are managed by external-dns for Olympus-owned hostnames.
+- The Cloudflare tunnel route itself is managed outside this repository; manifests
+  reference the in-cluster tunnel deployment and services.
+
+## Codebase Brain
+
+`clusters/olympus/codebase-brain/` deploys the Argo Events webhook and Argo
+Workflow that regenerates codebase documentation for allowlisted `nwlnexus`
+repositories.
+
+- Webhook: `https://brain-events.nwlnexus.net/push`
+- Runtime docs: `clusters/olympus/codebase-brain/README.md`
+- Argo platform: `clusters/olympus/argo-workflows/` and
+  `clusters/olympus/argo-events/`
+
+Brain PRs on `nwlnexus/second-brain` must never auto-merge.
