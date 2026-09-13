@@ -5,6 +5,10 @@ Push to allowlisted `nwlnexus/*/main` → Argo Events Sensor → Argo Workflow r
 
 Checklist: `nix-darwin-hm` → `docs/superpowers/plans/2026-07-17-codebase-brain-argo-checklist.md`
 
+Flux chain: `argo-workflows` → `argo-events` → `codebase-brain`. The
+`codebase-brain` Kustomization also waits for `external-secrets-config`,
+`cert-manager-config`, and `qnap-storage`.
+
 ## What this app deploys
 
 | Resource | Purpose |
@@ -35,6 +39,7 @@ same pattern as olympus-sdk `ingress-discovery` / `openmemory`).
 | `docs-api-key` | `credential`, `r2-endpoint`, `r2-access-key-id`, `r2-secret-access-key`, `webhook-secret` | Anthropic, R2/`AWS_*`, GitHub webhook HMAC |
 | `automation-slack-bot` | `slack_webhook` | failure Slack notify |
 | `codebase-docs-pipeline-gh-app` | `app-id`, `installation-id`, **`private-key`** = `base64(PEM)` (concealed; Connect collapses newlines) | App → `GH_TOKEN` mint |
+| `gh-pull-secret` | `username`, `credential` | GHCR pull (existing) |
 
 Encode PEM for the `private-key` field (macOS):
 
@@ -43,7 +48,6 @@ base64 -i ./private-key.pem | tr -d '\n' | pbcopy
 ```
 
 ExternalSecret uses `decodingStrategy: Base64` so the pod sees a normal PEM file.
-| `gh-pull-secret` | `username`, `credential` | GHCR pull (existing) |
 
 No `codebase-brain-github-webhook` 1Password item — HMAC is read from `docs-api-key`.
 
@@ -62,10 +66,22 @@ Create once in the **org** UI (not via Argo):
 Sensor filters to `refs/heads/main` + personal allowlist. Install the GitHub App on those
 repos + `second-brain`.
 
+The Sensor soft-coalesces events with `rateLimit: 1/min`. Backlog correctness is
+handled inside the Workflow: the `skip-if-stale` step exits early when the
+payload SHA is no longer the tip of `main`.
+
 ## Allowlist
 
-`allowlist-configmap.yaml` mirrors `modules/repomix/repos.toml` `[groups.personal]`
-(no work/`dtlr` repos). Keep Sensor + EventSource repo lists in sync when regenerating.
+`sensor.yaml` is the runtime allowlist enforcement point (`body.repository.name`
+filters). `allowlist-configmap.yaml` mirrors `modules/repomix/repos.toml`
+`[groups.personal]` for the Job/reference path; it does **not** drive the Sensor.
+Keep both in sync when repos change.
+
+## Failure notification
+
+The Workflow `onExit` handler posts non-success statuses through the
+`automation-slack-bot` webhook from `codebase-brain-secrets`. Successful runs do
+not notify.
 
 ## Ops
 

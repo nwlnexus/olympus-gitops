@@ -59,6 +59,15 @@ external-secrets → cert-manager → cert-manager-config → apps
                 → cloudflared
 ```
 
+Codebase Brain extends the base app path with Argo dependencies:
+
+```text
+argo-workflows → argo-events → codebase-brain
+```
+
+`argo-workflows` creates the `codebase-brain` namespace early so Helm
+RoleBindings can land before the app Kustomization reconciles.
+
 When adding a new app: check what it needs (secrets? certs? storage?) and set `dependsOn` accordingly.
 
 ## Adding a New App
@@ -135,7 +144,11 @@ App path: `clusters/olympus/codebase-brain/` (depends on `argo-workflows`, `argo
 - Job image: `ghcr.io/nwlnexus/codebase-brain:<sha>` (pinned in `workflowtemplate.yaml`)
 - Secrets: 1Password Dev → ExternalSecrets (see `codebase-brain/README.md`); Job `GH_TOKEN`
   is minted per Workflow from GitHub App item `codebase-docs-pipeline-gh-app`
-- Allowlist: personal `nwlnexus` repos only (mirrors nix-darwin-hm `repos.toml` `[groups.personal]`)
+- Allowlist: personal `nwlnexus` repos only; `sensor.yaml` enforces it at
+  runtime, while `allowlist-configmap.yaml` is a Job/reference mirror of
+  nix-darwin-hm `repos.toml` `[groups.personal]`
+- Coalescing: Sensor `rateLimit: 1/min`; Workflow `skip-if-stale` drops superseded
+  SHAs before running the Job
 - Brain PRs on `second-brain` must never auto-merge
 
 kubectl context for this cluster is `olympus` (AGENTS topology name: compute-hub).
