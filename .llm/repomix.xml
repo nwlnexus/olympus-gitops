@@ -52,6 +52,17 @@ The content is organized as follows:
     pack.yml
 clusters/
   olympus/
+    argo-events/
+      helmrelease.yaml
+      helmrepository.yaml
+      kustomization.yaml
+      namespace.yaml
+    argo-workflows/
+      codebase-brain-namespace.yaml
+      helmrelease.yaml
+      helmrepository.yaml
+      kustomization.yaml
+      namespace.yaml
     cert-manager/
       cloudflare-token-secret.yaml
       helmrelease.yaml
@@ -66,6 +77,24 @@ clusters/
       deployment.yaml
       externalsecret.yaml
       kustomization.yaml
+    codebase-brain/
+      allowlist-configmap.yaml
+      certificate.yaml
+      env-configmap.yaml
+      eventbus.yaml
+      eventsource.yaml
+      externalsecret-github-app.yaml
+      externalsecret-runtime.yaml
+      externalsecret-webhook.yaml
+      ghcr-pull-externalsecret.yaml
+      ingressroute.yaml
+      kustomization.yaml
+      namespace.yaml
+      rbac.yaml
+      README.md
+      sensor.yaml
+      work-root-pvc.yaml
+      workflowtemplate.yaml
     external-dns/
       cloudflare-token-secret.yaml
       helmrelease.yaml
@@ -80,9 +109,12 @@ clusters/
       cluster-secret-store.yaml
       kustomization.yaml
     flux-kustomizations/
+      argo-events.yaml
+      argo-workflows.yaml
       cert-manager-config.yaml
       cert-manager.yaml
       cloudflared.yaml
+      codebase-brain.yaml
       external-dns.yaml
       external-secrets-config.yaml
       external-secrets.yaml
@@ -506,6 +538,149 @@ jobs:
     secrets: inherit
 </file>
 
+<file path="clusters/olympus/argo-events/helmrelease.yaml">
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: argo-events
+  namespace: argo-events
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: argo-events
+      version: "2.4.23"
+      sourceRef:
+        kind: HelmRepository
+        name: argo
+        namespace: argo-events
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  values:
+    # EventSources / Sensors for codebase-brain live in the codebase-brain ns;
+    # the controller watches all namespaces by default.
+    openshift: false
+</file>
+
+<file path="clusters/olympus/argo-events/helmrepository.yaml">
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: argo
+  namespace: argo-events
+spec:
+  interval: 1h
+  url: https://argoproj.github.io/argo-helm
+</file>
+
+<file path="clusters/olympus/argo-events/kustomization.yaml">
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - helmrepository.yaml
+  - helmrelease.yaml
+</file>
+
+<file path="clusters/olympus/argo-events/namespace.yaml">
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argo-events
+</file>
+
+<file path="clusters/olympus/argo-workflows/codebase-brain-namespace.yaml">
+# Created early so argo-workflows HelmRelease can bind controller RBAC into
+# this namespace via controller.workflowNamespaces. The codebase-brain Flux
+# app owns the rest of the resources in this namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: codebase-brain
+  labels:
+    app.kubernetes.io/part-of: codebase-brain
+</file>
+
+<file path="clusters/olympus/argo-workflows/helmrelease.yaml">
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: argo-workflows
+  namespace: argo-workflows
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: argo-workflows
+      version: "1.0.20"
+      sourceRef:
+        kind: HelmRepository
+        name: argo
+        namespace: argo-workflows
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  values:
+    # Controller manages Workflows in codebase-brain (namespace created in this
+    # kustomization so Helm RoleBindings can land before the app Flux KS runs).
+    server:
+      enabled: true
+      # UI is cluster-internal; reach via kubectl port-forward when needed.
+      ingress:
+        enabled: false
+      authModes:
+        - server
+    controller:
+      workflowNamespaces:
+        - codebase-brain
+      parallelism: 20
+    workflow:
+      serviceAccount:
+        create: false
+    # Avoid helm install failing on transient resource waits after CRD job.
+    crds:
+      keep: true
+</file>
+
+<file path="clusters/olympus/argo-workflows/helmrepository.yaml">
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: argo
+  namespace: argo-workflows
+spec:
+  interval: 1h
+  url: https://argoproj.github.io/argo-helm
+</file>
+
+<file path="clusters/olympus/argo-workflows/kustomization.yaml">
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - codebase-brain-namespace.yaml
+  - helmrepository.yaml
+  - helmrelease.yaml
+</file>
+
+<file path="clusters/olympus/argo-workflows/namespace.yaml">
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argo-workflows
+</file>
+
 <file path="clusters/olympus/cert-manager/cloudflare-token-secret.yaml">
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
@@ -740,6 +915,796 @@ resources:
   - deployment.yaml
 </file>
 
+<file path="clusters/olympus/codebase-brain/allowlist-configmap.yaml">
+# Allowlist sourced from nix-darwin-hm modules/repomix/repos.toml [groups.personal].
+# Regenerate when that group changes (PR in nix-darwin-hm → PR here).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: codebase-brain-allowlist
+  namespace: codebase-brain
+data:
+  owner: nwlnexus
+  repos: |
+    olympus-sdk
+    olympus-gitops
+    olympus-infra
+    nix-darwin-hm
+    moneta
+    nix-op-secrets
+    second-brain
+    olympus-tailnet
+    homebrew-olympus
+</file>
+
+<file path="clusters/olympus/codebase-brain/certificate.yaml">
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: codebase-brain-events-tls
+  namespace: codebase-brain
+spec:
+  secretName: codebase-brain-events-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - brain-events.nwlnexus.net
+</file>
+
+<file path="clusters/olympus/codebase-brain/env-configmap.yaml">
+# Non-secret Job defaults (bucket name, model pin). Secrets stay in ExternalSecrets.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: codebase-brain-env
+  namespace: codebase-brain
+data:
+  BRAIN_R2_BUCKET: second-brain-docs
+  # Optional openwiki model override; empty → openwiki default.
+  OPENWIKI_MODEL_ID: ""
+</file>
+
+<file path="clusters/olympus/codebase-brain/eventbus.yaml">
+# Native EventBus (NATS) for EventSources / Sensors in this namespace.
+apiVersion: argoproj.io/v1alpha1
+kind: EventBus
+metadata:
+  name: default
+  namespace: codebase-brain
+spec:
+  nats:
+    native:
+      replicas: 1
+      auth: none
+</file>
+
+<file path="clusters/olympus/codebase-brain/eventsource.yaml">
+# GitHub push EventSource — HMAC only (org webhook created in GitHub UI).
+# No apiToken: Argo does not create/manage hooks. Secret = docs-api-key/webhook-secret.
+# Webhook URL: https://brain-events.nwlnexus.net/push
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: github-push
+  namespace: codebase-brain
+spec:
+  service:
+    ports:
+      - port: 12000
+        targetPort: 12000
+  github:
+    push:
+      # Org-level webhook delivers all repos; Sensor allowlist filters.
+      organizations:
+        - nwlnexus
+      webhook:
+        endpoint: /push
+        port: "12000"
+        method: POST
+      events:
+        - push
+      # apiToken omitted — webhook is managed in the GitHub org UI
+      webhookSecret:
+        name: codebase-brain-github-webhook
+        key: secret
+      active: true
+      contentType: json
+      insecure: false
+      deleteHookOnFinish: false
+</file>
+
+<file path="clusters/olympus/codebase-brain/externalsecret-github-app.yaml">
+# GitHub App credentials for minting short-lived installation tokens → Job GH_TOKEN.
+#
+# 1Password Dev item `codebase-docs-pipeline-gh-app`:
+#   app-id, installation-id (string fields)
+#   private-key — concealed field holding base64(PEM), no line wraps
+#     (Connect collapses newlines in concealed fields; base64 preserves the PEM)
+# Encode on macOS:
+#   base64 -i ./private-key.pem | tr -d '\n' | pbcopy
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: codebase-brain-github-app
+  namespace: codebase-brain
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: onepassword-connect
+    kind: ClusterSecretStore
+  target:
+    name: codebase-brain-github-app
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: app-id
+      remoteRef:
+        key: codebase-docs-pipeline-gh-app
+        property: app-id
+    - secretKey: installation-id
+      remoteRef:
+        key: codebase-docs-pipeline-gh-app
+        property: installation-id
+    - secretKey: private-key.pem
+      remoteRef:
+        key: codebase-docs-pipeline-gh-app
+        property: private-key
+        decodingStrategy: Base64
+</file>
+
+<file path="clusters/olympus/codebase-brain/externalsecret-runtime.yaml">
+# Runtime Job env (Anthropic + R2 + Slack). GH_TOKEN is minted per Workflow from
+# codebase-brain-github-app — never a long-lived PAT in this Secret.
+#
+# 1Password (Dev vault):
+#   docs-api-key            → credential, r2-endpoint, r2-access-key-id, r2-secret-access-key
+#   automation-slack-bot    → slack_webhook
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: codebase-brain-secrets
+  namespace: codebase-brain
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: onepassword-connect
+    kind: ClusterSecretStore
+  target:
+    name: codebase-brain-secrets
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      engineVersion: v2
+      data:
+        ANTHROPIC_API_KEY: "{{ .anthropic }}"
+        AWS_ENDPOINT_URL: "{{ .r2_endpoint }}"
+        AWS_ACCESS_KEY_ID: "{{ .r2_access_key_id }}"
+        AWS_SECRET_ACCESS_KEY: "{{ .r2_secret_access_key }}"
+        SLACK_WEBHOOK_URL: "{{ .slack_webhook_url }}"
+  data:
+    - secretKey: anthropic
+      remoteRef:
+        key: docs-api-key
+        property: credential
+    - secretKey: r2_endpoint
+      remoteRef:
+        key: docs-api-key
+        property: r2-endpoint
+    - secretKey: r2_access_key_id
+      remoteRef:
+        key: docs-api-key
+        property: r2-access-key-id
+    - secretKey: r2_secret_access_key
+      remoteRef:
+        key: docs-api-key
+        property: r2-secret-access-key
+    - secretKey: slack_webhook_url
+      remoteRef:
+        key: automation-slack-bot
+        property: slack_webhook
+</file>
+
+<file path="clusters/olympus/codebase-brain/externalsecret-webhook.yaml">
+# GitHub webhook HMAC secret for the Argo Events EventSource.
+# Same value as the GitHub org webhook "Secret" field.
+# Source: 1Password Dev → docs-api-key → webhook-secret
+# (No PAT / apiToken — org webhook is created in the GitHub UI.)
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: codebase-brain-github-webhook
+  namespace: codebase-brain
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: onepassword-connect
+    kind: ClusterSecretStore
+  target:
+    name: codebase-brain-github-webhook
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: secret
+      remoteRef:
+        key: docs-api-key
+        property: webhook-secret
+</file>
+
+<file path="clusters/olympus/codebase-brain/ghcr-pull-externalsecret.yaml">
+# Image pull secret for private ghcr.io/nwlnexus/codebase-brain.
+# Reuses 1Password item `gh-pull-secret` (vault Dev) — same as mem0 / ingress-discovery.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: ghcr-pull
+  namespace: codebase-brain
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: onepassword-connect
+    kind: ClusterSecretStore
+  target:
+    name: ghcr-pull
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      type: kubernetes.io/dockerconfigjson
+      data:
+        .dockerconfigjson: |
+          {"auths":{"ghcr.io":{"username":"{{ .username }}","password":"{{ .token }}","auth":"{{ printf "%s:%s" .username .token | b64enc }}"}}}
+  data:
+    - secretKey: username
+      remoteRef:
+        key: gh-pull-secret
+        property: username
+    - secretKey: token
+      remoteRef:
+        key: gh-pull-secret
+        property: credential
+</file>
+
+<file path="clusters/olympus/codebase-brain/ingressroute.yaml">
+# Public webhook endpoint for GitHub push → Argo Events EventSource.
+# Point the org/repo webhook at:
+#   https://brain-events.nwlnexus.net/push
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: codebase-brain-events
+  namespace: codebase-brain
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    external-dns.alpha.kubernetes.io/hostname: brain-events.nwlnexus.net
+    external-dns.alpha.kubernetes.io/target: ing.compute.nwlnexus.net
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`brain-events.nwlnexus.net`)
+      kind: Rule
+      services:
+        # EventSource webhook service name follows argo-events convention:
+        # <eventsource-name>-eventsource-svc
+        - name: github-push-eventsource-svc
+          port: 12000
+  tls:
+    secretName: codebase-brain-events-tls
+</file>
+
+<file path="clusters/olympus/codebase-brain/kustomization.yaml">
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - allowlist-configmap.yaml
+  - env-configmap.yaml
+  - work-root-pvc.yaml
+  - ghcr-pull-externalsecret.yaml
+  - externalsecret-runtime.yaml
+  - externalsecret-github-app.yaml
+  - externalsecret-webhook.yaml
+  - eventbus.yaml
+  - eventsource.yaml
+  - sensor.yaml
+  - workflowtemplate.yaml
+  - certificate.yaml
+  - ingressroute.yaml
+</file>
+
+<file path="clusters/olympus/codebase-brain/namespace.yaml">
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: codebase-brain
+</file>
+
+<file path="clusters/olympus/codebase-brain/rbac.yaml">
+# ServiceAccounts + RBAC for Workflow pods and the Argo Events Sensor.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: codebase-brain-workflow
+  namespace: codebase-brain
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: codebase-brain-sensor
+  namespace: codebase-brain
+---
+# Workflow pods: read Secrets/ConfigMaps/PVCs + emit Argo WorkflowTaskResults.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: codebase-brain-workflow
+  namespace: codebase-brain
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflowtaskresults"]
+    verbs: ["create", "get", "list", "watch", "patch", "update", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: codebase-brain-workflow
+  namespace: codebase-brain
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: codebase-brain-workflow
+subjects:
+  - kind: ServiceAccount
+    name: codebase-brain-workflow
+    namespace: codebase-brain
+---
+# Sensor submits Workflows from the WorkflowTemplate.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: codebase-brain-sensor
+  namespace: codebase-brain
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows", "workflowtemplates", "clusterworkflowtemplates"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: codebase-brain-sensor
+  namespace: codebase-brain
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: codebase-brain-sensor
+subjects:
+  - kind: ServiceAccount
+    name: codebase-brain-sensor
+    namespace: codebase-brain
+</file>
+
+<file path="clusters/olympus/codebase-brain/README.md">
+# Codebase Brain (Argo)
+
+Push to allowlisted `nwlnexus/*/main` → Argo Events Sensor → Argo Workflow running the
+`ghcr.io/nwlnexus/codebase-brain` Job (source: `nix-darwin-hm` `scripts/codebase-brain/`).
+
+Checklist: `nix-darwin-hm` → `docs/superpowers/plans/2026-07-17-codebase-brain-argo-checklist.md`
+
+## What this app deploys
+
+| Resource | Purpose |
+| --- | --- |
+| Namespace `codebase-brain` | Isolation |
+| WorkflowTemplate `codebase-brain` | Mint App install token → skip stale SHA → Job `--phase all` |
+| EventBus + EventSource `github-push` | GitHub `push` webhook (HMAC only; hook owned in GitHub UI) |
+| Sensor `codebase-brain-push` | Filter main + allowlist → submit Workflow |
+| PVC `codebase-brain-work` (50Gi, qnap-iscsi) | Shared `--work-root` cache (mutex-serialized) |
+| IngressRoute + Certificate | `https://brain-events.nwlnexus.net/push` |
+
+## R2
+
+ConfigMap `codebase-brain-env` → `BRAIN_R2_BUCKET=second-brain-docs` (graphs under prefix `graphs/`).
+
+## Image pin
+
+WorkflowTemplate image: `ghcr.io/nwlnexus/codebase-brain:a4d84cb`
+
+Bump the tag in `workflowtemplate.yaml` after a successful
+`nix-darwin-hm` workflow `codebase-brain-image` run (GHCR publish via Actions,
+same pattern as olympus-sdk `ingress-discovery` / `openmemory`).
+
+## 1Password (Dev vault) prerequisites
+
+| Item | Fields | Consumed as |
+| --- | --- | --- |
+| `docs-api-key` | `credential`, `r2-endpoint`, `r2-access-key-id`, `r2-secret-access-key`, `webhook-secret` | Anthropic, R2/`AWS_*`, GitHub webhook HMAC |
+| `automation-slack-bot` | `slack_webhook` | failure Slack notify |
+| `codebase-docs-pipeline-gh-app` | `app-id`, `installation-id`, **`private-key`** = `base64(PEM)` (concealed; Connect collapses newlines) | App → `GH_TOKEN` mint |
+
+Encode PEM for the `private-key` field (macOS):
+
+```bash
+base64 -i ./private-key.pem | tr -d '\n' | pbcopy
+```
+
+ExternalSecret uses `decodingStrategy: Base64` so the pod sees a normal PEM file.
+| `gh-pull-secret` | `username`, `credential` | GHCR pull (existing) |
+
+No `codebase-brain-github-webhook` 1Password item — HMAC is read from `docs-api-key`.
+
+**Never** put a personal PAT in the Job `GH_TOKEN` path — Workflow mints an installation
+token from the App PEM each run.
+
+## GitHub webhook
+
+Create once in the **org** UI (not via Argo):
+
+- Target: `https://brain-events.nwlnexus.net/push`
+- Content type: `application/json`
+- Events: **Just the push event**
+- Secret: 1Password `docs-api-key` / `webhook-secret`
+
+Sensor filters to `refs/heads/main` + personal allowlist. Install the GitHub App on those
+repos + `second-brain`.
+
+## Allowlist
+
+`allowlist-configmap.yaml` mirrors `modules/repomix/repos.toml` `[groups.personal]`
+(no work/`dtlr` repos). Keep Sensor + EventSource repo lists in sync when regenerating.
+
+## Ops
+
+```bash
+kubectl --context olympus get workflows -n codebase-brain
+kubectl --context olympus logs -n codebase-brain -l workflows.argoproj.io/workflow=<name> -c main
+kubectl --context olympus port-forward -n argo-workflows svc/argo-workflows-server 2746:2746
+```
+
+Brain PRs on `nwlnexus/second-brain` (`automation/brain-<repo>`) must **never** auto-merge.
+</file>
+
+<file path="clusters/olympus/codebase-brain/sensor.yaml">
+# Sensor: push → main + allowlisted repo → Workflow from WorkflowTemplate.
+# Soft coalesce via rateLimit; Workflow also exits early if SHA is no longer tip of main.
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: codebase-brain-push
+  namespace: codebase-brain
+spec:
+  template:
+    serviceAccountName: codebase-brain-sensor
+  dependencies:
+    - name: github-push-main
+      eventSourceName: github-push
+      eventName: push
+      filters:
+        data:
+          - path: body.ref
+            type: string
+            value:
+              - refs/heads/main
+          - path: body.repository.owner.login
+            type: string
+            value:
+              - nwlnexus
+          - path: body.repository.name
+            type: string
+            value:
+              - olympus-sdk
+              - olympus-gitops
+              - olympus-infra
+              - nix-darwin-hm
+              - moneta
+              - nix-op-secrets
+              - second-brain
+              - olympus-tailnet
+              - homebrew-olympus
+  triggers:
+    - template:
+        name: codebase-brain-workflow
+        k8s:
+          operation: create
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: brain-
+                namespace: codebase-brain
+              spec:
+                workflowTemplateRef:
+                  name: codebase-brain
+                arguments:
+                  parameters:
+                    - name: owner
+                      value: placeholder
+                    - name: repo
+                      value: placeholder
+                    - name: sha
+                      value: placeholder
+          parameters:
+            - src:
+                dependencyName: github-push-main
+                dataKey: body.repository.owner.login
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: github-push-main
+                dataKey: body.repository.name
+              dest: spec.arguments.parameters.1.value
+            - src:
+                dependencyName: github-push-main
+                dataKey: body.after
+              dest: spec.arguments.parameters.2.value
+      # Soft coalesce: at most one Workflow submit per minute for this Sensor.
+      # Mutex + stale-SHA exit handle backlog correctness.
+      rateLimit:
+        unit: Minute
+        requestsPerUnit: 1
+      retryStrategy:
+        steps: 3
+</file>
+
+<file path="clusters/olympus/codebase-brain/work-root-pvc.yaml">
+# Shared work-root for clone / gitnexus / openwiki / brain checkout caches.
+# Per-repo mutex brain-{owner}-{repo} serializes mounts (RWO).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: codebase-brain-work
+  namespace: codebase-brain
+spec:
+  storageClassName: qnap-iscsi
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+</file>
+
+<file path="clusters/olympus/codebase-brain/workflowtemplate.yaml">
+# WorkflowTemplate: mint GH_TOKEN → skip if SHA stale → run Job (--phase all).
+# Image tag pinned to nix-darwin-hm merge that ships the Job; bump via PR after rebuilds.
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: codebase-brain
+  namespace: codebase-brain
+spec:
+  entrypoint: main
+  serviceAccountName: codebase-brain-workflow
+  activeDeadlineSeconds: 10800
+  imagePullSecrets:
+    - name: ghcr-pull
+  arguments:
+    parameters:
+      - name: owner
+      - name: repo
+      - name: sha
+      - name: phase
+        value: "all"
+  # Per-repo mutex — shared work-root clone/openwiki tree must not race.
+  synchronization:
+    mutexes:
+      - name: "brain-{{workflow.parameters.owner}}-{{workflow.parameters.repo}}"
+  volumeClaimTemplates: []
+  volumes:
+    - name: work-root
+      persistentVolumeClaim:
+        claimName: codebase-brain-work
+    - name: github-app
+      secret:
+        secretName: codebase-brain-github-app
+  onExit: exit-handler
+  templates:
+    - name: main
+      retryStrategy:
+        limit: "1"
+        retryPolicy: Always
+      steps:
+        - - name: mint-gh-token
+            template: mint-gh-token
+        - - name: skip-if-stale
+            template: skip-if-stale
+            arguments:
+              parameters:
+                - name: gh-token
+                  value: "{{steps.mint-gh-token.outputs.parameters.token}}"
+        - - name: run
+            template: run
+            when: "{{steps.skip-if-stale.outputs.parameters.proceed}} == true"
+            arguments:
+              parameters:
+                - name: gh-token
+                  value: "{{steps.mint-gh-token.outputs.parameters.token}}"
+
+    - name: mint-gh-token
+      outputs:
+        parameters:
+          - name: token
+            valueFrom:
+              path: /tmp/gh_token
+      script:
+        image: python:3.12-slim
+        command: [bash]
+        source: |
+          set -euo pipefail
+          pip install -q --root-user-action=ignore PyJWT cryptography
+          python <<'PY'
+          import re, time, json, urllib.request
+          import jwt
+
+          def normalize_pem(raw: str) -> str:
+              """Accept multiline PEM or 1Password single-line paste (spaces for newlines)."""
+              s = raw.strip()
+              if "\n" in s:
+                  return s if s.endswith("\n") else s + "\n"
+              m = re.match(
+                  r"(-----BEGIN [^-]+-----)\s+(.+?)\s+(-----END [^-]+-----)\s*\Z",
+                  s,
+                  re.DOTALL,
+              )
+              if not m:
+                  return s + ("\n" if not s.endswith("\n") else "")
+              header, body, footer = m.groups()
+              body = "".join(body.split())
+              chunks = [body[i : i + 64] for i in range(0, len(body), 64)]
+              return "\n".join([header, *chunks, footer, ""])
+
+          app_id = open("/github-app/app-id").read().strip()
+          installation_id = open("/github-app/installation-id").read().strip()
+          private_key = normalize_pem(open("/github-app/private-key.pem").read())
+          now = int(time.time())
+          payload = {"iat": now - 60, "exp": now + 540, "iss": app_id}
+          encoded = jwt.encode(payload, private_key, algorithm="RS256")
+          if isinstance(encoded, bytes):
+              encoded = encoded.decode()
+          req = urllib.request.Request(
+              f"https://api.github.com/app/installations/{installation_id}/access_tokens",
+              method="POST",
+              headers={
+                  "Authorization": f"Bearer {encoded}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "User-Agent": "olympus-codebase-brain",
+              },
+              data=b"",
+          )
+          with urllib.request.urlopen(req) as resp:
+              token = json.load(resp)["token"]
+          open("/tmp/gh_token", "w").write(token)
+          print("minted installation access token", flush=True)
+          PY
+        volumeMounts:
+          - name: github-app
+            mountPath: /github-app
+            readOnly: true
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 256Mi
+
+    - name: skip-if-stale
+      inputs:
+        parameters:
+          - name: gh-token
+      outputs:
+        parameters:
+          - name: proceed
+            valueFrom:
+              path: /tmp/proceed
+      script:
+        image: alpine/git:2.47.2
+        command: [sh]
+        source: |
+          set -euo pipefail
+          OWNER="{{workflow.parameters.owner}}"
+          REPO="{{workflow.parameters.repo}}"
+          SHA="{{workflow.parameters.sha}}"
+          TOKEN="{{inputs.parameters.gh-token}}"
+          TIP=$(git ls-remote "https://x-access-token:${TOKEN}@github.com/${OWNER}/${REPO}.git" refs/heads/main | awk '{print $1}')
+          if [ -z "$TIP" ]; then
+            echo "unable to resolve tip of main; proceeding cautiously" >&2
+            echo true > /tmp/proceed
+            exit 0
+          fi
+          if [ "$TIP" != "$SHA" ]; then
+            echo "skip stale SHA ${SHA}; tip of main is ${TIP}" >&2
+            echo false > /tmp/proceed
+          else
+            echo "SHA ${SHA} is tip of main; proceeding" >&2
+            echo true > /tmp/proceed
+          fi
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+
+    - name: run
+      inputs:
+        parameters:
+          - name: gh-token
+      container:
+        image: ghcr.io/nwlnexus/codebase-brain:a4d84cb
+        command: ["bun", "run", "src/index.ts"]
+        args:
+          - --owner
+          - "{{workflow.parameters.owner}}"
+          - --repo
+          - "{{workflow.parameters.repo}}"
+          - --sha
+          - "{{workflow.parameters.sha}}"
+          - --phase
+          - "{{workflow.parameters.phase}}"
+          - --work-root
+          - /tmp/codebase-brain-job
+        env:
+          - name: GH_TOKEN
+            value: "{{inputs.parameters.gh-token}}"
+          - name: BRAIN_R2_BUCKET
+            valueFrom:
+              configMapKeyRef:
+                name: codebase-brain-env
+                key: BRAIN_R2_BUCKET
+        envFrom:
+          - secretRef:
+              name: codebase-brain-secrets
+        volumeMounts:
+          - name: work-root
+            mountPath: /tmp/codebase-brain-job
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2Gi
+          limits:
+            memory: 8Gi
+
+    - name: exit-handler
+      container:
+        image: curlimages/curl:8.12.1
+        command: [sh, -c]
+        args:
+          - |
+            set -eu
+            STATUS="{{workflow.status}}"
+            if [ "$STATUS" = "Succeeded" ]; then
+              echo "workflow Succeeded; no Slack alert"
+              exit 0
+            fi
+            URL="${SLACK_WEBHOOK_URL:-}"
+            if [ -z "$URL" ]; then
+              echo "SLACK_WEBHOOK_URL unset; skip notify for status=$STATUS" >&2
+              exit 0
+            fi
+            # Minimal JSON (workflow name/params are k8s-safe; no user-controlled quotes).
+            curl -fsS -X POST -H 'Content-type: application/json' \
+              --data "{\"text\":\"codebase-brain {{workflow.name}} status=${STATUS} {{workflow.parameters.owner}}/{{workflow.parameters.repo}}@{{workflow.parameters.sha}}\"}" \
+              "$URL"
+        envFrom:
+          - secretRef:
+              name: codebase-brain-secrets
+        resources:
+          requests:
+            cpu: 20m
+            memory: 32Mi
+          limits:
+            memory: 64Mi
+</file>
+
 <file path="clusters/olympus/external-dns/cloudflare-token-secret.yaml">
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
@@ -918,6 +1883,44 @@ resources:
   - cluster-secret-store.yaml
 </file>
 
+<file path="clusters/olympus/flux-kustomizations/argo-events.yaml">
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: argo-events
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/argo-events
+  prune: true
+  wait: true
+  timeout: 10m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    - name: argo-workflows
+</file>
+
+<file path="clusters/olympus/flux-kustomizations/argo-workflows.yaml">
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: argo-workflows
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/argo-workflows
+  prune: true
+  # HelmRelease may report Failed briefly while CRDs settle; don't block the
+  # tree forever — argo-events/codebase-brain still dependsOn this KS.
+  wait: false
+  timeout: 10m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+</file>
+
 <file path="clusters/olympus/flux-kustomizations/cert-manager-config.yaml">
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
@@ -973,6 +1976,29 @@ spec:
   dependsOn:
     - name: cert-manager-config
     - name: external-secrets-config
+</file>
+
+<file path="clusters/olympus/flux-kustomizations/codebase-brain.yaml">
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: codebase-brain
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/codebase-brain
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    - name: argo-workflows
+    - name: argo-events
+    - name: external-secrets-config
+    - name: cert-manager-config
+    - name: qnap-storage
+  # Ingress/DNS already live; avoid stalling app sync when traefik/external-dns
+  # report transient not-ready during unrelated upgrades.
 </file>
 
 <file path="clusters/olympus/flux-kustomizations/external-dns.yaml">
@@ -17498,6 +18524,9 @@ resources:
   - flux-kustomizations/qnap-ui.yaml
   - flux-kustomizations/mem0.yaml
   - flux-kustomizations/ingress-discovery.yaml
+  - flux-kustomizations/argo-workflows.yaml
+  - flux-kustomizations/argo-events.yaml
+  - flux-kustomizations/codebase-brain.yaml
 </file>
 
 <file path=".gitignore">
@@ -17634,83 +18663,218 @@ HTTP → HTTPS redirect is handled globally at the Traefik level (no per-route r
 compute-hub runs external-dns with `txtOwnerId: olympus`. Domain filters:
 `nwlnexus.net`, `nwlnexus.xyz`, `nwlnexus.io`. Each managed record carries an
 olympus-owned TXT registry entry so external-dns only touches records it owns.
+
+## Codebase Brain
+
+App path: `clusters/olympus/codebase-brain/` (depends on `argo-workflows`, `argo-events`).
+
+- Webhook: `https://brain-events.nwlnexus.net/push`
+- Job image: `ghcr.io/nwlnexus/codebase-brain:<sha>` (pinned in `workflowtemplate.yaml`)
+- Secrets: 1Password Dev → ExternalSecrets (see `codebase-brain/README.md`); Job `GH_TOKEN`
+  is minted per Workflow from GitHub App item `codebase-docs-pipeline-gh-app`
+- Allowlist: personal `nwlnexus` repos only (mirrors nix-darwin-hm `repos.toml` `[groups.personal]`)
+- Brain PRs on `second-brain` must never auto-merge
+
+kubectl context for this cluster is `olympus` (AGENTS topology name: compute-hub).
+
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **olympus-gitops**. Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit changes without running `detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/olympus-gitops/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/olympus-gitops/clusters` | All functional areas |
+| `gitnexus://repo/olympus-gitops/processes` | All execution flows |
+| `gitnexus://repo/olympus-gitops/process/{name}` | Step-by-step execution trace |
+
+<!-- gitnexus:end -->
 </file>
 
 <file path="CLAUDE.md">
-# Claude Code Instructions — olympus-gitops
+# olympus-gitops — Agent Context
 
-> Full context in `AGENTS.md`. This file covers Claude Code-specific operations.
+This repo contains Flux CD GitOps manifests for the Olympus homelab. All cluster state is
+declared here and reconciled by Flux on the single managed cluster.
 
-## Key Flux Commands
+## Topology
 
-There is one gitops-managed cluster; its kube-context is `compute-hub` (there is
-no `olympus` context — despite the repo path being `clusters/olympus`).
+There is exactly **one** gitops-managed cluster. Flux syncs the single repo path
+`./clusters/olympus` onto it (kube-context `compute-hub`).
 
-```bash
-# Force-sync a specific kustomization (after pushing a change)
-flux --context compute-hub reconcile source git flux-system
-flux --context compute-hub reconcile kustomization <name>
+| Name | Role |
+|------|------|
+| **compute-hub** | The only gitops-managed cluster. Ubuntu k3s, 3-node control-plane HA + worker (`onode-03*`, `naraka-01`). Everything under `clusters/olympus/` reconciles here. |
+| **QNAP** | Out-of-band **by design** — NOT in gitops. Provides iSCSI (Trident, StorageClass `qnap-iscsi`) to compute-hub. |
+| **ai-hub** | A **host only** (Mac Studio) — **not a cluster**. Runs Ollama (`ai-hub.raptor-mimosa.ts.net:11434`) plus native data services (Postgres :5432 / Redis :6379 / ClickHouse :8123 / Kafka as macOS LaunchDaemons). Its old OrbStack/Colima k3s was retired long ago. Manifests referencing `ai-hub` point at these host services and are correct — do not treat ai-hub as a cluster. |
+| ~~management-hub~~ | Retired (dead context). |
 
-# Force-sync a HelmRelease
-flux --context compute-hub reconcile helmrelease <name> -n <namespace>
+## Repository Structure
 
-# Check all kustomization status
-kubectl --context compute-hub get kustomization -n flux-system
-kubectl --context compute-hub get helmrelease -A
+```text
+clusters/
+└── olympus/          # Desired state for the compute-hub cluster (Flux syncs this path)
 ```
 
-## Dependency Chain Reference
+The `clusters/olympus/` tree:
+
+```text
+clusters/olympus/
+├── kustomization.yaml            # Root: lists all flux-kustomizations
+├── flux-system/                  # Flux bootstrap (gotk-sync points at ./clusters/olympus)
+├── flux-kustomizations/
+│   └── <app>.yaml                # One Flux Kustomization CRD per app
+└── <app>/
+    ├── kustomization.yaml        # Kustomize resources list
+    ├── namespace.yaml
+    ├── helmrepository.yaml
+    ├── helmrelease.yaml
+    ├── externalsecret.yaml       # Pulls secrets from 1Password Connect
+    ├── certificate.yaml          # cert-manager LE cert (DNS-01)
+    └── ingressroute.yaml         # Traefik IngressRoute v3
+```
+
+## Ingress & Domains
+
+Public ingress is via a remotely-managed Cloudflare named tunnel (`cloudflared`;
+tunnel id in `cloudflared/configmap.yaml`, routing edited in the Cloudflare
+dashboard, not here). `external-dns` (txtOwnerId `olympus`) manages records in
+`nwlnexus.net`, `nwlnexus.xyz`, and `nwlnexus.io`. The live app set is whatever
+is under `clusters/olympus/` — read that tree rather than a hand-maintained list.
+
+## Dependency Ordering
+
+Flux Kustomizations use `dependsOn` to enforce ordering. The base chain:
 
 ```
-external-secrets
-  → cert-manager
-    → cert-manager-config
-  → external-dns
-  → traefik-config
-  → cloudflared
-  → <apps> (dependsOn varies per app)
+external-secrets → cert-manager → cert-manager-config → apps
+                → external-dns
+                → traefik-config
+                → cloudflared
 ```
 
-## Reloader — Auto-restart on Secret/ConfigMap Changes
+When adding a new app: check what it needs (secrets? certs? storage?) and set `dependsOn` accordingly.
 
-[Stakater Reloader](https://github.com/stakater/Reloader) is deployed on compute-hub (`reloader` namespace). It watches Secrets and ConfigMaps and triggers rolling restarts of Deployments/StatefulSets/DaemonSets that are annotated to use them.
+## Adding a New App
 
-**Why this matters for ESO**: ExternalSecrets sync changes from 1Password automatically, but Kubernetes does not restart pods when a Secret value changes. Reloader bridges that gap.
+1. Create `clusters/olympus/<app>/` with at minimum: `kustomization.yaml`, `namespace.yaml`, `helmrepository.yaml`, `helmrelease.yaml`
+2. Add `clusters/olympus/flux-kustomizations/<app>.yaml` (Flux Kustomization CRD) with appropriate `dependsOn`
+3. Add the new flux-kustomization to `clusters/olympus/kustomization.yaml`
+4. Commit and push — Flux reconciles automatically (or use `flux reconcile` to trigger immediately)
 
-### Annotation pattern
+## Secrets Pattern
 
-Add to any Deployment/StatefulSet/DaemonSet that mounts a Secret or ConfigMap:
+All secrets come from 1Password via External Secrets Operator:
 
 ```yaml
-metadata:
-  annotations:
-    # Restart when ANY watched secret or configmap changes (recommended default)
-    reloader.stakater.com/auto: "true"
-
-    # Or scope to specific resources:
-    secret.reloader.stakater.com/reload: "my-secret,other-secret"
-    configmap.reloader.stakater.com/reload: "my-configmap"
+# ExternalSecret pulls from 1Password Connect
+spec:
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    name: <secret-name>
+    template:           # rename fields if needed
+      data:
+        targetKey: "{{ .sourceKey }}"
+  data:
+    - secretKey: sourceKey
+      remoteRef:
+        key: <1password-item-title>
+        property: <field-name>
 ```
 
-`watchGlobally: false` is set — Reloader only acts on annotated workloads.
+## Certificate Pattern
 
-### Checklist for existing deployments
+All TLS certs use cert-manager DNS-01 via Cloudflare:
 
-When reviewing or updating any workload that uses a Secret (including ESO-managed ones), add `reloader.stakater.com/auto: "true"` to the Deployment/StatefulSet metadata if not already present.
+```yaml
+spec:
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - hostname.nwlnexus.net
+```
 
-## Common Patterns
+## IngressRoute Pattern (Traefik v3)
 
-- **New app checklist**: namespace → helmrepository → helmrelease → (externalsecret if secrets needed) → (certificate + ingressroute if public) → **add reloader annotation to Deployment**
-- **Secret keys**: ExternalSecret `target.template` renames 1Password field names to what the chart expects
-- **valuesFrom**: Use `HelmRelease.spec.valuesFrom` to inject secret values as Helm values
-- **HTTP redirect**: Handled globally by Traefik HelmChartConfig — no per-route redirect needed
+```yaml
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`hostname.nwlnexus.net`)
+      kind: Rule
+      services:
+        - name: <service>
+          port: <port>
+  tls:
+    secretName: <cert-secret>
+```
 
-## Rules
+HTTP → HTTPS redirect is handled globally at the Traefik level (no per-route redirect needed).
 
-- Do NOT hard-code IPs in manifests — use DNS names or ExternalName services
-- Do NOT use `latest` image tags in HelmReleases — pin chart versions
-- Always set `dependsOn` in Flux Kustomizations — ordering failures cause cascading reconciliation errors
-- Commit plans to `../olympus-sdk/docs/plans/` before starting multi-step changes
+## External-DNS
+
+compute-hub runs external-dns with `txtOwnerId: olympus`. Domain filters:
+`nwlnexus.net`, `nwlnexus.xyz`, `nwlnexus.io`. Each managed record carries an
+olympus-owned TXT registry entry so external-dns only touches records it owns.
+
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **olympus-gitops**. Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit changes without running `detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/olympus-gitops/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/olympus-gitops/clusters` | All functional areas |
+| `gitnexus://repo/olympus-gitops/processes` | All execution flows |
+| `gitnexus://repo/olympus-gitops/process/{name}` | Step-by-step execution trace |
+
+<!-- gitnexus:end -->
 </file>
 
 <file path="README.md">
