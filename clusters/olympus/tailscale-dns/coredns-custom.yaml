@@ -11,9 +11,22 @@ data:
         forward . 100.100.100.100
     }
   data-services.server: |
-    # Resolves 'ai-hub' short-name → Tailscale IP so cluster pods can reach
-    # native data services (PostgreSQL, Redis, ClickHouse, Ollama).
+    # Resolves the 'data-hub' short-name → Tailscale IP so cluster pods can reach
+    # native data services (PostgreSQL, Redis, ClickHouse, Ollama) on the Mac Studio.
     # PostgreSQL binds to 100.95.232.41 (Tailscale); pg_hba allows 100.64.0.0/10.
+    # This is a static IP entry: it does NOT depend on the Tailscale device name.
+    data-hub:53 {
+        errors
+        hosts {
+            100.95.232.41 data-hub
+            fallthrough
+        }
+        cache 30
+    }
+    # TRANSITIONAL: legacy 'ai-hub' short-name (the host's former name), kept so
+    # that anything not yet re-pointed (stored UI connection settings, etc.) keeps
+    # resolving. Remove this block in a follow-up PR once the Tailscale device has
+    # been renamed to data-hub and nothing references 'ai-hub'.
     ai-hub:53 {
         errors
         hosts {

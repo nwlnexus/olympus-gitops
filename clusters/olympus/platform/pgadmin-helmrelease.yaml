@@ -34,11 +34,11 @@ spec:
     serverDefinitions:
       enabled: true
       servers:
-        ai-hub:
-          Name: ai-hub-postgres
+        data-hub:
+          Name: data-hub-postgres
           Group: Servers
           Port: 5432
           Username: postgres
-          Host: ai-hub
+          Host: data-hub
           SSLMode: prefer
           MaintenanceDB: postgres

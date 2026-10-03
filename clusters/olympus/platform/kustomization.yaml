@@ -6,7 +6,7 @@ resources:
   - externalsecret.yaml
   - pgadmin-externalsecret.yaml
 
-  # pgAdmin — UI for PostgreSQL (data now on ai-hub:5432)
+  # pgAdmin — UI for PostgreSQL (data now on data-hub:5432)
   - bitnami-helmrepository.yaml
   - pgadmin-pvc.yaml
   - pgadmin-helmrepository.yaml
@@ -14,7 +14,7 @@ resources:
   - pgadmin-certificate.yaml
   - pgadmin-ingressroute.yaml
 
-  # RedisInsight — UI for Redis (data now on ai-hub:6379)
+  # RedisInsight — UI for Redis (data now on data-hub:6379)
   - redisinsight-deployment.yaml
   - redisinsight-ingressroute.yaml
 
@@ -24,12 +24,12 @@ resources:
   - redpanda-helmrelease.yaml
   - redpanda-ingressroute.yaml
 
-  # CH-UI — UI for ClickHouse (data now on ai-hub:8123)
+  # CH-UI — UI for ClickHouse (data now on data-hub:8123)
   - ch-ui-pvc.yaml
   - ch-ui-deployment.yaml
   - ch-ui-ingressroute.yaml
 
   # tailscale-services.yaml — intentionally excluded from kustomization.
   # postgres-ts/redis-ts/clickhouse-ts/kafka-ts removed; data layer now native
-  # on ai-hub. Re-add entries to tailscale-services.yaml + here when new
+  # on data-hub. Re-add entries to tailscale-services.yaml + here when new
   # in-cluster services need tailnet LoadBalancer exposure.

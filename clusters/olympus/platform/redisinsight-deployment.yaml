@@ -19,10 +19,10 @@ spec:
           ports:
             - containerPort: 5540
           env:
-            # Seed the default Redis connection to ai-hub (native LaunchDaemon).
+            # Seed the default Redis connection to data-hub (native LaunchDaemon).
             # RedisInsight 2.x reads these on first start to auto-add a database.
             - name: RI_REDIS_HOST
-              value: "ai-hub"
+              value: "data-hub"
             - name: RI_REDIS_PORT
               value: "6379"
           resources:
