@@ -1,35 +1,28 @@
 # olympus-gitops
 
-GitOps manifests for the Olympus homelab, managed by ArgoCD running on the management host.
+Flux CD GitOps manifests for the Olympus homelab. Flux syncs `./clusters/olympus`
+onto the single managed cluster (compute-hub). See [AGENTS.md](AGENTS.md) for topology,
+conventions and the app layout.
 
 ## Structure
 
 ```
 clusters/
-  mac-studio/          # OrbStack Kubernetes cluster on Mac Studio (M1 Max)
-    external-secrets/  # ESO operator + ClusterSecretStore → 1Password Connect (wave 0)
-    cert-manager/      # cert-manager + Let's Encrypt DNS-01/Cloudflare issuer (wave 1)
-    traefik/           # Traefik ingress controller (wave 2)
+  olympus/             # Desired state for compute-hub (Flux syncs this path)
+    flux-system/       # Flux bootstrap
+    flux-kustomizations/  # One Flux Kustomization per app
+    <app>/             # Per-app manifests
 ```
 
-## ArgoCD Applications
+## Hosts
 
-Applications are created by Ansible during the mac-studio bootstrap (`make mac-studio-bootstrap`).
-They are NOT stored in this repo — Ansible manages them via `argocd app create --upsert`.
+- **compute-hub** — the only gitops-managed cluster (k3s).
+- **data-hub** — the Mac Studio; a host only, not a cluster. Runs the native data
+  services (Postgres, Redis, ClickHouse) and Ollama, reached by the
+  cluster over Tailscale. Formerly named `ai-hub`.
 
-Each app points to its directory here, syncs automatically, and creates its namespace if missing.
+## Secrets
 
-## Bootstrap sequence
-
-1. Ansible push seeds two secrets into the OrbStack cluster before ArgoCD syncs:
-   - `eso-op-connect-token` in `external-secrets` ns (1Password Connect token for ESO)
-   - `cloudflared-creds` in `cloudflared` ns (tunnel token, managed by Ansible directly)
-2. ArgoCD syncs `external-secrets` (wave 0) → ESO operator + ClusterSecretStore ready
-3. ArgoCD syncs `cert-manager` (wave 1) → ESO creates `cloudflare-api-token` Secret → ClusterIssuer ready
-4. ArgoCD syncs `traefik` (wave 2) → ingress controller ready
-
-## 1Password items required
-
-| Item name           | Fields              | Used by           |
-|---------------------|---------------------|-------------------|
-| `Cloudflare API Token` | `credential`     | cert-manager DNS-01 |
+Secrets come from 1Password via External Secrets Operator (`ClusterSecretStore`
+`onepassword-connect`). Some 1Password items keep their legacy `ai-hub-*` titles;
+those are item names, not hostnames.

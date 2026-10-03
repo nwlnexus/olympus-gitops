@@ -1,5 +1,5 @@
 # Tailnet-only OTLP ingress for Tempo, so per-cluster otel-collectors on
-# ai-hub/compute-hub can ship Traefik/edge traces over the tailnet (never CF).
+# data-hub/compute-hub can ship Traefik/edge traces over the tailnet (never CF).
 # No tailscale.com/funnel => reachable only inside raptor-mimosa.ts.net.
 apiVersion: v1
 kind: Service

@@ -12,7 +12,7 @@ There is exactly **one** gitops-managed cluster. Flux syncs the single repo path
 |------|------|
 | **compute-hub** | The only gitops-managed cluster. Ubuntu k3s, 3-node control-plane HA + worker (`onode-03*`, `naraka-01`). Everything under `clusters/olympus/` reconciles here. |
 | **QNAP** | Out-of-band **by design** — NOT in gitops. Provides iSCSI (Trident, StorageClass `qnap-iscsi`) to compute-hub. |
-| **ai-hub** | A **host only** (Mac Studio) — **not a cluster**. Runs Ollama (`ai-hub.raptor-mimosa.ts.net:11434`) plus native data services (Postgres :5432 / Redis :6379 / ClickHouse :8123 / Kafka as macOS LaunchDaemons). Its old OrbStack/Colima k3s was retired long ago. Manifests referencing `ai-hub` point at these host services and are correct — do not treat ai-hub as a cluster. |
+| **data-hub** | A **host only** (Mac Studio, formerly named `ai-hub`) — **not a cluster**. Runs Ollama (`100.95.232.41:11434`, the tailnet IP — name-independent) plus native data services (Postgres :5432 / Redis :6379 / ClickHouse :8123 / Kafka as macOS LaunchDaemons). Its old OrbStack/Colima k3s was retired long ago. Manifests referencing `data-hub` point at these host services (short name resolved by CoreDNS in `tailscale-dns/`) and are correct — do not treat data-hub as a cluster. 1Password items `ai-hub-data-services` / `ai-hub-secrets` keep their legacy names; they are item titles, not hostnames. |
 | ~~management-hub~~ | Retired (dead context). |
 
 ## Repository Structure

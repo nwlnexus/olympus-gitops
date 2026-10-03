@@ -26,10 +26,13 @@ spec:
             - name: http
               containerPort: 8765
           env:
-            # LLM + embedder run on the homelab Ollama (ai-hub). OLLAMA_BASE_URL is
+            # LLM + embedder run on the homelab Ollama (data-hub). OLLAMA_BASE_URL is
             # set explicitly to a non-localhost URL so OpenMemory's Docker host-rewrite
             # path (host.docker.internal / bridge-gw) is bypassed and pods reach Ollama
-            # over the tailnet MagicDNS name.
+            # over the tailnet. Uses the tailnet IP of the Mac Studio (data-hub) rather
+            # than a MagicDNS name so it is independent of the Tailscale device name
+            # and of CoreDNS reload timing (same IP as the CoreDNS data-hub entry in
+            # tailscale-dns/coredns-custom.yaml).
             - name: LLM_PROVIDER
               value: "ollama"
             # Fast NON-thinking extraction model. qwen3.6:27b-mlx (the coding model)
@@ -44,7 +47,7 @@ spec:
             - name: EMBEDDER_MODEL
               value: "nomic-embed-text"
             - name: OLLAMA_BASE_URL
-              value: "http://ai-hub.raptor-mimosa.ts.net:11434"
+              value: "http://100.95.232.41:11434"
             # Vector store = in-cluster Qdrant. memory.py keys off QDRANT_HOST/PORT to
             # select the qdrant provider; the init Job (mem0-init-config) then PUTs the
             # 768-dim override so the collection matches nomic-embed-text's output dims.
@@ -71,7 +74,7 @@ spec:
             # Route categorization's OpenAI client at the cluster Ollama's
             # OpenAI-compatible endpoint (/v1). Affects categorization.py only.
             - name: OPENAI_BASE_URL
-              value: "http://ai-hub.raptor-mimosa.ts.net:11434/v1"
+              value: "http://100.95.232.41:11434/v1"
             # Per-add categorization runs synchronously on every insert
             # (models.py:categorize_memory). ENABLED, routed at Ollama with a small
             # fast model (llama3.2:3b, ~0.5s/add, structured-output verified). Flip to
@@ -85,7 +88,7 @@ spec:
           # dependency-free route returning 200 iff the event loop is responsive.
           # REALITY (issue #43, verified on compute-hub 2026-07-08): an `add` still
           # blocks the single uvicorn worker (synchronous LLM extraction + categorization
-          # + embed against ai-hub Ollama) long enough that /health itself times out —
+          # + embed against data-hub Ollama) long enough that /health itself times out —
           # liveness failed 52x / readiness 186x over 46h → 8 SIGKILL restarts (exitCode
           # 137, NOT OOM: usage ~164Mi/1Gi). Readiness de-pooling a single-replica Service
           # turns "busy" into "unreachable", which is what broke mnemosyne recall.

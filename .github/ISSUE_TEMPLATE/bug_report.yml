@@ -60,7 +60,7 @@ body:
       description: Where does this bug occur?
       options:
         - compute-hub (cluster)
-        - ai-hub (host services / Ollama)
+        - data-hub (host services / Ollama)
         - QNAP storage
         - repo / CI
         - other

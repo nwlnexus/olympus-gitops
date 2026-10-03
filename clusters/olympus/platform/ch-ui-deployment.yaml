@@ -35,14 +35,14 @@ spec:
             - containerPort: 3488
               name: http
           env:
-            # Bootstraps the embedded "ai-hub ClickHouse" connection target.
+            # Bootstraps the embedded "data-hub ClickHouse" connection target.
             # ClickHouse `default` requires a password; enter it once via the
             # ch-ui admin panel on first login (persisted in the PVC sqlite db).
-            # ai-hub is the macOS Mac Studio running ClickHouse natively.
+            # data-hub is the macOS Mac Studio running ClickHouse natively.
             - name: CLICKHOUSE_URL
-              value: "http://ai-hub:8123"
+              value: "http://data-hub:8123"
             - name: CONNECTION_NAME
-              value: "ai-hub ClickHouse"
+              value: "data-hub ClickHouse"
             - name: APP_URL
               value: "https://chui.nwlnexus.io"
             - name: DATABASE_PATH

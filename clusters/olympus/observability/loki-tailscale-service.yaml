@@ -1,4 +1,4 @@
-# Tailnet-only push endpoint for Loki, so ai-hub/compute-hub log agents can ship
+# Tailnet-only push endpoint for Loki, so data-hub/compute-hub log agents can ship
 # logs over the tailnet (never CF). No tailscale.com/funnel => tailnet-only.
 apiVersion: v1
 kind: Service

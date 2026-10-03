@@ -34,6 +34,11 @@ kind: Job
 metadata:
   name: mem0-init-config
   namespace: mem0
+  annotations:
+    # Job spec.template is immutable; let Flux delete+recreate the Job when this
+    # manifest changes (otherwise the apply fails and the Job never re-runs, leaving
+    # the old Ollama URL persisted in OpenMemory's DB config).
+    kustomize.toolkit.fluxcd.io/force: enabled
 spec:
   backoffLimit: 10
   template:
@@ -51,7 +56,9 @@ spec:
             - |
               set -eu
               API="http://openmemory.mem0.svc.cluster.local:8765"
-              OLLAMA="http://ai-hub.raptor-mimosa.ts.net:11434"
+              # Tailnet IP of data-hub (Mac Studio): independent of the Tailscale device name.
+              # NOTE: this value is persisted into the OpenMemory DB config row by the PUTs below.
+              OLLAMA="http://100.95.232.41:11434"
 
               echo "Waiting for OpenMemory API at ${API}/docs ..."
               i=0
