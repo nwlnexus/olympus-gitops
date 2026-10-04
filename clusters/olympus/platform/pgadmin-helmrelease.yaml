@@ -21,6 +21,12 @@ spec:
         name: runix
         namespace: platform
   values:
+    # pgadmin-data is a single RWO qnap-iscsi volume. The chart's default
+    # RollingUpdate surges a new pod first; when it lands on another node it
+    # hits Multi-Attach, never becomes Ready, and the Helm upgrade times out
+    # and rolls back. Recreate stops the old pod before starting the new one.
+    strategy:
+      type: Recreate
     ingress:
       enabled: false
     persistentVolume:

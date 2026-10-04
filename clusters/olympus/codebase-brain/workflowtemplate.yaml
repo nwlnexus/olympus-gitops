@@ -9,6 +9,15 @@ spec:
   entrypoint: main
   serviceAccountName: codebase-brain-workflow
   activeDeadlineSeconds: 10800
+  # Garbage-collect finished Workflows (and, via ownerRefs, their pods). No
+  # workflow archive / log artifact repo is configured, so failed pods are the
+  # only place step logs live: keep failures for 7d, successes for 1d, and
+  # drop succeeded step pods as soon as they finish.
+  ttlStrategy:
+    secondsAfterSuccess: 86400
+    secondsAfterFailure: 604800
+  podGC:
+    strategy: OnPodSuccess
   imagePullSecrets:
     - name: ghcr-pull
   arguments:
