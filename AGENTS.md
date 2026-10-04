@@ -140,6 +140,22 @@ App path: `clusters/olympus/codebase-brain/` (depends on `argo-workflows`, `argo
 
 kubectl context for this cluster is `olympus` (AGENTS topology name: compute-hub).
 
+## k3s Upgrades (system-upgrade-controller)
+
+App path: `clusters/olympus/system-upgrade/`. k3s versions on compute-hub change **only**
+through system-upgrade-controller (SUC) `Plan`s in this directory — never by re-running the
+olympus-infra `k3s` role (its install task is `creates:`-guarded and never upgrades).
+
+- `crd.yaml` and `system-upgrade-controller.yaml` are vendored **unmodified** from the SUC
+  release assets; local changes are kustomize `patches` in `kustomization.yaml`.
+- **Never add `drain` to a Plan.** Use `cordon: true` only. All PVCs are single-attach RWO
+  (`qnap-iscsi`) and the redpanda PDB would block eviction.
+- **Never use `channel` in a Plan.** Always pin an exact `version:` (e.g. `v1.32.13+k3s1`);
+  a channel such as `stable` silently jumps minors.
+- One minor at a time, servers before agents, `concurrency: 1`.
+- Bump `SYSTEM_UPGRADE_JOB_KUBECTL_IMAGE` (ConfigMap patch) to the nearest existing
+  `rancher/kubectl` tag for each target minor; the cordon init container uses it.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
