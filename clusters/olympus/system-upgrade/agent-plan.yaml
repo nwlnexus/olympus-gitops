@@ -1,0 +1,20 @@
+apiVersion: upgrade.cattle.io/v1
+kind: Plan
+metadata:
+  name: agent-plan
+  namespace: system-upgrade
+spec:
+  concurrency: 1
+  cordon: true
+  serviceAccountName: system-upgrade
+  version: v1.35.9+k3s1
+  nodeSelector:
+    matchExpressions:
+      - {key: node-role.kubernetes.io/control-plane, operator: DoesNotExist}
+  tolerations:
+    - {key: olympus.io/role, operator: Equal, value: management-hub, effect: NoSchedule}
+  prepare:
+    image: rancher/k3s-upgrade
+    args: [prepare, server-plan]
+  upgrade:
+    image: rancher/k3s-upgrade

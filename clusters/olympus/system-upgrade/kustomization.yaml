@@ -14,6 +14,7 @@ resources:
   - crd.yaml
   - system-upgrade-controller.yaml
   - server-plan.yaml
+  - agent-plan.yaml
 patches:
   # The kubectl image is used by the job's cordon init container (not only
   # drain); the shipped default (v1.30.3) is out of skew. Bump per hop to the
@@ -25,4 +26,4 @@ patches:
     patch: |-
       - op: replace
         path: /data/SYSTEM_UPGRADE_JOB_KUBECTL_IMAGE
-        value: rancher/kubectl:v1.34.9
+        value: rancher/kubectl:v1.35.6
