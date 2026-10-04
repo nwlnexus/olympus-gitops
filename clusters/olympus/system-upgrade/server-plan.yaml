@@ -7,7 +7,7 @@ spec:
   concurrency: 1
   cordon: true
   serviceAccountName: system-upgrade
-  version: v1.33.13+k3s2
+  version: v1.34.12+k3s1
   nodeSelector:
     matchExpressions:
       - {key: node-role.kubernetes.io/control-plane, operator: In, values: ["true"]}
