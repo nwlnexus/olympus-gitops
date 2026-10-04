@@ -134,6 +134,14 @@ This project is indexed by GitNexus as **olympus-gitops**. Use the GitNexus MCP 
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
+## Flux (self-managed)
+
+Flux reconciles itself: `clusters/olympus/kustomization.yaml` includes `flux-system/`, so the controllers (`gotk-components.yaml`) and the sync objects (`gotk-sync.yaml`) are applied and pruned like any other app.
+
+- **Upgrade Flux** with a PR that regenerates the components with a pinned version: `flux install --version=vX.Y.Z --export > clusters/olympus/flux-system/gotk-components.yaml`. Read the release's upgrade notes first (CRD storage-version migrations: `flux migrate`).
+- **Never remove `flux-system` from the root kustomization**: with `prune: true` that would delete Flux itself.
+- The Git credentials Secret `flux-system/flux-system` is not in git; it stays as created at bootstrap.
+
 ## Always Do
 
 - **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
