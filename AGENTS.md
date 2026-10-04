@@ -140,6 +140,14 @@ App path: `clusters/olympus/codebase-brain/` (depends on `argo-workflows`, `argo
 
 kubectl context for this cluster is `olympus` (AGENTS topology name: compute-hub).
 
+## Flux (self-managed)
+
+Flux reconciles itself: `clusters/olympus/kustomization.yaml` includes `flux-system/`, so the controllers (`gotk-components.yaml`) and the sync objects (`gotk-sync.yaml`) are applied and pruned like any other app.
+
+- **Upgrade Flux** with a PR that regenerates the components with a pinned version: `flux install --version=vX.Y.Z --export > clusters/olympus/flux-system/gotk-components.yaml`. Read the release's upgrade notes first (CRD storage-version migrations: `flux migrate`).
+- **Never remove `flux-system` from the root kustomization**: with `prune: true` that would delete Flux itself.
+- The Git credentials Secret `flux-system/flux-system` is not in git; it stays as created at bootstrap.
+
 ## k3s Upgrades (system-upgrade-controller)
 
 App path: `clusters/olympus/system-upgrade/`. k3s versions on compute-hub change **only**
