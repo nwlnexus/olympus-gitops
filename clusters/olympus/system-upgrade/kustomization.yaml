@@ -13,6 +13,7 @@ kind: Kustomization
 resources:
   - crd.yaml
   - system-upgrade-controller.yaml
+  - server-plan.yaml
 patches:
   # The kubectl image is used by the job's cordon init container (not only
   # drain); the shipped default (v1.30.3) is out of skew. Bump per hop to the
