@@ -7,7 +7,7 @@ spec:
   # Persists the SQLite registry at /usr/src/openmemory/openmemory.db — the
   # source-of-truth metadata store the MCP search relies on. Losing it orphans
   # the Qdrant vectors from their app-level records.
-  # qnap-iscsi (Trident) — proven SC on this cluster; Longhorn fails mkfs on these nodes.
+  # qnap-iscsi (Trident) — the proven SC on this cluster.
   storageClassName: qnap-iscsi
   accessModes:
     - ReadWriteOnce

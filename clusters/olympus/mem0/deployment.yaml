@@ -9,7 +9,7 @@ spec:
     matchLabels:
       app: openmemory
   strategy:
-    # Recreate avoids two pods racing on the single RWO Longhorn volume (the
+    # Recreate avoids two pods racing on the single RWO volume (the
     # openmemory.db SQLite registry) during rollouts.
     type: Recreate
   template:
