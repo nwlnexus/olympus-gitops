@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# system-upgrade-controller (SUC) v0.20.2, vendored unmodified from the
+# rancher/system-upgrade-controller release assets (crd.yaml,
+# system-upgrade-controller.yaml). Local changes go in `patches` below, never
+# in the vendored files, so a version bump is a straight re-download.
+#
+# Plans (server-plan / agent-plan) are added per hop of the k3s upgrade.
+# Rules for every Plan in this directory:
+#   - NEVER set `drain` (cordon only): storage is single-attach RWO and the
+#     redpanda PDB would block eviction.
+#   - NEVER set `channel`; always pin an exact `version:`.
+resources:
+  - crd.yaml
+  - system-upgrade-controller.yaml
+patches:
+  # The kubectl image is used by the job's cordon init container (not only
+  # drain); the shipped default (v1.30.3) is out of skew. Bump per hop to the
+  # nearest existing rancher/kubectl tag for the target k3s minor.
+  - target:
+      kind: ConfigMap
+      name: default-controller-env
+      namespace: system-upgrade
+    patch: |-
+      - op: replace
+        path: /data/SYSTEM_UPGRADE_JOB_KUBECTL_IMAGE
+        value: rancher/kubectl:v1.32.13
