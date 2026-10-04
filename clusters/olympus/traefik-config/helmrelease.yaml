@@ -8,20 +8,29 @@ spec:
   chart:
     spec:
       chart: traefik
-      version: ">=30.0.0 <31.0.0"
+      # Chart 41.6.1 ships Traefik v3.7.13. Pinned exactly: 41.x minors bump the
+      # Traefik patch (3.7.x patches have carried behaviour changes).
+      version: "41.6.1"
       sourceRef:
         kind: HelmRepository
         name: traefik
         namespace: traefik
   install:
+    # Helm never upgrades CRDs from a chart's crds/ dir on its own. CreateReplace
+    # makes helm-controller apply the chart's traefik.io CRDs on every upgrade.
+    crds: CreateReplace
     remediation:
       retries: 3
   upgrade:
+    crds: CreateReplace
     remediation:
       retries: 3
   values:
-    podAnnotations:
-      config-version: "2"
+    deployment:
+      # Was top-level `podAnnotations` (silently ignored by the chart, rejected by
+      # the v39+ schema). Bump to force a pod restart.
+      podAnnotations:
+        config-version: "2"
     ingressClass:
       enabled: true
       isDefaultClass: true
@@ -32,13 +41,29 @@ spec:
       kubernetesIngress:
         enabled: true
         ingressClass: traefik
+    # Keep legacy router/service naming (router names feed access logs, the
+    # Prometheus `router` label and dashboards) and silence the v3.7.11+ warning.
+    # The chart can only render safeNaming=true, so pass false explicitly.
+    additionalArguments:
+      - --providers.kubernetescrd.safeNaming=false
     ports:
       web:
-        redirectTo:
-          port: websecure
+        # chart v34+: redirectTo -> http.redirections (upstream syntax);
+        # chart v39+: http options require the explicit `http` level.
+        http:
+          redirections:
+            entryPoint:
+              to: websecure
+              scheme: https
+              permanent: true
       websecure:
-        tls:
-          enabled: true
+        http:
+          tls:
+            enabled: true
+        observability:
+          # Traefik v3.5+ defaults to `minimal` (fewer spans than v3.1).
+          # `detailed` restores per-middleware spans.
+          traceVerbosity: detailed
     api:
       dashboard: true
     metrics:
@@ -49,32 +74,32 @@ spec:
         addEntryPointsLabels: true
         addServicesLabels: true
         addRoutersLabels: true
-    logs:
-      general:
-        level: INFO
-      access:
-        enabled: true
-        format: json
-        fields:
-          general:
-            defaultmode: keep
-            names:
-              ClientAddr: keep
-              RequestHost: keep
-              RequestMethod: keep
-              RequestPath: keep
-              RequestProtocol: keep
-              DownstreamStatus: keep
-              Duration: keep
-              RouterName: keep
-              ServiceName: keep
-          headers:
-            defaultmode: drop
-            names:
-              Authorization: redact
-              Cookie: drop
-              X-Forwarded-For: keep
-              X-Real-Ip: keep
+    # chart v41: logs.general -> log, logs.access -> accessLog,
+    # fields.general.defaultmode -> fields.defaultMode, *.defaultmode -> *.defaultMode
+    log:
+      level: INFO
+    accessLog:
+      enabled: true
+      format: json
+      fields:
+        defaultMode: keep
+        names:
+          ClientAddr: keep
+          RequestHost: keep
+          RequestMethod: keep
+          RequestPath: keep
+          RequestProtocol: keep
+          DownstreamStatus: keep
+          Duration: keep
+          RouterName: keep
+          ServiceName: keep
+        headers:
+          defaultMode: drop
+          names:
+            Authorization: redact
+            Cookie: drop
+            X-Forwarded-For: keep
+            X-Real-Ip: keep
     tracing:
       otlp:
         enabled: true
@@ -83,4 +108,6 @@ spec:
           endpoint: opentelemetry-collector.otel.svc.cluster.local:4317
           insecure: true
     service:
-      type: LoadBalancer
+      # chart v39+: `service.type` is no longer read; type lives under service.spec.
+      spec:
+        type: LoadBalancer
