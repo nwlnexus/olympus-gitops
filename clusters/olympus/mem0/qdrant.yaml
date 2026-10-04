@@ -9,7 +9,7 @@ spec:
     matchLabels:
       app: qdrant
   strategy:
-    # Recreate avoids two pods racing on the single RWO Longhorn volume during rollouts.
+    # Recreate avoids two pods racing on the single RWO volume during rollouts.
     type: Recreate
   template:
     metadata:

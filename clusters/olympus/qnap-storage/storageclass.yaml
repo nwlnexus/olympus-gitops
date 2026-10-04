@@ -2,7 +2,7 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: qnap-iscsi
-  # NOT default: compute-hub already has local-path and longhorn as default classes.
+  # NOT default: local-path (k3s built-in) is the cluster default class.
   # Workloads must request storageClassName: qnap-iscsi explicitly.
 provisioner: csi.trident.qnap.io
 parameters:
