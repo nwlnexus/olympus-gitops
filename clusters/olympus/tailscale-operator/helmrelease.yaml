@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: tailscale-operator
-      version: "1.98.4"  # pinned: unpinned upgrades silently changed proxy behavior (VIPService) and churned agents
+      version: "1.102.4"  # pinned: unpinned upgrades silently changed proxy behavior (VIPService) and churned agents; bump deliberately after reading the changelog
       sourceRef:
         kind: HelmRepository
         name: tailscale
