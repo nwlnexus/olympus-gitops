@@ -11,17 +11,25 @@
 # `maxRunners: 1` on the scale set this caps KVM CI at one VM job per KVM node,
 # enforced by the scheduler even if maxRunners is raised.
 #
-# Node selection: only nodes labelled `olympus.io/kvm-ci=true` run the plugin, so
-# only they advertise the resource (manual label, README.md in ../arc/).
+# Node selection: only nodes labelled `node-restriction.kubernetes.io/kvm-ci=true`
+# run the plugin, so only they advertise the resource (manual label, README.md in
+# ../arc/). The `node-restriction.kubernetes.io/` prefix cannot be set by a kubelet
+# on its own Node object (NodeRestriction admission, enabled in k3s), so a
+# compromised node cannot label itself to attract KVM jobs.
 #
-# Hardening (the reason it can run with far less than the upstream manifest's
-# `privileged: true` + hostPath /dev):
-#  - hostPath ONLY for /dev/kvm (CharDevice, read-only; the plugin only stats it)
-#    and the kubelet device-plugin directory (needed to create its socket);
+# TRUST: this pod is equivalent to root on its node. It answers the kubelet's
+# Allocate calls, so a malicious image could hand the KVM runner pod any host device
+# or host path; as uid 0 it can also write kubelet.sock / kubelet_internal_checkpoint
+# in /var/lib/kubelet/device-plugins. Hence: our own mirror of the image pinned by
+# digest, a ValidatingAdmissionPolicy that admits only that image in this namespace
+# (vap.yaml), labelled nodes only.
+#
+# Hardening (less than the upstream manifest's `privileged: true` + hostPath /dev):
+#  - hostPath ONLY for /dev/kvm (CharDevice; the plugin only stats it to discover
+#    the device) and the kubelet device-plugin directory (its socket);
 #  - uid 0 (the socket directory is root:root 0755) but ALL capabilities
 #    dropped, no privilege escalation, read-only root fs, seccomp RuntimeDefault;
-#  - no service account token, no ports exposed (default-deny NetworkPolicy);
-#  - image pinned by digest.
+#  - no service account token, metrics on 127.0.0.1 only, default-deny NetworkPolicy.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -42,10 +50,12 @@ spec:
     spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
+      # See priorityclass.yaml: above ordinary workloads for eviction, never preempts.
+      priorityClassName: ci-device-plugin
       nodeSelector:
         kubernetes.io/os: linux
         kubernetes.io/arch: amd64
-        olympus.io/kvm-ci: "true"
+        node-restriction.kubernetes.io/kvm-ci: "true"
       securityContext:
         runAsUser: 0
         runAsGroup: 0
@@ -53,9 +63,12 @@ spec:
           type: RuntimeDefault
       containers:
         - name: generic-device-plugin
-          # squat/generic-device-plugin 0.2.0 (2026-04-14), multi-arch index digest.
-          # Bump: resolve the new tag's index digest on ghcr.io and replace it here.
-          image: ghcr.io/squat/generic-device-plugin@sha256:66c8d5c270eb2b721f1064c549b9b7898152a6d2f0163380a5d37dc7636c20ff
+          # Our mirror of squat/generic-device-plugin 0.2.0 (Apache-2.0), copied with
+          # `skopeo copy --all --preserve-digests`, so the digest is the upstream
+          # index digest: ghcr.io/squat/generic-device-plugin:0.2.0@sha256:66c8d5c2...
+          # Bump procedure: README.md in ../arc/ (mirror first, then update here AND
+          # in vap.yaml).
+          image: ghcr.io/nwlnexus/generic-device-plugin@sha256:66c8d5c270eb2b721f1064c549b9b7898152a6d2f0163380a5d37dc7636c20ff
           args:
             - --domain=olympus.io
             - --log-level=info
@@ -86,7 +99,6 @@ spec:
               mountPath: /var/lib/kubelet/device-plugins
             - name: kvm
               mountPath: /dev/kvm
-              readOnly: true
       volumes:
         - name: device-plugins
           hostPath:

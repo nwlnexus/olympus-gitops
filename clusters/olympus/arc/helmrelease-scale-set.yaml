@@ -78,6 +78,12 @@ spec:
         # the chart's service account ("-no-permission") has no RBAC anyway.
         automountServiceAccountToken: false
         priorityClassName: ci-runner
+        # Hard wall-clock cap for the pod (olympus-sdk#390 review m1): a stuck job cannot
+        # hold a slot for days. Longest jobs (release builds) take well under 1 h; 3 h is ample. The kubelet kills the runner; ARC
+        # 0.15.0 then deletes the EphemeralRunner if a job was assigned (the job fails
+        # as "runner lost") or recreates the pod if none was, so the slot is freed.
+        activeDeadlineSeconds: 10800
+        enableServiceLinks: false
         securityContext:
           runAsNonRoot: true
           runAsUser: 1001          # `runner` user in the runner image (numeric: required by runAsNonRoot)

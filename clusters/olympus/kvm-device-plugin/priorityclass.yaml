@@ -1,0 +1,14 @@
+# The /dev/kvm device plugin (daemonset.yaml). Value 1000: just above ordinary
+# workloads (0) so that under node pressure the kubelet evicts CI pods (-1000) and
+# normal workloads before the 10m/16Mi plugin, but far below the system classes
+# (2e9) so it never outranks platform components. preemptionPolicy: Never: it never
+# evicts anything to get scheduled (if a labelled node is full, KVM CI simply waits).
+# system-node-critical is deliberately NOT used: KVM CI is not critical.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: ci-device-plugin
+value: 1000
+preemptionPolicy: Never
+globalDefault: false
+description: "Device plugins for CI (kvm-device-plugin): above ordinary workloads for eviction, never preempts."

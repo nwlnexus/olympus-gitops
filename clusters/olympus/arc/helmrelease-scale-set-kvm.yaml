@@ -85,6 +85,12 @@ spec:
         # the ResourceQuota can scope the KVM budget apart from the other sets
         # (quota.yaml: ci-runners-kvm / ci-runners-non-kvm).
         priorityClassName: ci-runner-kvm
+        # Hard wall-clock cap for the pod (olympus-sdk#390 review m1): a stuck job cannot
+        # hold a slot for days. vm-tests.yml times out at 60 min; 2 h is ample. The kubelet kills the runner; ARC
+        # 0.15.0 then deletes the EphemeralRunner if a job was assigned (the job fails
+        # as "runner lost") or recreates the pod if none was, so the slot is freed.
+        activeDeadlineSeconds: 7200
+        enableServiceLinks: false
         securityContext:
           runAsNonRoot: true
           runAsUser: 1001          # `runner` user in the runner image (numeric: required by runAsNonRoot)
@@ -98,7 +104,9 @@ spec:
           supplementalGroups: [994]
           seccompProfile:
             type: RuntimeDefault
-        # Only on nodes labelled for KVM CI (manual label, README.md). The device
+        # Only on nodes labelled for KVM CI (manual label, README.md). The label is in
+        # the node-restriction.kubernetes.io/ prefix, which a kubelet cannot set on
+        # its own Node, so a compromised node cannot attract KVM jobs. The device
         # plugin runs only there too, so the extended resource exists only there;
         # this affinity makes the intent explicit and gives a clear Pending reason.
         affinity:
@@ -106,7 +114,7 @@ spec:
             requiredDuringSchedulingIgnoredDuringExecution:
               nodeSelectorTerms:
                 - matchExpressions:
-                    - key: olympus.io/kvm-ci
+                    - key: node-restriction.kubernetes.io/kvm-ci
                       operator: In
                       values: ["true"]
                     - key: olympus.io/role
@@ -129,7 +137,10 @@ spec:
                 ephemeral-storage: 4Gi
                 olympus.io/kvm: "1"
               limits:
-                cpu: "4"
+                # 3, not 4: with an olympus-linux runner (4) and gates on the same onode,
+                # CI stays at or below half of the node's 16 cores (spec section 5).
+                # A full vm-test run peaked at 1.4 cores (README.md).
+                cpu: "3"
                 memory: 8Gi
                 ephemeral-storage: 15Gi
                 olympus.io/kvm: "1"

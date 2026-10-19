@@ -10,7 +10,8 @@ spec:
   interval: 10m
   path: ./clusters/olympus/kvm-device-plugin
   prune: true
-  # A DaemonSet with 0 desired pods (no node labelled olympus.io/kvm-ci=true yet)
+  # A DaemonSet with 0 desired pods (no node labelled
+  # node-restriction.kubernetes.io/kvm-ci=true yet)
   # is healthy, so waiting is safe; once a node is labelled, a broken plugin pod
   # turns this Kustomization not-ready.
   wait: true

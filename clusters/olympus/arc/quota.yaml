@@ -29,7 +29,7 @@ spec:
     pods: "13"                     # 4 runners + 8 gates + 1 KVM runner
     requests.cpu: "10500m"
     requests.memory: 21Gi
-    limits.cpu: "24"
+    limits.cpu: "23"
     limits.memory: 44Gi
     requests.ephemeral-storage: 22Gi
     limits.ephemeral-storage: 91Gi
@@ -71,7 +71,7 @@ metadata:
   name: ci-runners-kvm
   namespace: arc-runners
 spec:
-  # olympus-kvm: 1 pod (2 CPU / 4 GiB / 4 GiB ephemeral requests, 4 CPU / 8 GiB /
+  # olympus-kvm: 1 pod (2 CPU / 4 GiB / 4 GiB ephemeral requests, 3 CPU / 8 GiB /
   # 15 GiB limits) and one /dev/kvm. No slack for a terminating pod on purpose:
   # a new KVM runner waits until the previous one is gone (it also waits for the
   # device, count 1 per node).
@@ -84,7 +84,7 @@ spec:
     pods: "1"
     requests.cpu: "2"
     requests.memory: 4Gi
-    limits.cpu: "4"
+    limits.cpu: "3"
     limits.memory: 8Gi
     requests.olympus.io/kvm: "1"
 ---

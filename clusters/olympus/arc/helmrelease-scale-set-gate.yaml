@@ -80,6 +80,12 @@ spec:
         # the chart's service account ("-no-permission") has no RBAC anyway.
         automountServiceAccountToken: false
         priorityClassName: ci-runner
+        # Hard wall-clock cap for the pod (olympus-sdk#390 review m1): a stuck job cannot
+        # hold a slot for days. The gate polls for up to 120 min; 150 min leaves margin. The kubelet kills the runner; ARC
+        # 0.15.0 then deletes the EphemeralRunner if a job was assigned (the job fails
+        # as "runner lost") or recreates the pod if none was, so the slot is freed.
+        activeDeadlineSeconds: 9000
+        enableServiceLinks: false
         securityContext:
           runAsNonRoot: true
           runAsUser: 1001          # `runner` user in the runner image (numeric: required by runAsNonRoot)
@@ -96,7 +102,15 @@ spec:
                 - matchExpressions:
                     - key: olympus.io/role
                       operator: DoesNotExist
-        # No topology spread: gate pods are tiny pollers, placement does not matter.
+        # Soft spread over the onodes so 8 gates do not pile onto one node next to
+        # runners (review m8). ScheduleAnyway: never blocks a gate from starting.
+        topologySpreadConstraints:
+          - maxSkew: 2
+            topologyKey: kubernetes.io/hostname
+            whenUnsatisfiable: ScheduleAnyway
+            labelSelector:
+              matchLabels:
+                olympus.io/ci-gate: "true"
         containers:
           - name: runner
             # Our runner image (Ubuntu 22.04 glibc baseline, CI toolchains, actions
