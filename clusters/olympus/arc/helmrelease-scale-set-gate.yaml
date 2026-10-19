@@ -34,7 +34,7 @@ spec:
     # after the "Preconditions before raising maxRunners" in README.md. The quota
     # allows 12 pods in arc-runners (4 runners + 8 gates). Same drain switch and
     # known issue #4715 as olympus-linux.
-    maxRunners: 0
+    maxRunners: 8
     # Explicit controller service account (no cluster lookup at render time).
     controllerServiceAccount:
       namespace: arc-system

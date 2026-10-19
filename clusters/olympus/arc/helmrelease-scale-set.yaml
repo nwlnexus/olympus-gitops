@@ -26,14 +26,14 @@ spec:
     githubConfigSecret: arc-github-app
     runnerGroup: olympus-ci
     minRunners: 0
-    # STAGED ROLLOUT: merged with 0 so the controller, listener, secret, quota
-    # and policies can be validated without any runner pod starting. Do NOT raise
-    # it before the "Preconditions before raising maxRunners" in README.md are
-    # done (node IPv6 link-local DROP, sshd hardening, kubelet reserves, UniFi rule).
-    # First target: 3 (the quota allows 4 pods); 4 only after observing etcd/node load.
+    # Raised from 0 to 3 on 2026-10-19 after every precondition in README.md was done
+    # and verified (node IPv6 link-local DROP + sshd hardening on all four nodes,
+    # kubelet reserves on the three onodes, UniFi policy node IPs -> Gateway ports
+    # 22/80/443/8443). The quota allows 4 pods; go to 4 only after observing etcd and
+    # node load (etcd_disk_wal_fsync_duration_seconds, see README.md).
     # Also the drain switch (README.md); known issue: raising it again from 0 can
     # leave queued jobs stuck until a new dispatch or a listener restart (#4715).
-    maxRunners: 0
+    maxRunners: 3
     # Explicit controller service account (no cluster lookup at render time).
     controllerServiceAccount:
       namespace: arc-system

@@ -63,7 +63,7 @@ repositories of the org. Its private key is readable via ESO in `arc-runners` (S
 controller's copy in `arc-system`. Anyone able to read Secrets in those namespaces can
 register runners org-wide. Keep RBAC on both namespaces tight.
 
-## Preconditions before raising maxRunners
+## Preconditions before raising maxRunners (ALL DONE 2026-10-19, kept for the record and for rebuilds)
 
 Review of PR #116 found isolation gaps that NetworkPolicy cannot close. None of the
 following is in this repo; all must be done (and the probes re-run) before `maxRunners > 0`:
