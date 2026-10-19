@@ -1,0 +1,47 @@
+# /dev/kvm device plugin for the `olympus-kvm` CI scale set (nwlnexus/olympus-sdk#390).
+#
+# The ONE privileged-PSA namespace of the CI setup, and on purpose a separate one:
+# a device plugin must mount host paths (the kubelet's device-plugin socket
+# directory and the /dev/kvm node), which `baseline` and `restricted` forbid. The
+# pod itself is NOT a privileged container (see daemonset.yaml: root but no
+# capabilities, no privilege escalation, read-only root fs, no network, no SA token).
+# Nothing else may run here. In exchange, the runner pods in arc-runners stay
+# under `restricted` and get /dev/kvm only through the extended resource
+# `olympus.io/kvm`.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kvm-device-plugin
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    # Keep the gap visible: every pod admitted here is reported against baseline.
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+---
+# One pod per labelled node; there are three onodes, so 3 is the ceiling.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: kvm-device-plugin
+  namespace: kvm-device-plugin
+spec:
+  hard:
+    pods: "3"
+    requests.cpu: 100m
+    requests.memory: 64Mi
+    limits.cpu: 300m
+    limits.memory: 192Mi
+    services: "0"
+    persistentvolumeclaims: "0"
+---
+# The plugin talks to the kubelet over a unix socket only. No pod network at all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: kvm-device-plugin
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

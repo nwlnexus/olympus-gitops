@@ -17,8 +17,11 @@
 # precondition (dynamic address, cannot be a NetworkPolicy exception).
 ---
 # ---------------------------------------------------------------------------
-# arc-runners: untrusted CI code. Ingress: denied entirely. Egress: DNS + the
-# PUBLIC internet only. Runner pods therefore cannot reach any cluster Service
+# arc-runners: untrusted CI code (all scale sets, including olympus-kvm: the VM
+# harness uses QEMU user-mode networking inside the pod, so the guest's traffic
+# leaves through the pod's own sockets and is subject to exactly these rules;
+# SSH/HTTP to the guest is on 127.0.0.1 inside the pod). Ingress: denied entirely.
+# Egress: DNS + the PUBLIC internet only. Runner pods therefore cannot reach any cluster Service
 # or Pod (10.42/16, 10.43/16), any node (192.168.253.0/24), the LAN (QNAP, UniFi),
 # the tailnet (100.64.0.0/10) or the link-local range (169.254.0.0/16).
 # NOTE: "public internet" is any public address (GitHub, crates.io, npm, ghcr.io
@@ -142,18 +145,3 @@ spec:
               - 100.64.0.0/10
               - 169.254.0.0/16
               - 127.0.0.0/8
----
-# ---------------------------------------------------------------------------
-# arc-runners-kvm: empty until olympus-sdk#390. Fail closed: deny everything;
-# #390 must add its own explicit rules (mirror the arc-runners policy).
-# ---------------------------------------------------------------------------
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: default-deny-all
-  namespace: arc-runners-kvm
-spec:
-  podSelector: {}
-  policyTypes:
-    - Ingress
-    - Egress

@@ -1,7 +1,11 @@
-# CI runners on the cluster (nwlnexus/olympus-sdk#383). Three namespaces:
-#   arc-system       controller + one listener pod per scale set
-#   arc-runners      ephemeral runner pods of the general `olympus-linux` scale set
-#   arc-runners-kvm  reserved for the KVM scale set (olympus-sdk#390); empty for now
+# CI runners on the cluster (nwlnexus/olympus-sdk#383). Two namespaces:
+#   arc-system   controller + one listener pod per scale set
+#   arc-runners  ephemeral runner pods of ALL scale sets (olympus-linux, olympus-gate,
+#                olympus-kvm): the controller watches only this namespace.
+# The former `arc-runners-kvm` placeholder is gone (olympus-sdk#390): the KVM scale
+# set needs no PSA exception (it gets /dev/kvm from the device plugin in
+# ../kvm-device-plugin as an extended resource), so it lives in arc-runners under
+# `restricted` like the others.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -25,18 +29,5 @@ metadata:
     # Runner pods run untrusted CI code: restricted is enforced (non-root, no
     # privilege escalation, all capabilities dropped, seccomp RuntimeDefault).
     pod-security.kubernetes.io/enforce: restricted
-    pod-security.kubernetes.io/audit: restricted
-    pod-security.kubernetes.io/warn: restricted
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: arc-runners-kvm
-  labels:
-    # The single documented PSA exception, pending olympus-sdk#390: KVM runner
-    # pods get /dev/kvm from a device plugin and may need more than `restricted`
-    # allows. Still baseline, so no privileged containers, hostPath or hostNetwork.
-    # Warn/audit on restricted keep the gap visible. Revisit in #390.
-    pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

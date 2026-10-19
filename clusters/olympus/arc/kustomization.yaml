@@ -11,3 +11,4 @@ resources:
   - helmrelease-controller.yaml
   - helmrelease-scale-set.yaml
   - helmrelease-scale-set-gate.yaml
+  - helmrelease-scale-set-kvm.yaml

@@ -1,0 +1,160 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  # The release name is also the runner scale set name, i.e. the `runs-on:` label.
+  # `olympus-kvm`: the VM suites (vm-tests.yml, `make vm-test`: throwaway QEMU VMs
+  # with KVM acceleration), nwlnexus/olympus-sdk#390. Lives in arc-runners (the
+  # controller watches only that namespace) under the same `restricted` PSA as the
+  # other sets: /dev/kvm comes from the device plugin (../kvm-device-plugin) as the
+  # extended resource `olympus.io/kvm`, not from privileges or hostPath.
+  name: olympus-kvm
+  namespace: arc-runners
+spec:
+  interval: 1h
+  # Chart pinned by digest through an OCIRepository (see helmrepository.yaml).
+  chartRef:
+    kind: OCIRepository
+    name: gha-runner-scale-set
+    namespace: arc-system
+  dependsOn:
+    - name: arc
+      namespace: arc-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    githubConfigUrl: https://github.com/nwlnexus
+    # Pre-defined Secret from externalsecret.yaml (GitHub App credentials).
+    githubConfigSecret: arc-github-app
+    runnerGroup: olympus-ci
+    minRunners: 0
+    # ONE VM job at a time. Three independent caps: this value, the quota
+    # `ci-runners-kvm` (1 pod, 1 olympus.io/kvm) and the device plugin's `count: 1`
+    # per labelled node. Raise only together with a second labelled node (README.md).
+    # Also the drain switch (README.md, known issue #4715 applies).
+    maxRunners: 1
+    # Explicit controller service account (no cluster lookup at render time).
+    controllerServiceAccount:
+      namespace: arc-system
+      name: arc-gha-rs-controller
+    # containerMode intentionally unset ("none"): jobs run directly in the runner
+    # container. No docker-in-docker, nothing privileged. Jobs needing Docker stay
+    # on hosted runners (spec R6).
+    listenerTemplate:
+      spec:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          seccompProfile:
+            type: RuntimeDefault
+        containers:
+          - name: listener
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+              limits:
+                cpu: 250m
+                memory: 128Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: olympus.io/role
+                      operator: DoesNotExist
+    template:
+      metadata:
+        labels:
+          # NOT olympus.io/ci-runner: the olympus-linux topology spread selects on that
+          # label, so the KVM pod must not count against (or skew) the runner spread.
+          olympus.io/ci-kvm: "true"
+      spec:
+        # The runner container does not talk to the Kubernetes API in this mode;
+        # the chart's service account ("-no-permission") has no RBAC anyway.
+        automountServiceAccountToken: false
+        # Same value as ci-runner (-1000, never preempts); a separate class only so
+        # the ResourceQuota can scope the KVM budget apart from the other sets
+        # (quota.yaml: ci-runners-kvm / ci-runners-non-kvm).
+        priorityClassName: ci-runner-kvm
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001          # `runner` user in the runner image (numeric: required by runAsNonRoot)
+          runAsGroup: 1001
+          fsGroup: 1001
+          # gid of the host `kvm` group (identical on all three onodes:
+          # `getent group kvm` -> kvm:x:994). The container runtime creates the
+          # injected /dev/kvm with the HOST owner/mode (root:994 0660), so uid 1001
+          # can open it only through this supplemental group. A new KVM node must
+          # have the same gid (README.md). Allowed by PSA `restricted`.
+          supplementalGroups: [994]
+          seccompProfile:
+            type: RuntimeDefault
+        # Only on nodes labelled for KVM CI (manual label, README.md). The device
+        # plugin runs only there too, so the extended resource exists only there;
+        # this affinity makes the intent explicit and gives a clear Pending reason.
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: olympus.io/kvm-ci
+                      operator: In
+                      values: ["true"]
+                    - key: olympus.io/role
+                      operator: DoesNotExist
+        containers:
+          - name: runner
+            # KVM variant of our runner image (Ubuntu 22.04, actions runner, user
+            # `runner` uid 1001, no sudo, plus qemu-system-x86, qemu-utils, openssh
+            # client, python3, curl), pinned by digest. Public package; built by
+            # ci/runner/build.sh (olympus-sdk#388/#406). Bump procedure: README.md.
+            image: ghcr.io/nwlnexus/olympus-ci-runner@sha256:85b326c967603e64df1a3a4deb245ce55264a335c3a2416ffac7c82034ded373
+            command: ["/home/runner/run.sh"]
+            # The VM (QEMU, default VM_CPUS=2 / VM_MEM=2048 in vms/harness/vm.sh) runs
+            # INSIDE this container, so its guest RAM counts against the memory
+            # limit. Measured on the cluster: see README.md (#390 evidence).
+            resources:
+              requests:
+                cpu: "2"
+                memory: 4Gi
+                ephemeral-storage: 4Gi
+                olympus.io/kvm: "1"
+              limits:
+                cpu: "4"
+                memory: 8Gi
+                ephemeral-storage: 15Gi
+                olympus.io/kvm: "1"
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+              # readOnlyRootFilesystem is NOT set: the runner writes its config,
+              # _diag logs and tool caches under /home/runner and the root fs is
+              # discarded with the (ephemeral) pod anyway. The work dir and /tmp are
+              # emptyDirs with size limits so a job cannot fill the node disk.
+              # VM disks (qcow2 overlays) live in the work dir (vms/.runs, removed
+              # after each suite); the Ubuntu cloud image cache (~/.cache/olympus-vm,
+              # about 600 MB, restored by actions/cache) is on the container's root fs.
+              # Both count against the 15Gi ephemeral limit. Nothing is shared between
+              # jobs (no node cache volume): no cache poisoning across jobs.
+            volumeMounts:
+              - name: work
+                mountPath: /home/runner/_work
+              - name: tmp
+                mountPath: /tmp
+        volumes:
+          - name: work
+            emptyDir:
+              sizeLimit: 12Gi
+          - name: tmp
+            emptyDir:
+              sizeLimit: 2Gi

@@ -1,0 +1,20 @@
+# /dev/kvm device plugin for the olympus-kvm CI scale set (nwlnexus/olympus-sdk#390).
+# Separate from `arc` on purpose: it is the only privileged-PSA namespace of the CI
+# setup, and it can be removed or drained independently (README in ../arc/).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kvm-device-plugin
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/kvm-device-plugin
+  prune: true
+  # A DaemonSet with 0 desired pods (no node labelled olympus.io/kvm-ci=true yet)
+  # is healthy, so waiting is safe; once a node is labelled, a broken plugin pod
+  # turns this Kustomization not-ready.
+  wait: true
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
