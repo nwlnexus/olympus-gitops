@@ -1,0 +1,145 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  # The release name is also the runner scale set name, i.e. the `runs-on:` label.
+  name: olympus-linux
+  namespace: arc-runners
+spec:
+  interval: 1h
+  # Chart pinned by digest through an OCIRepository (see helmrepository.yaml).
+  chartRef:
+    kind: OCIRepository
+    name: gha-runner-scale-set
+    namespace: arc-system
+  dependsOn:
+    - name: arc
+      namespace: arc-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    githubConfigUrl: https://github.com/nwlnexus
+    # Pre-defined Secret from externalsecret.yaml (GitHub App credentials).
+    githubConfigSecret: arc-github-app
+    runnerGroup: olympus-ci
+    minRunners: 0
+    # STAGED ROLLOUT: merged with 0 so the controller, listener, secret, quota
+    # and policies can be validated without any runner pod starting. Do NOT raise
+    # it before the "Preconditions before raising maxRunners" in README.md are
+    # done (node IPv6 link-local DROP, sshd hardening, kubelet reserves, UniFi rule).
+    # First target: 3 (the quota allows 4 pods); 4 only after observing etcd/node load.
+    # Also the drain switch (README.md); known issue: raising it again from 0 can
+    # leave queued jobs stuck until a new dispatch or a listener restart (#4715).
+    maxRunners: 0
+    # Explicit controller service account (no cluster lookup at render time).
+    controllerServiceAccount:
+      namespace: arc-system
+      name: arc-gha-rs-controller
+    # containerMode intentionally unset ("none"): jobs run directly in the runner
+    # container. No docker-in-docker, nothing privileged. Jobs needing Docker stay
+    # on hosted runners (spec R6).
+    listenerTemplate:
+      spec:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          seccompProfile:
+            type: RuntimeDefault
+        containers:
+          - name: listener
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+              limits:
+                cpu: 250m
+                memory: 128Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: olympus.io/role
+                      operator: DoesNotExist
+    template:
+      metadata:
+        labels:
+          olympus.io/ci-runner: "true"
+      spec:
+        # The runner container does not talk to the Kubernetes API in this mode;
+        # the chart's service account ("-no-permission") has no RBAC anyway.
+        automountServiceAccountToken: false
+        priorityClassName: ci-runner
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001          # `runner` user in the runner image (numeric: required by runAsNonRoot)
+          runAsGroup: 1001
+          fsGroup: 1001
+          seccompProfile:
+            type: RuntimeDefault
+        # Never on naraka-01 (tainted olympus.io/role=management-hub:NoSchedule; no
+        # toleration is added, and this affinity makes the intent explicit).
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: olympus.io/role
+                      operator: DoesNotExist
+        # Spread runners across the three onodes. Terminating pods are not counted
+        # by topology spread, so during churn up to 3 runners can briefly land on
+        # ONE node (3 x 4 CPU / 8 GiB limits = 12 CPU / 24 GiB of a 16 CPU / 27 GiB
+        # node): that is why maxRunners starts at 3 and kubelet reserves are a
+        # precondition (README.md).
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: kubernetes.io/hostname
+            whenUnsatisfiable: DoNotSchedule
+            labelSelector:
+              matchLabels:
+                olympus.io/ci-runner: "true"
+        containers:
+          - name: runner
+            # Our runner image (Ubuntu 22.04 glibc baseline, CI toolchains, actions
+            # runner 2.338.0, user `runner` uid 1001, no sudo), pinned by digest.
+            # Public package; built by ci/runner/build.sh (olympus-sdk#388/#406).
+            # Bump procedure: README.md.
+            image: ghcr.io/nwlnexus/olympus-ci-runner@sha256:7c28d033b1d3133fde7a991e3ee80d59f96c3a8d7635ded5bf510691abfd87bc
+            command: ["/home/runner/run.sh"]
+            resources:
+              requests:
+                cpu: "2"
+                memory: 4Gi
+                ephemeral-storage: 4Gi
+              limits:
+                cpu: "4"
+                memory: 8Gi
+                ephemeral-storage: 15Gi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+              # readOnlyRootFilesystem is NOT set: the runner writes its config,
+              # _diag logs and tool caches under /home/runner and the root fs is
+              # discarded with the (ephemeral) pod anyway. The work dir and /tmp are
+              # emptyDirs with size limits so a job cannot fill the node disk.
+            volumeMounts:
+              - name: work
+                mountPath: /home/runner/_work
+              - name: tmp
+                mountPath: /tmp
+        volumes:
+          - name: work
+            emptyDir:
+              sizeLimit: 12Gi
+          - name: tmp
+            emptyDir:
+              sizeLimit: 2Gi

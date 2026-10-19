@@ -1,0 +1,46 @@
+# Hard ceilings (spec section 5). Starting points; tune from observed usage.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ci-runners
+  namespace: arc-runners
+spec:
+  hard:
+    # Staged: first target is 3 runners (maxRunners), 4 pods leaves one for a
+    # terminating pod. Sized for 4 pods x (2 CPU / 4 GiB requests, 4 CPU / 8 GiB
+    # limits). The spec's final ceiling (6 pods, 24 CPU, 48 GiB) is deliberately NOT
+    # used until node reserves and monitoring are in place.
+    pods: "4"
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    requests.ephemeral-storage: 16Gi
+    limits.ephemeral-storage: 60Gi
+    persistentvolumeclaims: "0"    # runners are stateless (emptyDir only)
+    services: "0"
+    secrets: "20"
+---
+# Controller + listener(s) only; small.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: arc-system
+  namespace: arc-system
+spec:
+  hard:
+    pods: "10"                     # controller + one listener per scale set (olympus-linux, later olympus-kvm)
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi
+---
+# arc-runners-kvm stays empty until nwlnexus/olympus-sdk#390.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: no-pods-until-390
+  namespace: arc-runners-kvm
+spec:
+  hard:
+    pods: "0"
