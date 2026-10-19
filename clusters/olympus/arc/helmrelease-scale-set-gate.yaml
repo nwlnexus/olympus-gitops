@@ -103,7 +103,7 @@ spec:
             # runner 2.338.0, user `runner` uid 1001, no sudo), pinned by digest.
             # Public package; built by ci/runner/build.sh (olympus-sdk#388/#406).
             # Bump procedure: README.md.
-            image: ghcr.io/nwlnexus/olympus-ci-runner@sha256:7c28d033b1d3133fde7a991e3ee80d59f96c3a8d7635ded5bf510691abfd87bc
+            image: ghcr.io/nwlnexus/olympus-ci-runner@sha256:3173f04c4f9ae2a2b635f28bfa83a228e905021a6b1dc5818b7ef115d7100c16
             command: ["/home/runner/run.sh"]
             resources:
               requests:
