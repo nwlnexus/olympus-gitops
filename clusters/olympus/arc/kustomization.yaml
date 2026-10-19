@@ -10,3 +10,4 @@ resources:
   - ocirepository.yaml
   - helmrelease-controller.yaml
   - helmrelease-scale-set.yaml
+  - helmrelease-scale-set-gate.yaml
