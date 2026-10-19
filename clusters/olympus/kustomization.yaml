@@ -27,3 +27,4 @@ resources:
   - flux-kustomizations/ingress-discovery.yaml
   - flux-kustomizations/system-upgrade.yaml
   - flux-kustomizations/arc.yaml
+  - flux-kustomizations/kvm-device-plugin.yaml

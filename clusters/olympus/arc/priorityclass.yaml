@@ -9,4 +9,17 @@ metadata:
 value: -1000
 preemptionPolicy: Never
 globalDefault: false
-description: "Ephemeral CI runner pods (arc-runners*): lowest priority, never preempt other workloads."
+description: "Ephemeral CI runner pods (arc-runners): lowest priority, never preempt other workloads."
+---
+# The KVM scale set (olympus-kvm, olympus-sdk#390): identical value and policy to
+# ci-runner. It exists only so ResourceQuota can tell KVM pods apart
+# (scopeSelector PriorityClass; quota.yaml) and give them their own budget without
+# loosening the budget of olympus-linux / olympus-gate.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: ci-runner-kvm
+value: -1000
+preemptionPolicy: Never
+globalDefault: false
+description: "Ephemeral KVM CI runner pods (olympus-kvm): same as ci-runner; separate class for quota scoping."

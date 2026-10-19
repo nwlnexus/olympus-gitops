@@ -1,0 +1,37 @@
+# Admit only the pinned device-plugin image in the privileged kvm-device-plugin
+# namespace: no other image, no init or ephemeral containers (kubectl debug), so the
+# privileged-PSA namespace cannot be reused for anything else. Keep the digest in
+# step with daemonset.yaml.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kvm-device-plugin-image-pin
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kvm-device-plugin
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods", "pods/ephemeralcontainers"]
+  variables:
+    - name: image
+      expression: "'ghcr.io/nwlnexus/generic-device-plugin@sha256:66c8d5c270eb2b721f1064c549b9b7898152a6d2f0163380a5d37dc7636c20ff'"
+  validations:
+    - expression: "object.spec.containers.all(c, c.image == variables.image)"
+      message: "kvm-device-plugin: only the pinned generic-device-plugin image is allowed"
+    - expression: "!has(object.spec.initContainers) || size(object.spec.initContainers) == 0"
+      message: "kvm-device-plugin: init containers are not allowed"
+    - expression: "!has(object.spec.ephemeralContainers) || size(object.spec.ephemeralContainers) == 0"
+      message: "kvm-device-plugin: ephemeral (debug) containers are not allowed"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: kvm-device-plugin-image-pin
+spec:
+  policyName: kvm-device-plugin-image-pin
+  validationActions: ["Deny"]

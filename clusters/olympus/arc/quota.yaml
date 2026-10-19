@@ -1,4 +1,23 @@
 # Hard ceilings (spec section 5). Starting points; tune from observed usage.
+#
+# arc-runners holds three scale sets. Three quotas, so adding olympus-kvm
+# (olympus-sdk#390) does NOT loosen the budget of the other two:
+#   ci-runners          the namespace total = non-KVM budget + one KVM pod
+#   ci-runners-non-kvm  every pod whose priorityClassName is NOT ci-runner-kvm
+#                       (olympus-linux, olympus-gate, and any pod without a class):
+#                       exactly the pod/CPU/memory budget these sets had before #390,
+#                       and 0 KVM devices
+#   ci-runners-kvm      pods with priorityClassName ci-runner-kvm (olympus-kvm only):
+#                       one pod, one /dev/kvm
+# A PriorityClass scope is the only quota scope that can tell pods of different
+# scale sets apart; verified on the cluster (2026-10-19, server dry-run) that
+# `NotIn` also matches pods with no priorityClassName at all, so nothing escapes.
+# LIMITATION: the API server rejects ephemeral-storage in a scoped quota
+# ("unsupported scope applied to resource"), so ephemeral storage is capped only by
+# the total below (18/76 GiB before #390, now 22/91 GiB = + one KVM pod's 4/15 GiB)
+# and per container by the LimitRange (15 GiB). Pods, CPU, memory and /dev/kvm are
+# split exactly; for disk, the non-KVM sets stay bounded by their pod counts x
+# per-pod limits, only the namespace sum gained one KVM pod's share.
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -6,24 +25,68 @@ metadata:
   namespace: arc-runners
 spec:
   hard:
-    # Staged: first target is 3 runners (maxRunners), 4 pods leaves one for a
-    # terminating pod. Runner budget unchanged: 4 pods x (2 CPU / 4 GiB requests,
-    # 4 CPU / 8 GiB limits, 4 / 15 GiB ephemeral). The spec's final ceiling (6 pods,
-    # 24 CPU, 48 GiB) is deliberately NOT used until node reserves and monitoring exist.
-    # On top of it, up to 8 olympus-gate pods (50m / 128Mi / 256Mi requests,
-    # 500m / 512Mi / 2Gi limits): +0.4 CPU, +1Gi memory, +2Gi ephemeral requests;
-    # +4 CPU, +4Gi memory, +16Gi ephemeral limits. maxRunners caps gates at 8, so
-    # the runner budget above always remains available to the 4 runner pods.
+    # = ci-runners-non-kvm + ci-runners-kvm (keep the sums in step when tuning).
+    pods: "13"                     # 4 runners + 8 gates + 1 KVM runner
+    requests.cpu: "10500m"
+    requests.memory: 21Gi
+    limits.cpu: "23"
+    limits.memory: 44Gi
+    requests.ephemeral-storage: 22Gi
+    limits.ephemeral-storage: 91Gi
+    requests.olympus.io/kvm: "1"
+    persistentvolumeclaims: "0"    # runners are stateless (emptyDir only)
+    services: "0"
+    secrets: "32"                  # one JIT-config Secret per runner/gate/KVM pod + the synced app Secret
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ci-runners-non-kvm
+  namespace: arc-runners
+spec:
+  # Unchanged budget of olympus-linux + olympus-gate (before #390 this was the
+  # namespace quota). Runner budget: 4 pods x (2 CPU / 4 GiB requests,
+  # 4 CPU / 8 GiB limits, 4 / 15 GiB ephemeral). The spec's final ceiling (6 pods,
+  # 24 CPU, 48 GiB) is deliberately NOT used until node reserves and monitoring exist.
+  # On top of it, up to 8 olympus-gate pods (50m / 128Mi / 256Mi requests,
+  # 500m / 512Mi / 2Gi limits): +0.4 CPU, +1Gi memory, +2Gi ephemeral requests;
+  # +4 CPU, +4Gi memory, +16Gi ephemeral limits. maxRunners caps gates at 8, so
+  # the runner budget above always remains available to the 4 runner pods.
+  scopeSelector:
+    matchExpressions:
+      - scopeName: PriorityClass
+        operator: NotIn
+        values: ["ci-runner-kvm"]
+  hard:
     pods: "12"                     # 4 runners + 8 gates
     requests.cpu: "8500m"
     requests.memory: 17Gi
     limits.cpu: "20"
     limits.memory: 36Gi
-    requests.ephemeral-storage: 18Gi
-    limits.ephemeral-storage: 76Gi
-    persistentvolumeclaims: "0"    # runners are stateless (emptyDir only)
-    services: "0"
-    secrets: "30"                  # one JIT-config Secret per runner/gate pod + the synced app Secret
+    requests.olympus.io/kvm: "0"   # only olympus-kvm pods may hold /dev/kvm
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ci-runners-kvm
+  namespace: arc-runners
+spec:
+  # olympus-kvm: 1 pod (2 CPU / 4 GiB / 4 GiB ephemeral requests, 3 CPU / 8 GiB /
+  # 15 GiB limits) and one /dev/kvm. No slack for a terminating pod on purpose:
+  # a new KVM runner waits until the previous one is gone (it also waits for the
+  # device, count 1 per node).
+  scopeSelector:
+    matchExpressions:
+      - scopeName: PriorityClass
+        operator: In
+        values: ["ci-runner-kvm"]
+  hard:
+    pods: "1"
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "3"
+    limits.memory: 8Gi
+    requests.olympus.io/kvm: "1"
 ---
 # Controller + listener(s) only; small.
 apiVersion: v1
@@ -33,18 +96,8 @@ metadata:
   namespace: arc-system
 spec:
   hard:
-    pods: "10"                     # controller + one listener per scale set (olympus-linux, olympus-gate, later olympus-kvm)
+    pods: "10"                     # controller + one listener per scale set (olympus-linux, olympus-gate, olympus-kvm)
     requests.cpu: "2"
     requests.memory: 2Gi
     limits.cpu: "4"
     limits.memory: 4Gi
----
-# arc-runners-kvm stays empty until nwlnexus/olympus-sdk#390.
-apiVersion: v1
-kind: ResourceQuota
-metadata:
-  name: no-pods-until-390
-  namespace: arc-runners-kvm
-spec:
-  hard:
-    pods: "0"

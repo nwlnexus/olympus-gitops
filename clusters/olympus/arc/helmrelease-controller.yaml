@@ -31,8 +31,7 @@ spec:
       logLevel: info
       # Watch only the runner namespace: the chart then creates namespaced Roles
       # instead of the cluster-wide ClusterRole. Consequence: scale sets must live
-      # in arc-runners. The KVM scale set (#390) must either also use arc-runners
-      # or get a second controller.
+      # in arc-runners (all three do, including olympus-kvm, #390).
       watchSingleNamespace: arc-runners
     # Metrics are intentionally NOT enabled: the observability stack has no scrape
     # job for them yet and arc-system allows no ingress. Monitoring is
