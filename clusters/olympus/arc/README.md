@@ -134,7 +134,7 @@ replace the digest in `helmrelease-scale-set.yaml` in one PR. Never use a tag.
 
 - KVM scale set (`olympus-kvm`, #390; `arc-runners-kvm` is empty with a 0-pod quota and
   deny-all policy). Its image variant digest is
-  `ghcr.io/nwlnexus/olympus-ci-runner@sha256:b024514b2ce7a04d5483b8199081cf5e7c910dfd9adc6319afa4f723112cf137`.
+  `ghcr.io/nwlnexus/olympus-ci-runner@sha256:85b326c967603e64df1a3a4deb245ce55264a335c3a2416ffac7c82034ded373`.
 - Controller/listener metrics, dashboards, alerts: #392 (no scrape job exists; arc-system allows no ingress).
 - Egress allowlist: runners can reach any public IP, so a malicious job can exfiltrate
   anything it can read (repository secrets exposed to the job). Standard NetworkPolicy
