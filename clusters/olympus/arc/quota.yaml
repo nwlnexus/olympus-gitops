@@ -7,19 +7,23 @@ metadata:
 spec:
   hard:
     # Staged: first target is 3 runners (maxRunners), 4 pods leaves one for a
-    # terminating pod. Sized for 4 pods x (2 CPU / 4 GiB requests, 4 CPU / 8 GiB
-    # limits). The spec's final ceiling (6 pods, 24 CPU, 48 GiB) is deliberately NOT
-    # used until node reserves and monitoring are in place.
-    pods: "4"
-    requests.cpu: "8"
-    requests.memory: 16Gi
-    limits.cpu: "16"
-    limits.memory: 32Gi
-    requests.ephemeral-storage: 16Gi
-    limits.ephemeral-storage: 60Gi
+    # terminating pod. Runner budget unchanged: 4 pods x (2 CPU / 4 GiB requests,
+    # 4 CPU / 8 GiB limits, 4 / 15 GiB ephemeral). The spec's final ceiling (6 pods,
+    # 24 CPU, 48 GiB) is deliberately NOT used until node reserves and monitoring exist.
+    # On top of it, up to 8 olympus-gate pods (50m / 128Mi / 256Mi requests,
+    # 500m / 512Mi / 2Gi limits): +0.4 CPU, +1Gi memory, +2Gi ephemeral requests;
+    # +4 CPU, +4Gi memory, +16Gi ephemeral limits. maxRunners caps gates at 8, so
+    # the runner budget above always remains available to the 4 runner pods.
+    pods: "12"                     # 4 runners + 8 gates
+    requests.cpu: "8500m"
+    requests.memory: 17Gi
+    limits.cpu: "20"
+    limits.memory: 36Gi
+    requests.ephemeral-storage: 18Gi
+    limits.ephemeral-storage: 76Gi
     persistentvolumeclaims: "0"    # runners are stateless (emptyDir only)
     services: "0"
-    secrets: "20"
+    secrets: "30"                  # one JIT-config Secret per runner/gate pod + the synced app Secret
 ---
 # Controller + listener(s) only; small.
 apiVersion: v1
@@ -29,7 +33,7 @@ metadata:
   namespace: arc-system
 spec:
   hard:
-    pods: "10"                     # controller + one listener per scale set (olympus-linux, later olympus-kvm)
+    pods: "10"                     # controller + one listener per scale set (olympus-linux, olympus-gate, later olympus-kvm)
     requests.cpu: "2"
     requests.memory: 2Gi
     limits.cpu: "4"

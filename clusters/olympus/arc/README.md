@@ -15,12 +15,33 @@ preconditions below.
 |------|---------|
 | `namespace.yaml` | `arc-system` (controller + listeners), `arc-runners` (runner pods, PSA `restricted`), `arc-runners-kvm` (empty, baseline, documented PSA exception pending #390) |
 | `priorityclass.yaml` | `ci-runner`, value -1000, `preemptionPolicy: Never` (below every other workload) |
-| `quota.yaml`, `limitrange.yaml` | hard ceilings (4 pods; 8 CPU / 16 GiB requests, 16 CPU / 32 GiB limits) and default requests/limits for every container; `arc-runners-kvm` quota is 0 pods |
+| `quota.yaml`, `limitrange.yaml` | hard ceilings (12 pods: 4 runners + 8 gates; 8.5 CPU / 17 GiB requests, 20 CPU / 36 GiB limits) and default requests/limits for every container; `arc-runners-kvm` quota is 0 pods |
 | `networkpolicy.yaml` | default-deny ingress; runner egress = DNS + public internet only (no IPv4 cluster, node, LAN or tailnet addresses); controller/listener egress adds the API server only |
 | `externalsecret.yaml` | `arc-github-app` Secret (GitHub App credentials) from 1Password via ESO |
 | `ocirepository.yaml` | both charts pinned by digest (`ghcr.io/actions/actions-runner-controller-charts`) |
 | `helmrelease-controller.yaml` | `gha-runner-scale-set-controller` (release `arc`, CRDs `CreateReplace`, `watchSingleNamespace: arc-runners`, image pinned by digest) |
 | `helmrelease-scale-set.yaml` | `gha-runner-scale-set` release `olympus-linux` (`runs-on: olympus-linux`), no container mode |
+| `helmrelease-scale-set-gate.yaml` | scale set `olympus-gate` (`runs-on: olympus-gate`), tiny pods for the CI gate poller |
+
+## Scale sets
+
+All in `arc-runners`, same chart pin, same GitHub App Secret and runner group `olympus-ci`,
+same hardening (restricted, uid 1001, no SA token, `ci-runner` priority, our runner image by digest).
+Both are staged at `maxRunners: 0`; raise `olympus-linux` (first target 3) and `olympus-gate` (8) together.
+
+| Scale set | For | Pods | Per pod (requests / limits) |
+|-----------|-----|------|------------------------------|
+| `olympus-linux` | CI jobs (lint, test, build) | max 4 | 2 CPU, 4 GiB / 4 CPU, 8 GiB; spread over the onodes via label `olympus.io/ci-runner` |
+| `olympus-gate` | the CI gate workflow: a poller (bash, gh, jq) that waits up to 120 min for sibling workflows | max 8 | 50m, 128Mi, 256Mi ephemeral / 500m, 512Mi, 2Gi; label `olympus.io/ci-gate`, no spread |
+| `olympus-kvm` (later, #390) | VM suites | 1 | see #390 |
+
+The gate has its own pool on purpose: if it shared the 3 `olympus-linux` slots, three open
+PRs would each hold a slot while waiting for jobs that can never be scheduled (deadlock).
+The `arc-runners` quota (12 pods, requests 8.5 CPU / 17 GiB, limits 20 CPU / 36 GiB) is the
+runner budget plus the gate budget. NetworkPolicies and the LimitRange select/apply to the
+whole namespace, so gate pods get the same isolation. The controller (`watchSingleNamespace:
+arc-runners`) serves any number of scale sets in that namespace; each adds one listener pod
+in `arc-system` (quota 10 pods is enough for the controller and 2 to 3 listeners).
 
 Charts are `0.15.0` (controller and scale set must always be bumped together; update
 tag and digest of both OCIRepository objects). `watchSingleNamespace` removes the
@@ -94,7 +115,8 @@ alerts in #392 forward before raising maxRunners.
   back to the hosted label (`ubuntu-latest`).
 - Removal, in TWO steps (removing everything at once deadlocks: the controller is
   deleted before it can remove the scale set's finalizers):
-  1. PR removing only `helmrelease-scale-set.yaml` (and its line in `kustomization.yaml`); wait until
+  1. PR removing BOTH scale-set releases (`helmrelease-scale-set.yaml` and
+     `helmrelease-scale-set-gate.yaml`, and their lines in `kustomization.yaml`); wait until
      `kubectl -n arc-runners get autoscalingrunnerset` is empty.
   2. PR removing the rest (delete `flux-kustomizations/arc.yaml` and its line in
      `../kustomization.yaml`; `prune: true` removes the app).

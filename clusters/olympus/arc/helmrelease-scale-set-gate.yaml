@@ -1,0 +1,137 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  # The release name is also the runner scale set name, i.e. the `runs-on:` label.
+  # `olympus-gate`: a SEPARATE pool for the CI gate workflow, a pure poller
+  # (bash + gh + jq) that waits up to 120 min for sibling workflows. It must not share
+  # the olympus-linux slots: with 3 slots, three open PRs would each hold a slot
+  # waiting for jobs that can never get one (deadlock). Tiny pods, own pool.
+  name: olympus-gate
+  namespace: arc-runners
+spec:
+  interval: 1h
+  # Same chart, same OCIRepository pin as olympus-linux (see ocirepository.yaml).
+  chartRef:
+    kind: OCIRepository
+    name: gha-runner-scale-set
+    namespace: arc-system
+  dependsOn:
+    - name: arc
+      namespace: arc-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    githubConfigUrl: https://github.com/nwlnexus
+    # Pre-defined Secret from externalsecret.yaml (GitHub App credentials).
+    githubConfigSecret: arc-github-app
+    runnerGroup: olympus-ci
+    minRunners: 0
+    # STAGED like olympus-linux: merged at 0. Raise to 8 TOGETHER with olympus-linux,
+    # after the "Preconditions before raising maxRunners" in README.md. The quota
+    # allows 12 pods in arc-runners (4 runners + 8 gates). Same drain switch and
+    # known issue #4715 as olympus-linux.
+    maxRunners: 0
+    # Explicit controller service account (no cluster lookup at render time).
+    controllerServiceAccount:
+      namespace: arc-system
+      name: arc-gha-rs-controller
+    # containerMode intentionally unset ("none"): jobs run directly in the runner
+    # container. No docker-in-docker, nothing privileged. Jobs needing Docker stay
+    # on hosted runners (spec R6).
+    listenerTemplate:
+      spec:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          seccompProfile:
+            type: RuntimeDefault
+        containers:
+          - name: listener
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+              limits:
+                cpu: 250m
+                memory: 128Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: olympus.io/role
+                      operator: DoesNotExist
+    template:
+      metadata:
+        labels:
+          # NOT olympus.io/ci-runner: the olympus-linux topology spread selects on that
+          # label, so gate pods must not count against (or skew) the runner spread.
+          olympus.io/ci-gate: "true"
+      spec:
+        # The runner container does not talk to the Kubernetes API in this mode;
+        # the chart's service account ("-no-permission") has no RBAC anyway.
+        automountServiceAccountToken: false
+        priorityClassName: ci-runner
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001          # `runner` user in the runner image (numeric: required by runAsNonRoot)
+          runAsGroup: 1001
+          fsGroup: 1001
+          seccompProfile:
+            type: RuntimeDefault
+        # Never on naraka-01 (tainted olympus.io/role=management-hub:NoSchedule; no
+        # toleration is added, and this affinity makes the intent explicit).
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: olympus.io/role
+                      operator: DoesNotExist
+        # No topology spread: gate pods are tiny pollers, placement does not matter.
+        containers:
+          - name: runner
+            # Our runner image (Ubuntu 22.04 glibc baseline, CI toolchains, actions
+            # runner 2.338.0, user `runner` uid 1001, no sudo), pinned by digest.
+            # Public package; built by ci/runner/build.sh (olympus-sdk#388/#406).
+            # Bump procedure: README.md.
+            image: ghcr.io/nwlnexus/olympus-ci-runner@sha256:7c28d033b1d3133fde7a991e3ee80d59f96c3a8d7635ded5bf510691abfd87bc
+            command: ["/home/runner/run.sh"]
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+                ephemeral-storage: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+                ephemeral-storage: 2Gi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+              # readOnlyRootFilesystem is NOT set: the runner writes its config,
+              # _diag logs and tool caches under /home/runner and the root fs is
+              # discarded with the (ephemeral) pod anyway. The work dir and /tmp are
+              # small emptyDirs (1Gi + 256Mi, inside the 2Gi ephemeral limit).
+            volumeMounts:
+              - name: work
+                mountPath: /home/runner/_work
+              - name: tmp
+                mountPath: /tmp
+        volumes:
+          - name: work
+            emptyDir:
+              sizeLimit: 1Gi
+          - name: tmp
+            emptyDir:
+              sizeLimit: 256Mi
