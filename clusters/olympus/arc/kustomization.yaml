@@ -7,6 +7,6 @@ resources:
   - limitrange.yaml
   - networkpolicy.yaml
   - externalsecret.yaml
-  - helmrepository.yaml
+  - ocirepository.yaml
   - helmrelease-controller.yaml
   - helmrelease-scale-set.yaml

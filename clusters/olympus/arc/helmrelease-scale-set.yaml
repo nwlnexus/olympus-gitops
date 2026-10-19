@@ -6,15 +6,11 @@ metadata:
   namespace: arc-runners
 spec:
   interval: 1h
-  chart:
-    spec:
-      chart: gha-runner-scale-set
-      # pinned: must always equal the gha-runner-scale-set-controller version.
-      version: "0.15.0"
-      sourceRef:
-        kind: HelmRepository
-        name: actions-runner-controller
-        namespace: arc-system
+  # Chart pinned by digest through an OCIRepository (see helmrepository.yaml).
+  chartRef:
+    kind: OCIRepository
+    name: gha-runner-scale-set
+    namespace: arc-system
   dependsOn:
     - name: arc
       namespace: arc-system
@@ -30,8 +26,14 @@ spec:
     githubConfigSecret: arc-github-app
     runnerGroup: olympus-ci
     minRunners: 0
-    # Drain/fallback: set to 0 to stop starting runners (see README.md).
-    maxRunners: 4
+    # STAGED ROLLOUT: merged with 0 so the controller, listener, secret, quota
+    # and policies can be validated without any runner pod starting. Do NOT raise
+    # it before the "Preconditions before raising maxRunners" in README.md are
+    # done (node IPv6 link-local DROP, sshd hardening, kubelet reserves, UniFi rule).
+    # First target: 3 (the quota allows 4 pods); 4 only after observing etcd/node load.
+    # Also the drain switch (README.md); known issue: raising it again from 0 can
+    # leave queued jobs stuck until a new dispatch or a listener restart (#4715).
+    maxRunners: 0
     # Explicit controller service account (no cluster lookup at render time).
     controllerServiceAccount:
       namespace: arc-system
@@ -78,7 +80,7 @@ spec:
         priorityClassName: ci-runner
         securityContext:
           runAsNonRoot: true
-          runAsUser: 1001          # `runner` user in the upstream image (numeric: required by runAsNonRoot)
+          runAsUser: 1001          # `runner` user in the runner image (numeric: required by runAsNonRoot)
           runAsGroup: 1001
           fsGroup: 1001
           seccompProfile:
@@ -92,8 +94,11 @@ spec:
                 - matchExpressions:
                     - key: olympus.io/role
                       operator: DoesNotExist
-        # Spread runners across the three onodes: with maxRunners 4, at most 2 per
-        # node, i.e. <= 8 CPU requested / 16 GiB limit per 16 CPU / 27 GiB node.
+        # Spread runners across the three onodes. Terminating pods are not counted
+        # by topology spread, so during churn up to 3 runners can briefly land on
+        # ONE node (3 x 4 CPU / 8 GiB limits = 12 CPU / 24 GiB of a 16 CPU / 27 GiB
+        # node): that is why maxRunners starts at 3 and kubelet reserves are a
+        # precondition (README.md).
         topologySpreadConstraints:
           - maxSkew: 1
             topologyKey: kubernetes.io/hostname
@@ -103,11 +108,11 @@ spec:
                 olympus.io/ci-runner: "true"
         containers:
           - name: runner
-            # TEMPORARY placeholder: the upstream runner image (Ubuntu 24.04 based).
-            # nwlnexus/olympus-sdk#388 replaces it with our own Ubuntu 22.04 image,
-            # pinned by digest, with the CI toolchains. DO NOT use this placeholder
-            # for release builds (glibc baseline must be 22.04).
-            image: ghcr.io/actions/actions-runner:2.338.0@sha256:4ffadc0002b2581327e06101fc8c06cd189232baf79fe561fac9caeb76f5e807
+            # Our runner image (Ubuntu 22.04 glibc baseline, CI toolchains, actions
+            # runner 2.338.0, user `runner` uid 1001, no sudo), pinned by digest.
+            # Public package; built by ci/runner/build.sh (olympus-sdk#388/#406).
+            # Bump procedure: README.md.
+            image: ghcr.io/nwlnexus/olympus-ci-runner@sha256:7c28d033b1d3133fde7a991e3ee80d59f96c3a8d7635ded5bf510691abfd87bc
             command: ["/home/runner/run.sh"]
             resources:
               requests:

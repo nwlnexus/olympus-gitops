@@ -6,8 +6,15 @@
 # Cluster facts (verified 2026-10-19): IPv4-only; pod CIDR 10.42.0.0/16 (per-node /24),
 # service CIDR 10.43.0.0/16 (kube-dns 10.43.0.10, kubernetes 10.43.0.1), nodes
 # 192.168.253.7/.8/.9 (onodes) and .14 (naraka-01), API VIP 192.168.253.2 (kube-vip).
-# Because the cluster is single-stack IPv4 there are no IPv6 rules; if IPv6/dual-stack
-# is ever enabled, add ::/0 exceptions for fc00::/7, fe80::/10 and ::1/128 here.
+#
+# IPv6 CAVEAT (verified by review): the cluster is single-stack IPv4 but every pod
+# and the node's cni0 still carry fe80:: link-local addresses, and kube-router
+# programs only IPv4 rules. Pods can therefore reach node services and same-node
+# pods over IPv6 link-local WITHOUT any NetworkPolicy being involved. This cannot
+# be fixed here; it is closed at node level (ip6tables DROP on cni0 INPUT/FORWARD,
+# managed in olympus-infra) and is a precondition for raising maxRunners above 0
+# (README.md). The UniFi gateway's WAN address is likewise a node/network-level
+# precondition (dynamic address, cannot be a NetworkPolicy exception).
 ---
 # ---------------------------------------------------------------------------
 # arc-runners: untrusted CI code. Ingress: denied entirely. Egress: DNS + the

@@ -1,0 +1,27 @@
+# Both charts are pinned by content digest (ref.digest wins over ref.tag; the tag
+# documents the version). Controller and scale set versions must always match.
+# Bump: `helm pull oci://ghcr.io/actions/actions-runner-controller-charts/<chart> --version X`
+# prints the digest; update tag and digest of BOTH objects in one PR.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: gha-runner-scale-set-controller
+  namespace: arc-system
+spec:
+  interval: 1h
+  url: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+  ref:
+    tag: "0.15.0"
+    digest: sha256:20a369215b8c2ed981c4c0c75e56e6009564d51fffcbbd314d5da0ef82de253a
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: gha-runner-scale-set
+  namespace: arc-system
+spec:
+  interval: 1h
+  url: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+  ref:
+    tag: "0.15.0"
+    digest: sha256:bdfdad17cf8e45ae064c73ed6764f0c75d4bf71a6e2912e6363a43d6dfc787de
