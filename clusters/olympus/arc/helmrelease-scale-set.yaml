@@ -1,0 +1,140 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  # The release name is also the runner scale set name, i.e. the `runs-on:` label.
+  name: olympus-linux
+  namespace: arc-runners
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: gha-runner-scale-set
+      # pinned: must always equal the gha-runner-scale-set-controller version.
+      version: "0.15.0"
+      sourceRef:
+        kind: HelmRepository
+        name: actions-runner-controller
+        namespace: arc-system
+  dependsOn:
+    - name: arc
+      namespace: arc-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    githubConfigUrl: https://github.com/nwlnexus
+    # Pre-defined Secret from externalsecret.yaml (GitHub App credentials).
+    githubConfigSecret: arc-github-app
+    runnerGroup: olympus-ci
+    minRunners: 0
+    # Drain/fallback: set to 0 to stop starting runners (see README.md).
+    maxRunners: 4
+    # Explicit controller service account (no cluster lookup at render time).
+    controllerServiceAccount:
+      namespace: arc-system
+      name: arc-gha-rs-controller
+    # containerMode intentionally unset ("none"): jobs run directly in the runner
+    # container. No docker-in-docker, nothing privileged. Jobs needing Docker stay
+    # on hosted runners (spec R6).
+    listenerTemplate:
+      spec:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          seccompProfile:
+            type: RuntimeDefault
+        containers:
+          - name: listener
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+              limits:
+                cpu: 250m
+                memory: 128Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: olympus.io/role
+                      operator: DoesNotExist
+    template:
+      metadata:
+        labels:
+          olympus.io/ci-runner: "true"
+      spec:
+        # The runner container does not talk to the Kubernetes API in this mode;
+        # the chart's service account ("-no-permission") has no RBAC anyway.
+        automountServiceAccountToken: false
+        priorityClassName: ci-runner
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001          # `runner` user in the upstream image (numeric: required by runAsNonRoot)
+          runAsGroup: 1001
+          fsGroup: 1001
+          seccompProfile:
+            type: RuntimeDefault
+        # Never on naraka-01 (tainted olympus.io/role=management-hub:NoSchedule; no
+        # toleration is added, and this affinity makes the intent explicit).
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: olympus.io/role
+                      operator: DoesNotExist
+        # Spread runners across the three onodes: with maxRunners 4, at most 2 per
+        # node, i.e. <= 8 CPU requested / 16 GiB limit per 16 CPU / 27 GiB node.
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: kubernetes.io/hostname
+            whenUnsatisfiable: DoNotSchedule
+            labelSelector:
+              matchLabels:
+                olympus.io/ci-runner: "true"
+        containers:
+          - name: runner
+            # TEMPORARY placeholder: the upstream runner image (Ubuntu 24.04 based).
+            # nwlnexus/olympus-sdk#388 replaces it with our own Ubuntu 22.04 image,
+            # pinned by digest, with the CI toolchains. DO NOT use this placeholder
+            # for release builds (glibc baseline must be 22.04).
+            image: ghcr.io/actions/actions-runner:2.338.0@sha256:4ffadc0002b2581327e06101fc8c06cd189232baf79fe561fac9caeb76f5e807
+            command: ["/home/runner/run.sh"]
+            resources:
+              requests:
+                cpu: "2"
+                memory: 4Gi
+                ephemeral-storage: 4Gi
+              limits:
+                cpu: "4"
+                memory: 8Gi
+                ephemeral-storage: 15Gi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+              # readOnlyRootFilesystem is NOT set: the runner writes its config,
+              # _diag logs and tool caches under /home/runner and the root fs is
+              # discarded with the (ephemeral) pod anyway. The work dir and /tmp are
+              # emptyDirs with size limits so a job cannot fill the node disk.
+            volumeMounts:
+              - name: work
+                mountPath: /home/runner/_work
+              - name: tmp
+                mountPath: /tmp
+        volumes:
+          - name: work
+            emptyDir:
+              sizeLimit: 12Gi
+          - name: tmp
+            emptyDir:
+              sizeLimit: 2Gi

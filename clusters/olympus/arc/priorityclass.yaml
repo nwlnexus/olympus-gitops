@@ -1,0 +1,12 @@
+# CI runner pods rank below every other workload on the cluster (existing
+# classes: system-node-critical, system-cluster-critical; all other pods are 0),
+# so the scheduler evicts/preempts CI first. preemptionPolicy: Never means a
+# waiting CI pod never evicts anything else to make room for itself.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: ci-runner
+value: -1000
+preemptionPolicy: Never
+globalDefault: false
+description: "Ephemeral CI runner pods (arc-runners*): lowest priority, never preempt other workloads."

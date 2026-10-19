@@ -1,0 +1,44 @@
+# Every container gets default requests AND limits, so a pod can never be
+# unbounded; explicit values may not exceed `max`.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: ci-runners
+  namespace: arc-runners
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 250m
+        memory: 512Mi
+        ephemeral-storage: 1Gi
+      default:
+        cpu: "1"
+        memory: 2Gi
+        ephemeral-storage: 5Gi
+      max:
+        cpu: "4"
+        memory: 8Gi
+        ephemeral-storage: 15Gi
+    - type: Pod
+      max:                         # per-pod ceiling = the spec's 4 CPU / 8 GiB
+        cpu: "4"
+        memory: 8Gi
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: arc-system
+  namespace: arc-system
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 50m
+        memory: 64Mi
+      default:
+        cpu: 500m
+        memory: 256Mi
+      max:
+        cpu: "1"
+        memory: 512Mi

@@ -1,0 +1,32 @@
+# Hard ceilings (spec section 5). Starting points; tune from observed usage.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ci-runners
+  namespace: arc-runners
+spec:
+  hard:
+    pods: "6"                      # maxRunners is 4; headroom for a surge/terminating pods
+    requests.cpu: "24"
+    requests.memory: 48Gi
+    limits.cpu: "24"
+    limits.memory: 48Gi
+    requests.ephemeral-storage: 24Gi
+    limits.ephemeral-storage: 90Gi
+    persistentvolumeclaims: "0"    # runners are stateless (emptyDir only)
+    services: "0"
+    secrets: "20"
+---
+# Controller + listener(s) only; small.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: arc-system
+  namespace: arc-system
+spec:
+  hard:
+    pods: "10"                     # controller + one listener per scale set (olympus-linux, later olympus-kvm)
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi

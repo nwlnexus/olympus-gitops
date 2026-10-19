@@ -1,0 +1,152 @@
+# Network isolation for the CI namespaces. Enforcement relies on k3s' embedded
+# kube-router network-policy controller (flannel alone does not enforce
+# NetworkPolicy); verified active on compute-hub (k3s config does not set
+# `disable-network-policy`). If that is ever disabled these policies become inert.
+#
+# Cluster facts (verified 2026-10-19): IPv4-only; pod CIDR 10.42.0.0/16 (per-node /24),
+# service CIDR 10.43.0.0/16 (kube-dns 10.43.0.10, kubernetes 10.43.0.1), nodes
+# 192.168.253.7/.8/.9 (onodes) and .14 (naraka-01), API VIP 192.168.253.2 (kube-vip).
+# Because the cluster is single-stack IPv4 there are no IPv6 rules; if IPv6/dual-stack
+# is ever enabled, add ::/0 exceptions for fc00::/7, fe80::/10 and ::1/128 here.
+---
+# ---------------------------------------------------------------------------
+# arc-runners: untrusted CI code. Ingress: denied entirely. Egress: DNS + the
+# PUBLIC internet only. Runner pods therefore cannot reach any cluster Service
+# or Pod (10.42/16, 10.43/16), any node (192.168.253.0/24), the LAN (QNAP, UniFi),
+# the tailnet (100.64.0.0/10) or the link-local range (169.254.0.0/16).
+# NOTE: "public internet" is any public address (GitHub, crates.io, npm, ghcr.io
+# ...). A per-host allowlist (spec section 5) needs an L7/FQDN-aware policy,
+# which kube-router cannot do; this is the strongest rule expressible with
+# standard NetworkPolicy.
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: arc-runners
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-dns-and-internet
+  namespace: arc-runners
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    # DNS via CoreDNS only (the kube-dns Service DNATs to these pods).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Public internet, minus every private/internal range.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8         # pod 10.42.0.0/16 + service 10.43.0.0/16
+              - 172.16.0.0/12
+              - 192.168.0.0/16     # LAN 192.168.253.0/24: nodes, API VIP, QNAP, UniFi
+              - 100.64.0.0/10      # tailnet (CGNAT)
+              - 169.254.0.0/16     # link-local
+              - 127.0.0.0/8
+---
+# ---------------------------------------------------------------------------
+# arc-system: controller + listener. No ingress at all (nothing scrapes them;
+# metrics are disabled, see helmrelease-controller.yaml). Egress: DNS, the
+# Kubernetes API server, and the public internet (GitHub's Actions service
+# endpoints are many and change). Nothing else.
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: arc-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-dns-apiserver-internet
+  namespace: arc-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Kubernetes API server. kube-proxy DNATs 10.43.0.1:443 to the control-plane
+    # nodes' :6443 before the policy is evaluated, so the node endpoints are what
+    # matters; the VIP and the service IP are listed too so the rule also holds
+    # for clients configured with them directly.
+    - to:
+        - ipBlock:
+            cidr: 192.168.253.7/32   # onode-030c31
+        - ipBlock:
+            cidr: 192.168.253.8/32   # onode-0312ce
+        - ipBlock:
+            cidr: 192.168.253.9/32   # onode-0314ac
+        - ipBlock:
+            cidr: 192.168.253.2/32   # kube-vip control-plane VIP
+      ports:
+        - protocol: TCP
+          port: 6443
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.1/32       # kubernetes.default Service
+      ports:
+        - protocol: TCP
+          port: 443
+    # GitHub / public internet, minus every private/internal range.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+---
+# ---------------------------------------------------------------------------
+# arc-runners-kvm: empty until olympus-sdk#390. Fail closed: deny everything;
+# #390 must add its own explicit rules (mirror the arc-runners policy).
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: arc-runners-kvm
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

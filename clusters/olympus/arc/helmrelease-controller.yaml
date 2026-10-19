@@ -1,0 +1,62 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: arc
+  namespace: arc-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: gha-runner-scale-set-controller
+      # pinned: must always equal the gha-runner-scale-set chart version in
+      # helmrelease-scale-set.yaml (controller and scale set are versioned together).
+      version: "0.15.0"
+      sourceRef:
+        kind: HelmRepository
+        name: actions-runner-controller
+        namespace: arc-system
+  # Helm installs CRDs from crds/ once and never upgrades them; CreateReplace
+  # makes Flux create and replace them on install and on every upgrade.
+  install:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+  values:
+    replicaCount: 1
+    flags:
+      logLevel: info
+    # Metrics are intentionally NOT enabled: the observability stack has no scrape
+    # job for them yet and arc-system allows no ingress. Monitoring is
+    # nwlnexus/olympus-sdk#392 (set `metrics:` here and add a scrape + a
+    # NetworkPolicy ingress rule from the scraper's namespace then).
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    # Restricted-profile pod (image runs as 65532:65532).
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      runAsUser: 65532
+      runAsGroup: 65532
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true   # chart mounts an emptyDir at /tmp
+      capabilities:
+        drop: ["ALL"]
+    # Controller runs on the onodes (no toleration for naraka-01's management-hub taint).
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: olympus.io/role
+                  operator: DoesNotExist
