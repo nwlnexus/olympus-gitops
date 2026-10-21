@@ -4,6 +4,7 @@ resources:
   - namespace.yaml
   - externalsecret.yaml
   - helmrepository.yaml
+  - blackbox-exporter-helmrelease.yaml
   - prometheus-helmrelease.yaml
   - grafana-admin-externalsecret.yaml
   - grafana-helmrelease.yaml

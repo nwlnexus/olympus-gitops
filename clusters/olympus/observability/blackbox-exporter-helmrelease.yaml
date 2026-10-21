@@ -1,0 +1,53 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: blackbox-exporter
+  namespace: observability
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: prometheus-blackbox-exporter
+      # Pinned. Source: https://prometheus-community.github.io/helm-charts
+      # (HelmRepository prometheus-community). Chart tgz sha256 (index digest):
+      # e341b17f202c7ff95cae056d23a481d8080aa3dc1dbaaa5d68296595b8b90ace
+      # appVersion v0.29.0 (image quay.io/prometheus/blackbox-exporter, chart default tag).
+      version: "11.20.0"
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: observability
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # Probes the data-hub host services (Mac Studio, not a cluster) from inside the
+    # cluster, over the tailnet, so a service that is up on localhost but not on its
+    # tailnet address is still seen as down. Scraped by the prometheus-server
+    # `blackbox-*` jobs (extraScrapeConfigs in prometheus-helmrelease.yaml).
+    # Service: blackbox-exporter.observability.svc:9115
+    fullnameOverride: blackbox-exporter
+    replicas: 1
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
+    config:
+      modules:
+        http_2xx:
+          prober: http
+          timeout: 5s
+          http:
+            valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+            follow_redirects: true
+            preferred_ip_protocol: "ip4"
+        tcp_connect:
+          prober: tcp
+          timeout: 5s
+          tcp:
+            preferred_ip_protocol: "ip4"
