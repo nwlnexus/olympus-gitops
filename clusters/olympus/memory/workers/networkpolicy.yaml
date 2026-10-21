@@ -1,0 +1,34 @@
+# Ingress allow rule for the worker pods. The namespace is default-deny ingress
+# (../networkpolicy.yaml); NetworkPolicies are additive. Workers accept connections on one port
+# only (9090: /metrics, /healthz, /readyz) and only from Prometheus (job kubernetes-pods). The
+# kubelet's probes come from the node and are not subject to NetworkPolicy under k3s' kube-router
+# policy controller, same as for the gateway pods.
+# Egress is unrestricted in this namespace (see ../networkpolicy.yaml), so the workers reach
+# Postgres, DNS and LiteLLM on data-hub without a rule.
+#
+# Postgres needs no change: ../networkpolicy.yaml `allow-store-ingress` admits every pod in the
+# namespace (`from: podSelector: {}`) on 5432 and 6379, which includes the worker pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-worker-ingress
+  namespace: memory
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: memory
+      app.kubernetes.io/component: worker
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+              app.kubernetes.io/component: server
+      ports:
+        - protocol: TCP
+          port: 9090

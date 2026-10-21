@@ -1,0 +1,33 @@
+# Memory workers v1 (olympus-sdk#453, epic #444): Deployments memory-worker-extract and
+# memory-worker-embed. Separate from `memory` and `memory-gateway` on purpose: the stores and the
+# gateway must stay Ready whatever happens to the workers (failed rollout, LiteLLM trouble, a
+# missing 1Password item). See ../memory/workers/README.md.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: memory-workers
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/memory/workers
+  prune: true
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    # Namespace, Postgres, the `memory_worker` role password (Job/memory-migrate) and Secret
+    # memory-stores.
+    - name: memory
+    # Secret ghcr-pull (../memory/gateway/ghcr-pull-externalsecret.yaml) and, transitively,
+    # the ClusterSecretStore onepassword-connect.
+    - name: memory-gateway
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: memory-worker-extract
+      namespace: memory
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: memory-worker-embed
+      namespace: memory

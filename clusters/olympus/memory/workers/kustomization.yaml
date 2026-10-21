@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Applied by the Flux Kustomization `memory-workers` (../../flux-kustomizations/memory-workers.yaml).
+# The `memory` Kustomization (path ../) does not include this directory.
+# Secret `ghcr-pull` (image pull) is created by ../gateway/ghcr-pull-externalsecret.yaml and is
+# deliberately not duplicated here; this is why `memory-workers` dependsOn `memory-gateway`.
+resources:
+  - externalsecret.yaml
+  - workers.yaml
+  - networkpolicy.yaml

@@ -1,0 +1,332 @@
+# Memory workers v1 (nwlnexus/olympus-sdk#453, epic #444, design
+# docs/superpowers/specs/2026-10-21-memory-gateway-contract-design.md sections 3.4, 8 and 9;
+# packages/memory-workers/README.md in olympus-sdk is the reference for every setting below).
+#
+# Deployed by its own Flux Kustomization (../../flux-kustomizations/memory-workers.yaml), like the
+# gateway, so a broken worker rollout can never make the stores or the gateway unhealthy.
+#
+# One image, one process per stage: `--stage extract` and `--stage embed`. Workers pull jobs from
+# the Postgres queue (connecting as role `memory_worker`); nothing connects to them except
+# Prometheus (9090: /metrics, /healthz, /readyz). There is therefore no Service.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memory-workers-config
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-workers
+    app.kubernetes.io/part-of: memory
+data:
+  # --- shared by both stages (envFrom) ------------------------------------------------------
+  # Listener for /metrics, /healthz and /readyz (defaults of the worker, spelled out so the probes,
+  # the scrape annotations and the NetworkPolicy have one visible source).
+  MEMORY_HOST: "0.0.0.0"
+  MEMORY_METRICS_PORT: "9090"
+  LOG_LEVEL: "INFO"
+  # LiteLLM on data-hub (tailnet IP, name-independent), same address as the gateway. The API key
+  # is NOT here: it is in Secret memory-workers (LITELLM_API_KEY_FILE).
+  # Egress from ns memory is unrestricted and the gateway already uses this address.
+  LITELLM_BASE_URL: "http://100.95.232.41:4000/v1"
+  MEMORY_EXTRACT_ALIAS: "memory-extract"
+  MEMORY_EMBED_ALIAS: "memory-embed"
+  # No graph worker in v1: with `true` the extract worker would enqueue graph_ingest jobs that
+  # nothing consumes, and MemoryQueueBacklogOld/Stuck would fire. Flip it when the Graphiti
+  # ingest worker deploys (README.md of the worker, "Graph jobs").
+  MEMORY_GRAPH_ENABLED: "false"
+  # --- per stage (referenced one by one with configMapKeyRef) -------------------------------
+  # extract: the GPU model on data-hub is single-slot, so ONE claim loop in ONE pod, one job per
+  # claim (the extract stage rejects any other batch size).
+  extract-concurrency: "1"
+  extract-batch-size: "1"
+  # embed: 4 claim loops per pod, 4 facts per claim = one /embeddings request (worker defaults).
+  embed-concurrency: "4"
+  embed-batch-size: "4"
+---
+# Embed pair: 2 replicas, a node drain may take one, never both. (The extract worker is a single
+# replica by design: a budget on it would only block drains, and it is safe to interrupt.)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: memory-worker-embed
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-worker-embed
+    app.kubernetes.io/part-of: memory
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memory-worker-embed
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-worker-extract
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-worker-extract
+    app.kubernetes.io/part-of: memory
+    app.kubernetes.io/component: worker
+  annotations:
+    # stakater reloader (../../reloader): roll the pods when the ConfigMap or Secret changes.
+    reloader.stakater.com/auto: "true"
+spec:
+  # ONE replica, and it must stay one: the extraction model on data-hub is a single GPU slot.
+  # Scale to 0 to pause extraction (README.md, "Pausing extraction").
+  replicas: 1
+  strategy:
+    # Never two extract pods at once, not even during a rollout (maxSurge would double the load
+    # on the single GPU slot). The queue tolerates the few seconds of downtime: jobs wait.
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memory-worker-extract
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memory-worker-extract
+        app.kubernetes.io/part-of: memory
+        app.kubernetes.io/component: worker
+      annotations:
+        # Scraped by the `kubernetes-pods` job of the cluster's Prometheus (the same mechanism that
+        # scrapes the gateway: it keeps prometheus.io/scrape=true and honours the port and path
+        # annotations, scheme http). No static job needed.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      # No Kubernetes API access is needed: no token is mounted into the pod.
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        # Secret created by ../gateway/ghcr-pull-externalsecret.yaml (same namespace, same private
+        # ghcr.io/nwlnexus org). Not duplicated here.
+        - name: ghcr-pull
+      # SIGTERM: no new claims; the job in flight gets MEMORY_WORKER_SHUTDOWN_GRACE_SECONDS (worker
+      # default 20) to commit, then it is released back to the queue without counting an attempt.
+      # The pod's grace period must stay above that.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        # Pod Security `restricted` (enforced by the namespace). uid/gid 10001 is the image's USER.
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: memory-worker
+          # Pinned by digest, never by tag. Built from olympus-sdk main (tag sha-6ff56ae) by
+          # .github/workflows/memory-workers.yml.
+          image: ghcr.io/nwlnexus/memory-workers@sha256:1e0c7049f00c87248bf818e93717ccbb19304138e753febb43d3f65a08382910
+          imagePullPolicy: IfNotPresent
+          # The image ENTRYPOINT is `python -m memory_workers`; the stage is the argument.
+          args: ["--stage", "extract"]
+          ports:
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: memory-workers-config
+          env:
+            - name: MEMORY_WORKER_CONCURRENCY
+              valueFrom:
+                configMapKeyRef:
+                  name: memory-workers-config
+                  key: extract-concurrency
+            - name: MEMORY_WORKER_BATCH_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: memory-workers-config
+                  key: extract-batch-size
+            # Secrets are read from files (a mounted Secret), not from the environment, so they
+            # do not show up in `kubectl describe pod` or in a crash dump of the environment.
+            # The worker refuses to start if both DATABASE_URL and DATABASE_URL_FILE are set.
+            - name: DATABASE_URL_FILE
+              value: /run/secrets/memory-workers/DATABASE_URL
+            - name: LITELLM_API_KEY_FILE
+              value: /run/secrets/memory-workers/LITELLM_API_KEY
+          startupProbe:
+            # Process liveness: the health server answers as soon as the loop is up.
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            # 200 while the last database round trip succeeded recently and the worker is not
+            # shutting down. Nothing routes to the pod; this is for the Flux health check and
+            # `kubectl get pods`.
+            httpGet:
+              path: /readyz
+              port: metrics
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            # 503 only when the worker loop itself hung (no tick for 3 x reap interval + 30 s):
+            # no database, so a Postgres or LiteLLM outage never restarts the pod.
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            # The only writable path (TMPDIR and HOME point here in the image).
+            - name: tmp
+              mountPath: /tmp
+            - name: secrets
+              mountPath: /run/secrets/memory-workers
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: secrets
+          secret:
+            secretName: memory-workers
+            defaultMode: 0440
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-worker-embed
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-worker-embed
+    app.kubernetes.io/part-of: memory
+    app.kubernetes.io/component: worker
+  annotations:
+    # stakater reloader (../../reloader): roll the pods when the ConfigMap or Secret changes.
+    reloader.stakater.com/auto: "true"
+spec:
+  # Two pods x 4 claim loops. Queue claims use FOR UPDATE SKIP LOCKED, so any number of embed
+  # workers is safe; two give redundancy across nodes, not throughput.
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memory-worker-embed
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memory-worker-embed
+        app.kubernetes.io/part-of: memory
+        app.kubernetes.io/component: worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: ghcr-pull
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          # Spread the two replicas across nodes, but never leave a replica unschedulable
+          # when only one node is available (hence preferred, not required).
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: memory-worker-embed
+      containers:
+        - name: memory-worker
+          image: ghcr.io/nwlnexus/memory-workers@sha256:1e0c7049f00c87248bf818e93717ccbb19304138e753febb43d3f65a08382910
+          imagePullPolicy: IfNotPresent
+          args: ["--stage", "embed"]
+          ports:
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: memory-workers-config
+          env:
+            - name: MEMORY_WORKER_CONCURRENCY
+              valueFrom:
+                configMapKeyRef:
+                  name: memory-workers-config
+                  key: embed-concurrency
+            - name: MEMORY_WORKER_BATCH_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: memory-workers-config
+                  key: embed-batch-size
+            - name: DATABASE_URL_FILE
+              value: /run/secrets/memory-workers/DATABASE_URL
+            - name: LITELLM_API_KEY_FILE
+              value: /run/secrets/memory-workers/LITELLM_API_KEY
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: metrics
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: secrets
+              mountPath: /run/secrets/memory-workers
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: secrets
+          secret:
+            secretName: memory-workers
+            defaultMode: 0440
