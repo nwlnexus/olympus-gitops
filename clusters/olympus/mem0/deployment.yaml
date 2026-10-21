@@ -26,7 +26,11 @@ spec:
             - name: http
               containerPort: 8765
           env:
-            # LLM + embedder run on the homelab Ollama (data-hub). OLLAMA_BASE_URL is
+            # LLM + embedder run on the homelab Ollama (data-hub), which now binds only
+            # its tailnet IP (olympus-sdk#447). OpenMemory stays on that address, not
+            # LiteLLM: it is retired at WS11 of olympus-sdk#444, and its mem0 `ollama`
+            # provider speaks the native Ollama API that LiteLLM does not proxy.
+            # OLLAMA_BASE_URL is
             # set explicitly to a non-localhost URL so OpenMemory's Docker host-rewrite
             # path (host.docker.internal / bridge-gw) is bypassed and pods reach Ollama
             # over the tailnet. Uses the tailnet IP of the Mac Studio (data-hub) rather
@@ -76,14 +80,16 @@ spec:
             - name: OPENAI_BASE_URL
               value: "http://100.95.232.41:11434/v1"
             # Per-add categorization runs synchronously on every insert
-            # (models.py:categorize_memory). ENABLED, routed at Ollama with a small
-            # fast model (llama3.2:3b, ~0.5s/add, structured-output verified). Flip to
-            # "true" to turn it off. CATEGORIZATION_MODEL is read by the image patch
-            # (olympus-sdk openmemory.yml) and must be a model Ollama has pulled.
+            # (models.py:categorize_memory). ENABLED, routed at Ollama. llama3.2:3b was
+            # removed from data-hub's roster (olympus-sdk#447), so categorization uses
+            # qwen2.5:7b-instruct, the same non-thinking model as extraction (already
+            # resident, a few seconds per add). Flip to "true" to turn it off.
+            # CATEGORIZATION_MODEL is read by the image patch (olympus-sdk
+            # openmemory.yml) and must be a model Ollama has pulled.
             - name: DISABLE_CATEGORIZATION
               value: "false"
             - name: CATEGORIZATION_MODEL
-              value: "llama3.2:3b"
+              value: "qwen2.5:7b-instruct"
           # /health (added via the openmemory.yml image patch) is meant to be a
           # dependency-free route returning 200 iff the event loop is responsive.
           # REALITY (issue #43, verified on compute-hub 2026-07-08): an `add` still
