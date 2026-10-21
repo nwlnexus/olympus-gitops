@@ -77,6 +77,56 @@ spec:
               - to: nigel.williamslucas@gmail.com
                 send_resolved: true
           - name: 'null'
+    # data-hub host probes via blackbox-exporter (observability/blackbox-exporter).
+    # data-hub is a Mac Studio host, not a cluster; addresses are its tailnet IP
+    # (100.95.232.41) on purpose: the probes must fail if a service is not bound to
+    # the tailnet address (Postgres has been bound to 127.0.0.1 only since July after
+    # a boot-time bind race with tailscaled; see DataHubPostgresNotOnTailnet).
+    # TODO(olympus-sdk#447): add an authenticated LiteLLM /v1/models check (needs a
+    # bearer key) and alert on an empty model list. Needs a Secret and a mechanism
+    # beyond a plain http_2xx probe, so it is deferred until the key exists.
+    extraScrapeConfigs: |
+      - job_name: blackbox-exporter
+        metrics_path: /metrics
+        static_configs:
+          - targets: ["blackbox-exporter.observability.svc:9115"]
+      - job_name: blackbox-datahub-http
+        metrics_path: /probe
+        params:
+          module: [http_2xx]
+        scrape_interval: 30s
+        scrape_timeout: 10s
+        static_configs:
+          - targets: ["http://100.95.232.41:4000/health/liveliness"]
+            labels:
+              service: litellm
+          - targets: ["http://100.95.232.41:11434/api/tags"]
+            labels:
+              service: ollama
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.observability.svc:9115
+      - job_name: blackbox-datahub-tcp
+        metrics_path: /probe
+        params:
+          module: [tcp_connect]
+        scrape_interval: 30s
+        scrape_timeout: 10s
+        static_configs:
+          - targets: ["100.95.232.41:5432"]
+            labels:
+              service: postgres
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.observability.svc:9115
     serverFiles:
       alerting_rules.yml:
         groups:
@@ -126,6 +176,38 @@ spec:
                   severity: warning
                 annotations:
                   summary: "Target {{ $labels.job }} ({{ $labels.instance }}) on {{ $labels.cluster }} down >10m."
+          - name: data-hub
+            rules:
+              # Fires per probed data-hub service (litellm, ollama). Postgres has its own
+              # alert below, so it is excluded here to avoid a duplicate page.
+              # TODO: raise litellm to severity critical once the memory workers depend
+              # on it (olympus-sdk#444 wave 2+); route-by-label is already in place via
+              # the `service` label.
+              - alert: DataHubServiceDown
+                expr: probe_success{job=~"blackbox-datahub-.*", service!="postgres"} == 0
+                for: 10m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "data-hub service {{ $labels.service }} is failing its probe for >10m."
+                  description: "Probe of {{ $labels.instance }} (job {{ $labels.job }}) from the cluster has failed for 10m. Check the service on data-hub and that it is bound to the tailnet IP."
+              # The failure that went unnoticed from July: Postgres bound to 127.0.0.1
+              # only. The probe targets the tailnet address, so this fires in that case.
+              - alert: DataHubPostgresNotOnTailnet
+                expr: probe_success{job="blackbox-datahub-tcp", service="postgres"} == 0
+                for: 10m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "Postgres on data-hub is not accepting connections on its tailnet address."
+                  description: "TCP connect to {{ $labels.instance }} has failed for 10m. Known cause: the boot-time bind race, where postgres starts before tailscaled is up, fails to bind the tailnet IP and falls back to 127.0.0.1 only. Check `lsof -iTCP:5432 -sTCP:LISTEN` on data-hub and restart the Postgres LaunchDaemon once tailscaled is up."
+              - alert: BlackboxExporterDown
+                expr: absent(up{job="blackbox-exporter"} == 1)
+                for: 10m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "blackbox-exporter is not being scraped successfully (data-hub probes are blind)."
     prometheus-pushgateway:
       enabled: false
     kube-state-metrics:
