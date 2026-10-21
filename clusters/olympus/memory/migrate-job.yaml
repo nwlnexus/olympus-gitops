@@ -16,7 +16,19 @@
 #   - an applied file whose content has changed (sha256 drift) FAILS the Job. Applied
 #     migrations are immutable; fix forward with a new file;
 #   - files are named NNNN_description.sql, applied in lexical order.
-# Connects as the `postgres` superuser (the only role that exists at this stage).
+#
+# After the loop, a separate step sets the passwords of the login roles that migration
+# 0004 creates (memory_gateway, memory_worker). Passwords never live in git: they come
+# from the Secret `memory-stores` (keys gateway-db-password / worker-db-password), reach
+# psql through its environment (not argv, not a file, not the ConfigMap) and are never
+# echoed. ALTER ROLE ... PASSWORD is idempotent, so every run re-applies them.
+# The two new env vars are deliberately NOT `optional: true` (fail closed): while the
+# 1Password fields are missing the ExternalSecret cannot sync, the keys are absent from
+# the Secret, and the pod waits in CreateContainerConfigError (visible in
+# `kubectl -n memory describe pod`, no restarts, backoffLimit untouched) until they
+# appear. With `optional: true` the Job would instead start, fail the empty-password
+# check, burn through backoffLimit and end Failed.
+# Connects as the `postgres` superuser (the only role that exists at 0001).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -89,6 +101,29 @@ spec:
                   -f "$f" \
                   -c "INSERT INTO memory.schema_migrations (version, name, checksum) VALUES ('${version}', '${name}', '${sum}')"
               done
+
+              # ---- role passwords (step after the migrations; see header) -----------------
+              if [ -z "${GATEWAY_DB_PASSWORD:-}" ] || [ -z "${WORKER_DB_PASSWORD:-}" ]; then
+                echo "ERROR: gateway-db-password / worker-db-password in Secret memory-stores are empty; refusing to leave the login roles without a password."
+                exit 1
+              fi
+              # $1 role, $2 password. The password travels in psql's environment (DB_PW);
+              # psql's \set backtick runs a shell that expands $DB_PW itself, so the value
+              # is on no command line, and :'pw' substitutes it as a quoted literal. The
+              # SETs keep the statement out of the server log, including the error log
+              # should it fail (log_min_duration_statement is 1000 in postgresql.conf).
+              set_role_password() {
+                DB_PW=$2 psql -X -q -v ON_ERROR_STOP=1 -v role="$1" <<'SQL'
+              SET log_min_duration_statement = -1;
+              SET log_min_error_statement = panic;
+              \set pw `printf %s "$DB_PW"`
+              ALTER ROLE :"role" PASSWORD :'pw';
+              SQL
+                echo "password set for role $1"
+              }
+              set_role_password memory_gateway "$GATEWAY_DB_PASSWORD"
+              set_role_password memory_worker "$WORKER_DB_PASSWORD"
+
               echo "migrations complete:"
               psql -v ON_ERROR_STOP=1 -c "SELECT version, name, applied_at FROM memory.schema_migrations ORDER BY version"
           env:
@@ -97,6 +132,18 @@ spec:
                 secretKeyRef:
                   name: memory-stores
                   key: postgres-password
+            # Role passwords for migration 0004's login roles. Required (no `optional`),
+            # see the header: the Job waits until the 1Password fields exist.
+            - name: GATEWAY_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: memory-stores
+                  key: gateway-db-password
+            - name: WORKER_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: memory-stores
+                  key: worker-db-password
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
