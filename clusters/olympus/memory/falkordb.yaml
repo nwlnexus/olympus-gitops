@@ -1,0 +1,155 @@
+# FalkorDB (Redis + graph module), the Graphiti graph store (spec D4/5.2). Single
+# instance. State: 20Gi `qnap-iscsi` PVC (expandable, reclaimPolicy Retain).
+# Scheduling is left default; see the note in postgres.yaml (WS12, olympus-sdk#457).
+#
+# The image's own entrypoint (/var/lib/falkordb/bin/run.sh) is replaced by the
+# command below. It is a ~20-line script that (a) starts the FalkorDB Browser UI
+# (node, port 3000, needs a writable /app/.data) in the background, then (b) execs
+#   redis-server ${REDIS_ARGS} --protected-mode no --dir $FALKORDB_DATA_PATH \
+#     --loadmodule $FALKORDB_BIN_PATH/falkordb.so $FALKORDB_ARGS
+# Running redis-server directly drops the Browser UI (unneeded, and an extra
+# surface), lets the shell quote the password (REDIS_ARGS would word-split it), and
+# runs as the image's `redis` user (999) under `restricted`. Re-check this command
+# against run.sh when bumping the image.
+apiVersion: v1
+kind: Service
+metadata:
+  name: falkordb-headless
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: falkordb
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: falkordb
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: falkordb
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: falkordb
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: falkordb
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: falkordb
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: falkordb
+spec:
+  replicas: 1
+  serviceName: falkordb-headless
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: falkordb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: falkordb
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: falkordb
+          # falkordb/falkordb:v4.22.2 (== :latest on 2026-10-20), multi-arch index
+          # digest resolved from the Docker Hub registry API on 2026-10-20 (amd64
+          # manifest sha256:d06b5fe2...). Redis 8.10.2 + FalkorDB 4.22.2.
+          image: falkordb/falkordb:v4.22.2@sha256:03f53c46223ac2c0aab05ede7c6a8d9299255b7fd228909424f2c453f7a8cfcd
+          command:
+            - /bin/sh
+            - -c
+            - >-
+              exec redis-server /etc/falkordb/falkordb.conf
+              --requirepass "$FALKORDB_PASSWORD"
+              --protected-mode no
+              --dir /var/lib/falkordb/data
+              --loadmodule /var/lib/falkordb/bin/falkordb.so
+              $FALKORDB_ARGS
+          env:
+            - name: FALKORDB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: memory-stores
+                  key: falkordb-password
+            # Same module arguments as the image default; tune here if Graphiti
+            # queries hit the 1s TIMEOUT.
+            - name: FALKORDB_ARGS
+              value: MAX_QUEUED_QUERIES 25 TIMEOUT 1000 RESULTSET_SIZE 10000
+            # redis-cli reads this, so the probes authenticate without the password
+            # appearing on a command line.
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: memory-stores
+                  key: falkordb-password
+          ports:
+            - name: redis
+              containerPort: 6379
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          startupProbe:
+            exec:
+              command: [/bin/sh, -c, 'redis-cli -h 127.0.0.1 ping | grep -q PONG']
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: [/bin/sh, -c, 'redis-cli -h 127.0.0.1 ping | grep -q PONG']
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: [/bin/sh, -c, 'redis-cli -h 127.0.0.1 ping | grep -q PONG']
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/falkordb/data
+            - name: config
+              mountPath: /etc/falkordb
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: falkordb-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        storageClassName: qnap-iscsi
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 20Gi

@@ -1,0 +1,20 @@
+# Backup target for both CronJobs (postgres/ and falkordb/ subdirectories).
+# `qnap-nfs` is the nfs-subdir-external-provisioner class (NFS export on the QNAP);
+# its reclaimPolicy is Delete and archiveOnDelete is false, so deleting this PVC
+# deletes every backup. Flux `prune` is therefore disabled for this object: removing
+# it from git will NOT delete it (delete it by hand if you really mean to).
+# ReadWriteMany so the two nightly CronJobs can overlap without Multi-Attach issues.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memory-backups
+  namespace: memory
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  storageClassName: qnap-nfs
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi

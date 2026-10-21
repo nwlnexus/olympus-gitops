@@ -1,0 +1,153 @@
+# Postgres 16 + pgvector for episodes, facts, embeddings and the capture queue
+# (spec 5.2). Single instance. State: 50Gi `qnap-iscsi` PVC (allowVolumeExpansion,
+# reclaimPolicy Retain: the PV survives deletion of the PVC/StatefulSet).
+#
+# Scheduling: intentionally left default (no nodeSelector/affinity/tolerations).
+# The onodes carry no taints and naraka-01 is tainted `olympus.io/role=management-hub`,
+# so these land on an onode today. WS12 (olympus-sdk#457) may move the memory
+# platform to an `olympus.io/role=agent-services` node; do it then, not now.
+#
+# Reachability: ClusterIP `postgres` for clients, headless `postgres-headless` for the
+# StatefulSet identity. No Ingress/Tailscale/Cloudflare object exists for it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  replicas: 1
+  serviceName: postgres-headless
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          # pgvector/pgvector:pg16 (= 0.8.7-pg16, Debian bookworm), multi-arch index
+          # digest resolved from the Docker Hub registry API on 2026-10-20. To bump:
+          # re-resolve the digest for the new tag and update tag + digest together.
+          image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
+          args:
+            - -c
+            - config_file=/etc/postgresql/postgresql.conf
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_DB
+              value: memory
+            # Only read on the FIRST start (empty PGDATA). Rotating the 1Password
+            # field later does not change the role password: ALTER ROLE it (README).
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: memory-stores
+                  key: postgres-password
+            # Subdirectory of the mount: the ext4 volume root has lost+found, which
+            # initdb refuses to use as a data directory.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_INITDB_ARGS
+              value: --data-checksums
+          ports:
+            - name: postgres
+              containerPort: 5432
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          startupProbe:
+            exec:
+              command: [pg_isready, -U, postgres, -d, memory]
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, postgres, -d, memory]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: [pg_isready, -U, postgres, -d, memory]
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: config
+              mountPath: /etc/postgresql
+              readOnly: true
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: config
+          configMap:
+            name: postgres-config
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        storageClassName: qnap-iscsi
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 50Gi
