@@ -1,22 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  # Namespace + secrets
   - namespace.yaml
-  - externalsecret.yaml
-  - pgadmin-externalsecret.yaml
-
-  # pgAdmin — UI for PostgreSQL (data now on data-hub:5432)
   - bitnami-helmrepository.yaml
-  - pgadmin-pvc.yaml
-  - pgadmin-helmrepository.yaml
-  - pgadmin-helmrelease.yaml
-  - pgadmin-certificate.yaml
-  - pgadmin-ingressroute.yaml
-
-  # RedisInsight — UI for Redis (data now on data-hub:6379)
-  - redisinsight-deployment.yaml
-  - redisinsight-ingressroute.yaml
 
   # Redpanda — in-cluster broker (no macOS arm64 binary available)
   - redpanda-helmrepository.yaml
@@ -24,12 +10,11 @@ resources:
   - redpanda-helmrelease.yaml
   - redpanda-ingressroute.yaml
 
-  # CH-UI — UI for ClickHouse (data now on data-hub:8123)
-  - ch-ui-pvc.yaml
-  - ch-ui-deployment.yaml
-  - ch-ui-ingressroute.yaml
-
+  # ch-ui, redisinsight, pgadmin and the platform-credentials ExternalSecret were
+  # removed (olympus-sdk#446): the ClickHouse and Redis tiers they pointed at are
+  # retired, and Postgres on data-hub goes away at WS9 of olympus-sdk#444.
+  #
   # tailscale-services.yaml — intentionally excluded from kustomization.
-  # postgres-ts/redis-ts/clickhouse-ts/kafka-ts removed; data layer now native
-  # on data-hub. Re-add entries to tailscale-services.yaml + here when new
-  # in-cluster services need tailnet LoadBalancer exposure.
+  # postgres-ts/redis-ts/clickhouse-ts/kafka-ts removed; re-add entries to
+  # tailscale-services.yaml + here when new in-cluster services need tailnet
+  # LoadBalancer exposure.
