@@ -17,9 +17,10 @@ clusters/
 ## Hosts
 
 - **compute-hub** — the only gitops-managed cluster (k3s).
-- **data-hub** — the Mac Studio; a host only, not a cluster. Runs the native data
-  services (Postgres, Redis, ClickHouse) and Ollama, reached by the
-  cluster over Tailscale. Formerly named `ai-hub`.
+- **data-hub** — the Mac Studio; a host only, not a cluster. The fleet's inference
+  node (Ollama behind LiteLLM) and macOS CI runner, reached by the cluster over
+  Tailscale. Nothing else from the old data tier is left (a temporary Postgres
+  remains until WS9 of olympus-sdk#444). Formerly named `ai-hub`.
 
 ## Secrets
 
