@@ -2,7 +2,8 @@
 
 Namespace `memory`. Implements nwlnexus/olympus-sdk#449 (epic #444, spec sections D3, D4
 and 5.2). This directory holds the **stores** and the schema (migrations 0001-0004, see below); the
-gateway (#450) and workers (#451) come later and add their own manifests.
+gateway (#450, see `gateway/README.md`; deployed by its own Flux Kustomization) and workers (#453)
+come later and add their own manifests.
 
 | Object | What |
 |---|---|
@@ -192,8 +193,9 @@ Alert `MemoryStorePVCFillingUp` fires at 80% for 30m.
 
 Default-deny ingress for the namespace. Postgres and FalkorDB accept connections from pods in
 `memory` and from the blackbox-exporter pod in `observability`. Egress is unrestricted. Note
-that default-deny also covers future pods here: the gateway (#450) needs its own allow rules,
-including any from the Tailscale/cloudflared proxies that front it.
+that default-deny also covers future pods here: the gateway (#450) has its own allow rules in
+`gateway/networkpolicy.yaml` (Tailscale proxy and blackbox exporter to 8080, Prometheus to 9090);
+the stores' rule already admits the gateway pods.
 
 ## Monitoring
 
@@ -202,4 +204,7 @@ ServiceMonitor/PrometheusRule objects would be inert. Instead
 `../observability/prometheus-helmrelease.yaml` has a `blackbox-memory-tcp` scrape job
 (tcp_connect to `postgres.memory.svc:5432` and `falkordb.memory.svc:6379` through the
 blackbox-exporter) and a `memory` rule group: `MemoryStoreDown`, `MemoryStorePVCFillingUp`,
-`MemoryBackupStale`. Queue-age alerts come with the capture queue.
+`MemoryBackupStale`, plus the gateway's `blackbox-memory-http` probe (`/readyz`) and the queue/capture/gateway
+alerts of the design (section 9). The gateway's own metrics (:9090) are scraped by the default `kubernetes-pods`
+job through the `prometheus.io/*` pod annotations. Rules are unit-tested:
+`python3 ../observability/tests/check_prometheus.py` (promtool and PyYAML required).

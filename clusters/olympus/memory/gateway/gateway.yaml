@@ -1,0 +1,211 @@
+# Memory gateway (nwlnexus/olympus-sdk#450 task G10, epic #444, design
+# docs/superpowers/specs/2026-10-21-memory-gateway-contract-design.md sections 5.6, 6.1 and 9).
+#
+# NOT ENABLED BY DEFAULT: this directory is deployed by its own Flux Kustomization
+# (../../flux-kustomizations/memory-gateway.yaml), which is not listed in the root
+# kustomization.yaml. See README.md in this directory ("Enabling") for the two steps.
+#
+# Two replicas of the TypeScript gateway (MCP + REST on :8080, metrics on :9090, never routed).
+# Reachability: ClusterIP Service `memory-gateway` (80 -> 8080, in-cluster and blackbox probe) and
+# the Tailscale LoadBalancer Service `memory-ts` (tailscale-service.yaml, tailnet host `memory`).
+# There is deliberately no cloudflared/public exposure here: that is olympus-sdk#451.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memory-gateway-config
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-gateway
+    app.kubernetes.io/part-of: memory
+data:
+  # Listeners (defaults of src/config.ts, spelled out so the Service/probe/NetworkPolicy ports
+  # have one visible source).
+  MEMORY_HOST: "0.0.0.0"
+  MEMORY_PORT: "8080"
+  MEMORY_METRICS_PORT: "9090"
+  LOG_LEVEL: "info"
+  # LiteLLM on data-hub (tailnet IP, name-independent) for query embeddings (design 6.3).
+  # The API key is NOT here: it is in Secret memory-gateway (LITELLM_API_KEY_FILE).
+  # Egress to this address from ns memory is untested (T-TS), see README.md.
+  LITELLM_BASE_URL: "http://100.95.232.41:4000/v1"
+  # LiteLLM alias the gateway embeds queries with (768 dimensions, design 3.2). The extraction
+  # alias `memory-extract` belongs to the workers (#453), not the gateway.
+  MEMORY_EMBED_ALIAS: "memory-embed"
+  # --- Cloudflare Access (design 5.2, 5.6) -------------------------------------------------
+  # OWNER-SUPPLIED PLACEHOLDERS (issue olympus-sdk#451 creates the Access application and
+  # gives both values). Leave BOTH unset until then. The gateway requires both or neither
+  # (src/config.ts): with neither it starts, the Access-JWT path is disabled, and a request
+  # that carries only an Access JWT is refused with 401 (fail closed). Gateway keys
+  # (Authorization: Bearer mgw_...) work either way, which is all tailnet mode needs.
+  # Do NOT put a dummy value here: with Access configured /readyz waits for the JWKS to be
+  # fetched from the team domain, so a wrong value keeps both pods NotReady.
+  #   MEMORY_ACCESS_TEAM_DOMAIN: "https://<team>.cloudflareaccess.com"   # no trailing slash
+  #   MEMORY_ACCESS_AUD: "<application AUD tag>"                          # comma-separated if several
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: memory-gateway
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-gateway
+    app.kubernetes.io/part-of: memory
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: memory-gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: memory-gateway
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-gateway
+    app.kubernetes.io/part-of: memory
+spec:
+  # Two replicas: a node drain may take one, never both.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memory-gateway
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-gateway
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-gateway
+    app.kubernetes.io/part-of: memory
+  annotations:
+    # stakater reloader (../../reloader): roll the pods when the ConfigMap or Secret changes.
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memory-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memory-gateway
+        app.kubernetes.io/part-of: memory
+      annotations:
+        # Scraped by the `kubernetes-pods` job of the cluster's Prometheus (verified against the
+        # live config on 2026-10-21: it keeps prometheus.io/scrape=true and honours the
+        # prometheus.io/port and prometheus.io/path annotations, scheme http). No static job needed.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      # No Kubernetes API access is needed: no token is mounted into the pod.
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        # The ghcr.io/nwlnexus/memory-gateway package is private until the owner makes it public.
+        - name: ghcr-pull
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        # Pod Security `restricted` (enforced by the namespace). uid/gid 10001 is the image's USER.
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          # Spread the two replicas across nodes, but never leave a replica unschedulable
+          # when only one node is available (hence preferred, not required).
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: memory-gateway
+      containers:
+        - name: memory-gateway
+          # >>> REPLACE BEFORE ENABLING <<<
+          # PLACEHOLDER digest (64 zeros): it cannot be pulled. Replace it with the first digest
+          # the olympus-sdk `memory-gateway` workflow publishes (job summary "Record image digest"
+          # of the run on main, or `docker buildx imagetools inspect
+          # ghcr.io/nwlnexus/memory-gateway:sha-<short>`). Pin by digest, never by tag.
+          image: ghcr.io/nwlnexus/memory-gateway@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: memory-gateway-config
+          env:
+            # Secrets are read from files (a mounted Secret), not from the environment, so they
+            # do not show up in `kubectl describe pod` or in a crash dump of the environment.
+            - name: DATABASE_URL_FILE
+              value: /run/secrets/memory-gateway/DATABASE_URL
+            - name: LITELLM_API_KEY_FILE
+              value: /run/secrets/memory-gateway/LITELLM_API_KEY
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            # SELECT 1 within 1 s, plus the Access JWKS when Access is configured (design 6.1).
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            # Process liveness only: no database, so a Postgres outage never restarts the pods.
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            # The only writable path (TMPDIR and HOME point here in the image).
+            - name: tmp
+              mountPath: /tmp
+            - name: secrets
+              mountPath: /run/secrets/memory-gateway
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: secrets
+          secret:
+            secretName: memory-gateway
+            defaultMode: 0440
