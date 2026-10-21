@@ -68,7 +68,14 @@ spec:
                 sum=$(sha256sum "$f" | cut -d' ' -f1)
                 # Empty when the ledger does not exist yet (before 0001) or the
                 # version has not been applied.
-                prior=$(psql -Atq -v ON_ERROR_STOP=1 -c "SELECT CASE WHEN to_regclass('memory.schema_migrations') IS NULL THEN '' ELSE coalesce((SELECT checksum FROM memory.schema_migrations WHERE version = '${version}'), '') END")
+                # Existence is checked in its own statement: Postgres resolves table names at
+                # parse time, so referencing memory.schema_migrations inside a CASE fails on
+                # the first run even though that branch is never evaluated.
+                have=$(psql -Atq -v ON_ERROR_STOP=1 -c "SELECT to_regclass('memory.schema_migrations') IS NOT NULL")
+                prior=""
+                if [ "$have" = "t" ]; then
+                  prior=$(psql -Atq -v ON_ERROR_STOP=1 -c "SELECT coalesce((SELECT checksum FROM memory.schema_migrations WHERE version = '${version}'), '')")
+                fi
                 if [ -n "$prior" ]; then
                   if [ "$prior" != "$sum" ]; then
                     echo "ERROR: migration ${base} was applied with checksum ${prior} but the file is now ${sum}. Applied migrations are immutable; add a new migration instead."
