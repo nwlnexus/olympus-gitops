@@ -1,0 +1,61 @@
+# Ingress isolation for the memory namespace. Enforcement relies on k3s' embedded
+# kube-router network-policy controller (same basis as ../arc/networkpolicy.yaml;
+# `disable-network-policy` is not set on compute-hub). If that is ever disabled
+# these policies become inert. The IPv6 link-local caveat documented in
+# ../arc/networkpolicy.yaml applies here too (closed at node level, olympus-infra).
+#
+# Egress is deliberately NOT restricted: the stores only answer connections, the
+# backup/migration Jobs only talk to the stores in this namespace, and the repo's
+# only egress policies (arc) exist to contain untrusted CI code, which this is not.
+# Revisit when the gateway and workers (#450, #451) arrive and need LiteLLM egress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: memory
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Postgres (5432) and FalkorDB (6379) accept connections only from
+#   - any pod in this namespace (gateway, workers, migration Job, backup CronJobs), and
+#   - the blackbox-exporter in `observability` (tcp_connect probes, see
+#     ../observability/prometheus-helmrelease.yaml).
+# Nothing else, in particular no exposure outside the cluster: the Services are
+# ClusterIP/headless only and no Tailscale/Cloudflare object points at them.
+# Clients that live in other namespaces later (e.g. a Tailscale proxy fronting the
+# GATEWAY, #450) get their own rule on the gateway pods, not on the stores.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-store-ingress
+  namespace: memory
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [postgres, falkordb]
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus-blackbox-exporter
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379

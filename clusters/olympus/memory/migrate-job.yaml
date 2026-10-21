@@ -1,0 +1,110 @@
+# Applies the versioned SQL files in migrations/ (mounted from the generated
+# `memory-migrations` ConfigMap) to the `memory` database, in filename order,
+# recording each applied version in memory.schema_migrations. See README.md for how
+# to add a migration.
+#
+# Flux-friendly re-run pattern: kustomization.yaml generates the ConfigMap with a
+# content-hash suffix, so any change to a migration changes the Job's pod template;
+# the `force: enabled` annotation makes Flux delete and recreate the Job (its
+# template is immutable), which re-runs the runner. Already-applied versions are
+# skipped, so a re-run only applies what is new. (Same annotation as
+# ../mem0/init-config-job.yaml.)
+#
+# Rules the runner enforces:
+#   - each file runs in ONE transaction together with its ledger INSERT, so a failed
+#     migration leaves no partial state and no ledger row;
+#   - an applied file whose content has changed (sha256 drift) FAILS the Job. Applied
+#     migrations are immutable; fix forward with a new file;
+#   - files are named NNNN_description.sql, applied in lexical order.
+# Connects as the `postgres` superuser (the only role that exists at this stage).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: memory-migrate
+  namespace: memory
+  annotations:
+    kustomize.toolkit.fluxcd.io/force: enabled
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memory-migrate
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          # Same pinned image as postgres.yaml (client tools match the server major).
+          image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              export PGHOST=postgres PGPORT=5432 PGUSER=postgres PGDATABASE=memory
+              export PGCONNECT_TIMEOUT=5
+
+              i=0
+              until pg_isready -q -t 5; do
+                i=$((i + 1))
+                if [ "$i" -ge 120 ]; then
+                  echo "postgres not ready after ${i} attempts; failing so the Job retries."
+                  exit 1
+                fi
+                echo "waiting for postgres (attempt ${i})"
+                sleep 5
+              done
+
+              for f in /migrations/*.sql; do
+                base=$(basename "$f" .sql)
+                version=${base%%_*}
+                name=${base#*_}
+                sum=$(sha256sum "$f" | cut -d' ' -f1)
+                # Empty when the ledger does not exist yet (before 0001) or the
+                # version has not been applied.
+                prior=$(psql -Atq -v ON_ERROR_STOP=1 -c "SELECT CASE WHEN to_regclass('memory.schema_migrations') IS NULL THEN '' ELSE coalesce((SELECT checksum FROM memory.schema_migrations WHERE version = '${version}'), '') END")
+                if [ -n "$prior" ]; then
+                  if [ "$prior" != "$sum" ]; then
+                    echo "ERROR: migration ${base} was applied with checksum ${prior} but the file is now ${sum}. Applied migrations are immutable; add a new migration instead."
+                    exit 1
+                  fi
+                  echo "skip   ${base} (already applied)"
+                  continue
+                fi
+                echo "apply  ${base}"
+                psql -v ON_ERROR_STOP=1 --single-transaction -q \
+                  -f "$f" \
+                  -c "INSERT INTO memory.schema_migrations (version, name, checksum) VALUES ('${version}', '${name}', '${sum}')"
+              done
+              echo "migrations complete:"
+              psql -v ON_ERROR_STOP=1 -c "SELECT version, name, applied_at FROM memory.schema_migrations ORDER BY version"
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: memory-stores
+                  key: postgres-password
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: memory-migrations

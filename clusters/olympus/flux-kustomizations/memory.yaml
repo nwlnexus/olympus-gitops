@@ -1,0 +1,29 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: memory
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/memory
+  prune: true
+  timeout: 10m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    # ClusterSecretStore onepassword-connect (ExternalSecret memory-stores).
+    - name: external-secrets-config
+    # StorageClass qnap-iscsi (database and graph PVCs).
+    - name: qnap-storage
+    # StorageClass qnap-nfs (backup PVC).
+    - name: nfs-provisioner
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: postgres
+      namespace: memory
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      name: falkordb
+      namespace: memory
