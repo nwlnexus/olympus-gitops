@@ -1,0 +1,25 @@
+# Tailnet-only access for the memory gateway (reachability mode `tailnet`, design 5.6):
+# http://memory.<tailnet>.ts.net. No tailscale.com/funnel and no cloudflared route: the public
+# path (https://memory.nwlnexus.io through Cloudflare Access) is olympus-sdk#451.
+# Only the app port is published; the metrics port 9090 is never routed (design 6.1).
+# Follows ../../mem0/tailscale-service.yaml.
+apiVersion: v1
+kind: Service
+metadata:
+  name: memory-ts
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-gateway
+    app.kubernetes.io/part-of: memory
+  annotations:
+    tailscale.com/hostname: "memory"
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app.kubernetes.io/name: memory-gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

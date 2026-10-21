@@ -152,6 +152,29 @@ spec:
             target_label: instance
           - target_label: __address__
             replacement: blackbox-exporter.observability.svc:9115
+      # Memory gateway (olympus-sdk#450 task G10, design section 9): http_2xx probe of /readyz through
+      # the ClusterIP Service, so a gateway with no ready endpoint, or one whose database is
+      # unreachable, reads as probe_success 0. Allowed by the gateway NetworkPolicy
+      # (memory/gateway/networkpolicy.yaml: blackbox-exporter -> 8080). The gateway's own metrics on
+      # :9090 are scraped by the default `kubernetes-pods` job via the prometheus.io/* pod
+      # annotations (checked against the live config), so no static job is needed for them.
+      - job_name: blackbox-memory-http
+        metrics_path: /probe
+        params:
+          module: [http_2xx]
+        scrape_interval: 30s
+        scrape_timeout: 10s
+        static_configs:
+          - targets: ["http://memory-gateway.memory.svc/readyz"]
+            labels:
+              service: memory-gateway
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.observability.svc:9115
     serverFiles:
       alerting_rules.yml:
         groups:
@@ -277,6 +300,50 @@ spec:
                 annotations:
                   summary: "CronJob {{ $labels.cronjob }} in ns memory has had no successful run for >36h."
                   description: "Check `kubectl -n memory get jobs,pods` and the Job logs; the backup PVC memory-backups (qnap-nfs) being unwritable or full is the likely cause."
+              # Memory gateway and queue (olympus-sdk#450 task G10, design section 9). The queue
+              # gauges are exported by the gateway (Q-QUEUE-METRICS, every 30 s, both replicas, hence
+              # max by); scraped through the kubernetes-pods job. The expr/for/severity are the
+              # design's, verbatim; the annotations are additions.
+              - alert: MemoryQueueBacklogOld
+                expr: max by (stage) (memory_queue_oldest_pending_age_seconds{stage=~"extract|embed|graph_ingest"}) > 14400
+                for: 30m
+                labels: { severity: warning }
+                annotations:
+                  summary: "Memory queue stage {{ $labels.stage }} has a job pending for more than 4h."
+                  description: "The oldest pending `{{ $labels.stage }}` job is {{ $value | humanizeDuration }} old. Workers (olympus-sdk#453) are not keeping up or are down; LiteLLM on data-hub is the usual dependency. `kubectl -n memory exec deploy/memory-gateway -- node dist/admin/cli.js queue stats`."
+              - alert: MemoryQueueBacklogStuck
+                expr: max by (stage) (memory_queue_oldest_pending_age_seconds) > 86400
+                for: 30m
+                labels: { severity: critical }
+                annotations:
+                  summary: "Memory queue stage {{ $labels.stage }} has a job pending for more than 24h."
+                  description: "The oldest pending `{{ $labels.stage }}` job is {{ $value | humanizeDuration }} old. Captured memory is not being processed."
+              - alert: MemoryQueueDeadLetters
+                expr: max by (stage) (memory_queue_jobs{state="dead"}) > 0
+                for: 15m
+                labels: { severity: warning }
+                annotations:
+                  summary: "Memory queue stage {{ $labels.stage }} has dead jobs."
+                  description: "{{ $value }} `{{ $labels.stage }}` job(s) exhausted their attempts. Inspect with `queue stats`, fix the cause, then `queue requeue-dead` (memory-admin CLI in the gateway image)."
+              # The "fifth unused memory system" alarm (design section 9 / platform spec section 9).
+              # Note: a counter with labels has no series until its first increment, so this stays
+              # silent (empty vector) on a gateway that has never received a capture, and for 24h
+              # after the last one; that is the design's expression, kept as written.
+              - alert: MemoryCaptureStalled
+                expr: sum(increase(memory_capture_received_total{result="created"}[24h])) == 0
+                for: 1h
+                labels: { severity: warning }
+                annotations:
+                  summary: "No memory capture was stored in the last 24h."
+                  description: "Hooks are not delivering (gateway key revoked, hook broken after a Claude Code upgrade, gateway unreachable) or nobody used Claude Code. Check the gateway logs and `memory_capture_received_total`."
+              # probe: job blackbox-memory-http, /readyz through the blackbox exporter.
+              - alert: MemoryGatewayDown
+                expr: probe_success{job="blackbox-memory-http"} == 0   # http probe of /readyz via the blackbox exporter
+                for: 10m
+                labels: { severity: critical }
+                annotations:
+                  summary: "The memory gateway is not ready."
+                  description: "GET {{ $labels.instance }} has failed for 10m: no ready gateway pod, or Postgres (or the Access JWKS, when configured) is unreachable. `kubectl -n memory get pods -l app.kubernetes.io/name=memory-gateway` and the pod logs."
     prometheus-pushgateway:
       enabled: false
     kube-state-metrics:

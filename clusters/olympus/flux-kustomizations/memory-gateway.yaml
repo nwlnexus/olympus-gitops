@@ -1,0 +1,29 @@
+# Memory gateway (olympus-sdk#450, task G10). Separate from the `memory` Kustomization on purpose:
+# the stores must stay Ready whatever happens to the gateway (missing image, missing 1Password
+# item, failed rollout). NOT listed in ../kustomization.yaml until the image digest in
+# ../memory/gateway/gateway.yaml is real: see ../memory/gateway/README.md ("Enabling").
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: memory-gateway
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/memory/gateway
+  prune: true
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    # Namespace, Postgres, the role password (Job/memory-migrate) and Secret memory-stores.
+    - name: memory
+    # ClusterSecretStore onepassword-connect (ExternalSecrets).
+    - name: external-secrets-config
+    # LoadBalancerClass tailscale (Service memory-ts).
+    - name: tailscale-operator
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: memory-gateway
+      namespace: memory

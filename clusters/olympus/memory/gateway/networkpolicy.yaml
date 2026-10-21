@@ -1,0 +1,58 @@
+# Ingress allow rules for the gateway pods. The namespace is default-deny ingress
+# (../networkpolicy.yaml); NetworkPolicies are additive, so this adds three narrow rules.
+# Egress is unrestricted in this namespace (see ../networkpolicy.yaml), so the gateway can reach
+# Postgres, DNS and LiteLLM on data-hub without a rule.
+#
+# Postgres and FalkorDB need no change: ../networkpolicy.yaml `allow-store-ingress` already
+# admits every pod in the namespace (podSelector {}), which includes the gateway pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-ingress
+  namespace: memory
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: memory-gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    # App port from the Tailscale operator's proxy pod that fronts Service `memory-ts`
+    # (StatefulSet `ts-memory-ts-*` in ns tailscale, labelled by the operator with the parent
+    # Service). Future public path (#451): add the cloudflared rule there, not here.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tailscale
+          podSelector:
+            matchLabels:
+              tailscale.com/managed: "true"
+              tailscale.com/parent-resource: memory-ts
+              tailscale.com/parent-resource-ns: memory
+      ports:
+        - protocol: TCP
+          port: 8080
+    # App port from the blackbox-exporter (http probe of /readyz, job blackbox-memory-http in
+    # ../../observability/prometheus-helmrelease.yaml).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus-blackbox-exporter
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Metrics port from Prometheus only (job kubernetes-pods).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+              app.kubernetes.io/component: server
+      ports:
+        - protocol: TCP
+          port: 9090

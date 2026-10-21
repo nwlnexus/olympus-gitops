@@ -29,3 +29,4 @@ resources:
   - flux-kustomizations/arc.yaml
   - flux-kustomizations/kvm-device-plugin.yaml
   - flux-kustomizations/memory.yaml
+  - flux-kustomizations/memory-gateway.yaml

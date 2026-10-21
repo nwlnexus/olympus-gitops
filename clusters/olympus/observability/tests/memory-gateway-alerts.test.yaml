@@ -1,0 +1,144 @@
+# Unit tests for the memory gateway alerts (design section 9, olympus-sdk#450 task G10).
+# Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease first).
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  # --- MemoryQueueBacklogOld: > 4h, for 30m, stages extract|embed|graph_ingest only -----------
+  - name: backlog older than 4h fires after 30m, graph_forget is excluded
+    interval: 1m
+    input_series:
+      - series: 'memory_queue_oldest_pending_age_seconds{stage="extract"}'
+        values: "15000x60"
+      - series: 'memory_queue_oldest_pending_age_seconds{stage="graph_forget"}'
+        values: "15000x60"
+      - series: 'memory_queue_oldest_pending_age_seconds{stage="embed"}'
+        values: "100x60"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MemoryQueueBacklogOld
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: MemoryQueueBacklogOld
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              stage: extract
+            exp_annotations:
+              summary: "Memory queue stage extract has a job pending for more than 4h."
+              description: "The oldest pending `extract` job is 4h 10m 0s old. Workers (olympus-sdk#453) are not keeping up or are down; LiteLLM on data-hub is the usual dependency. `kubectl -n memory exec deploy/memory-gateway -- node dist/admin/cli.js queue stats`."
+
+  # --- MemoryQueueBacklogStuck: > 24h on any stage, for 30m -----------------------------------
+  - name: backlog older than 24h is critical on any stage
+    interval: 1m
+    input_series:
+      - series: 'memory_queue_oldest_pending_age_seconds{stage="graph_forget"}'
+        values: "90000x60"
+      - series: 'memory_queue_oldest_pending_age_seconds{stage="extract"}'
+        values: "80000x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: MemoryQueueBacklogStuck
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              stage: graph_forget
+            exp_annotations:
+              summary: "Memory queue stage graph_forget has a job pending for more than 24h."
+              description: "The oldest pending `graph_forget` job is 1d 1h 0m 0s old. Captured memory is not being processed."
+
+  # --- MemoryQueueDeadLetters: any dead job for 15m; two replicas report the same gauge -------
+  - name: dead letters fire after 15m, max by stage collapses the two replicas
+    interval: 1m
+    input_series:
+      - series: 'memory_queue_jobs{stage="embed",state="dead",pod="memory-gateway-a"}'
+        values: "2x40"
+      - series: 'memory_queue_jobs{stage="embed",state="dead",pod="memory-gateway-b"}'
+        values: "2x40"
+      - series: 'memory_queue_jobs{stage="extract",state="pending",pod="memory-gateway-a"}'
+        values: "500x40"
+      - series: 'memory_queue_jobs{stage="extract",state="dead",pod="memory-gateway-a"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MemoryQueueDeadLetters
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: MemoryQueueDeadLetters
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              stage: embed
+            exp_annotations:
+              summary: "Memory queue stage embed has dead jobs."
+              description: "2 `embed` job(s) exhausted their attempts. Inspect with `queue stats`, fix the cause, then `queue requeue-dead` (memory-admin CLI in the gateway image)."
+
+  # --- MemoryCaptureStalled: no created capture in 24h, for 1h -------------------------------
+  - name: flat created counter fires
+    interval: 5m
+    input_series:
+      - series: 'memory_capture_received_total{result="created",hook_event="Stop",pod="a"}'
+        values: "10x400"
+      - series: 'memory_capture_received_total{result="duplicate",hook_event="Stop",pod="a"}'
+        values: "0+5x400"
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: MemoryCaptureStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "No memory capture was stored in the last 24h."
+              description: "Hooks are not delivering (gateway key revoked, hook broken after a Claude Code upgrade, gateway unreachable) or nobody used Claude Code. Check the gateway logs and `memory_capture_received_total`."
+  - name: a counter that keeps growing does not fire
+    interval: 5m
+    input_series:
+      - series: 'memory_capture_received_total{result="created",hook_event="Stop",pod="a"}'
+        values: "0+1x400"
+    alert_rule_test:
+      - eval_time: 26h
+        alertname: MemoryCaptureStalled
+        exp_alerts: []
+  - name: no created series at all (gateway never captured) stays silent, as designed
+    interval: 5m
+    input_series:
+      - series: 'memory_http_requests_total{route="/healthz",method="GET",status="200"}'
+        values: "0+1x400"
+    alert_rule_test:
+      - eval_time: 26h
+        alertname: MemoryCaptureStalled
+        exp_alerts: []
+
+  # --- MemoryGatewayDown: failing /readyz probe for 10m ---------------------------------------
+  - name: failing readyz probe fires after 10m, the tcp store probe is not confused with it
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-memory-http",instance="http://memory-gateway.memory.svc/readyz",service="memory-gateway"}'
+        values: "0x30"
+      - series: 'probe_success{job="blackbox-memory-tcp",instance="postgres.memory.svc:5432",service="memory-postgres"}'
+        values: "0x30"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: MemoryGatewayDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: MemoryGatewayDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: blackbox-memory-http
+              instance: "http://memory-gateway.memory.svc/readyz"
+              service: memory-gateway
+            exp_annotations:
+              summary: "The memory gateway is not ready."
+              description: "GET http://memory-gateway.memory.svc/readyz has failed for 10m: no ready gateway pod, or Postgres (or the Access JWKS, when configured) is unreachable. `kubectl -n memory get pods -l app.kubernetes.io/name=memory-gateway` and the pod logs."
+  - name: passing probe is quiet
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-memory-http",instance="http://memory-gateway.memory.svc/readyz",service="memory-gateway"}'
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MemoryGatewayDown
+        exp_alerts: []
