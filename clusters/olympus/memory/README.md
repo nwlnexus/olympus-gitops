@@ -1,8 +1,8 @@
 # memory — data stores for the memory platform
 
 Namespace `memory`. Implements nwlnexus/olympus-sdk#449 (epic #444, spec sections D3, D4
-and 5.2). This directory holds only the **stores**; the gateway (#450) and workers (#451)
-come later and add their own manifests and migrations.
+and 5.2). This directory holds the **stores** and the schema (migrations 0001-0004, see below); the
+gateway (#450) and workers (#451) come later and add their own manifests.
 
 | Object | What |
 |---|---|
@@ -22,8 +22,10 @@ platform to an `olympus.io/role=agent-services` node.
 The ExternalSecret reads a **new** item in vault **Dev**:
 
 - item name: `memory-stores`
-- fields: `postgres-password`, `falkordb-password` (concealed; generate with
-  `openssl rand -hex 24`)
+- fields: `postgres-password`, `falkordb-password`, `gateway-db-password`,
+  `worker-db-password` (concealed; generate each with `openssl rand -hex 24`). The last two
+  are the passwords of the Postgres roles `memory_gateway` and `memory_worker` (migration
+  0004); the stores themselves only need the first two.
 
 Create it before the PR is merged. Until it exists the Secret `memory-stores` does not,
 both StatefulSets wait in `CreateContainerConfigError`, and the `memory` Flux Kustomization
@@ -39,7 +41,7 @@ the Postgres password later: change the 1Password field, then
 Migrations are plain SQL files in `migrations/`, named `NNNN_short_description.sql`
 (zero-padded, next free number), applied in filename order by `Job/memory-migrate`.
 
-1. Create `migrations/0002_<what>.sql`. It must be **idempotent** (`CREATE ... IF NOT EXISTS`,
+1. Create `migrations/<next number>_<what>.sql` (the next free number is `0005`). It must be **idempotent** (`CREATE ... IF NOT EXISTS`,
    `ADD COLUMN IF NOT EXISTS`, `DO $$ ... $$` guards), because it is run once per database but
    may be replayed by hand or after a restore. Do not put `BEGIN`/`COMMIT` in it: the runner
    wraps each file and its ledger row in one transaction, so a failing file leaves nothing behind.
@@ -56,9 +58,60 @@ Migrations are plain SQL files in `migrations/`, named `NNNN_short_description.s
 Inspect state: `kubectl -n memory logs job/memory-migrate` and
 `kubectl -n memory exec postgres-0 -- psql -U postgres -d memory -c 'SELECT * FROM memory.schema_migrations ORDER BY version'`.
 
-`0001_init.sql` only creates the `vector` extension, the `memory` schema and the ledger. The
-episode/fact/queue tables are owned by #452 and #450. The Job connects as the `postgres`
-superuser; application roles with least privilege should arrive in those later migrations.
+The Job connects as the `postgres` superuser.
+
+### Migrations 0001-0004
+
+| File | What |
+|---|---|
+| `0001_init.sql` | `vector` extension, schema `memory`, the ledger `memory.schema_migrations` |
+| `0002_core.sql` | `client`, `episode`, `fact`, `fact_revision`, `fact_embedding` (vector(768), HNSW), `import_ledger`, `audit_log`, `touch_updated_at()` |
+| `0003_queue_and_graph.sql` | `capture_queue` (the durable job queue), `fact_graph_episode`, and the Postgres mirror of the Graphiti graph (`entity`, `entity_edge`, `fact_entity`) |
+| `0004_roles.sql` | least-privilege login roles `memory_gateway` and `memory_worker` with their grants (no password in SQL) |
+
+0002-0004 are copied verbatim from the approved contract,
+[`docs/superpowers/specs/2026-10-21-memory-gateway-contract-design.md`](https://github.com/nwlnexus/olympus-sdk/blob/main/docs/superpowers/specs/2026-10-21-memory-gateway-contract-design.md)
+section 3 in olympus-sdk (epic #444, issue #450). That document is the authority for the
+tables, the roles' privileges and the queue semantics; do not edit these files, add a new
+migration instead. The gateway and the workers connect as `memory_gateway` / `memory_worker`,
+never as `postgres`.
+
+### Role passwords
+
+Migration 0004 creates the two roles with `LOGIN` but no password, so until the password step
+has run they cannot authenticate. After the migration loop the same Job sets both passwords
+from the Secret `memory-stores` (keys `gateway-db-password` and `worker-db-password`, from the
+1Password item of the same name):
+
+- Each password goes to `psql` through its **environment** and is read by a `\set` backtick
+  (`printf %s "$DB_PW"`), then substituted with `ALTER ROLE :"role" PASSWORD :'pw'`. It is on
+  no command line (so not in the process list), not in a SQL file, not in the ConfigMap, and
+  never echoed; the Job only logs `password set for role <name>`. The session also sets
+  `log_min_duration_statement = -1` and `log_min_error_statement = panic` so the statement
+  cannot reach the server log.
+- The step is idempotent (`ALTER ROLE ... PASSWORD` can be repeated) and runs on every Job run,
+  including runs where every migration was skipped. An empty value fails the Job.
+- **Merging before the 1Password fields exist is safe but leaves the Job pending.** The
+  ExternalSecret then fails to sync (`SecretSyncedError`; the Secret keeps its existing keys),
+  the Job's `secretKeyRef` for the new keys cannot be resolved, and the Job pod sits in
+  `CreateContainerConfigError` (`kubectl -n memory describe pod -l app.kubernetes.io/name=memory-migrate`
+  says `couldn't find key gateway-db-password`). It does not crash-loop and does not consume
+  `backoffLimit`; the new env vars are deliberately **not** `optional: true` (fail closed: an
+  optional reference would start the Job with empty passwords, which it rejects, burning
+  `backoffLimit` and ending Failed, which only a spec change could retry). Migrations 0002-0004
+  are not applied during the wait either, because the container does not start. Once the fields
+  exist, the next ExternalSecret refresh (hourly, or
+  `kubectl -n memory annotate externalsecret memory-stores force-sync=$(date +%s) --overwrite`)
+  creates the keys and the kubelet starts the pod by itself. The stores are unaffected; the
+  `memory` Kustomization only health-checks the StatefulSets.
+- **Rotating a role password:** change the 1Password field, wait for the Secret to refresh,
+  then re-run the Job (`kubectl -n memory delete job memory-migrate`, then
+  `flux reconcile kustomization memory -n flux-system`). Running pods that use the old password
+  keep working until they reconnect; restart them afterwards.
+- To log in as a role from inside the cluster, for example to test grants:
+  `kubectl -n memory exec -it postgres-0 -- psql -h postgres -U memory_gateway -d memory`
+  (`-h postgres` forces TCP password authentication; type the password at the prompt rather
+  than putting it on a command line).
 
 ## Backups
 

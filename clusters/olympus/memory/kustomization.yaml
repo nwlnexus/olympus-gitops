@@ -25,3 +25,6 @@ configMapGenerator:
     namespace: memory
     files:
       - migrations/0001_init.sql
+      - migrations/0002_core.sql
+      - migrations/0003_queue_and_graph.sql
+      - migrations/0004_roles.sql
