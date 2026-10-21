@@ -127,6 +127,31 @@ spec:
             target_label: instance
           - target_label: __address__
             replacement: blackbox-exporter.observability.svc:9115
+      # Memory platform stores (olympus-sdk#449). TCP connect to the ClusterIP Services
+      # in ns `memory`; allowed by the NetworkPolicy there (blackbox-exporter only).
+      # The cluster has no Prometheus operator, so these static jobs (not
+      # ServiceMonitors) are how the stores are watched. A tcp_connect to a Service
+      # with no ready endpoints fails, so a down or NotReady pod reads as probe_success 0.
+      - job_name: blackbox-memory-tcp
+        metrics_path: /probe
+        params:
+          module: [tcp_connect]
+        scrape_interval: 30s
+        scrape_timeout: 10s
+        static_configs:
+          - targets: ["postgres.memory.svc:5432"]
+            labels:
+              service: memory-postgres
+          - targets: ["falkordb.memory.svc:6379"]
+            labels:
+              service: memory-falkordb
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.observability.svc:9115
     serverFiles:
       alerting_rules.yml:
         groups:
@@ -208,6 +233,50 @@ spec:
                   severity: warning
                 annotations:
                   summary: "blackbox-exporter is not being scraped successfully (data-hub probes are blind)."
+          - name: memory
+            rules:
+              # Memory platform stores (ns memory): probes come from the
+              # blackbox-memory-tcp job above.
+              - alert: MemoryStoreDown
+                expr: probe_success{job="blackbox-memory-tcp"} == 0
+                for: 10m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: "Memory store {{ $labels.service }} is not accepting connections."
+                  description: "TCP connect to {{ $labels.instance }} from the cluster has failed for 10m. Check `kubectl -n memory get pods,pvc` and the pod logs; a missing Secret `memory-stores` (1Password item of the same name) or an unattached iSCSI volume are the usual causes."
+              # kubelet_volume_stats_* is exposed twice (jobs kubernetes-nodes and
+              # kubernetes-api-servers), hence max by (...). Covers the two data PVCs
+              # (data-postgres-0, data-falkordb-0) and the NFS backup PVC when it reports stats.
+              - alert: MemoryStorePVCFillingUp
+                expr: >-
+                  max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace="memory"})
+                  / max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace="memory"})
+                  > 0.8
+                for: 30m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "PVC {{ $labels.persistentvolumeclaim }} in ns memory is {{ $value | humanizePercentage }} full."
+                  description: "qnap-iscsi allows online expansion: patch the PVC's spec.resources.requests.storage (StatefulSet volumeClaimTemplates are immutable, so see memory/README.md for the procedure)."
+              # No successful backup for 36h, or no success ever and the CronJob is
+              # already older than 36h (kube_cronjob_status_last_successful_time is
+              # absent until the first success).
+              - alert: MemoryBackupStale
+                expr: >-
+                  (time() - kube_cronjob_status_last_successful_time{namespace="memory"} > 129600)
+                  or
+                  (
+                    time() - kube_cronjob_created{namespace="memory"} > 129600
+                    unless on (namespace, cronjob)
+                    kube_cronjob_status_last_successful_time{namespace="memory"}
+                  )
+                for: 5m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "CronJob {{ $labels.cronjob }} in ns memory has had no successful run for >36h."
+                  description: "Check `kubectl -n memory get jobs,pods` and the Job logs; the backup PVC memory-backups (qnap-nfs) being unwritable or full is the likely cause."
     prometheus-pushgateway:
       enabled: false
     kube-state-metrics:
