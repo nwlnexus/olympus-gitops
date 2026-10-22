@@ -1,0 +1,203 @@
+# Unit tests for the memory embedder alerts (olympus-sdk#529, epic #444).
+# Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease first).
+# The series carry the labels the cluster's `kubernetes-pods` job gives them: namespace and the pod
+# labels (app_kubernetes_io_name), plus pod.
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  # --- MemoryEmbedderDown: blackbox probe of /health, for 10m ---------------------------------
+  - name: failing health probe fires after 10m, the gateway probe is not confused with it
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-memory-embedder",instance="http://memory-embedder.memory.svc/health",service="memory-embedder"}'
+        values: "0x30"
+      - series: 'probe_success{job="blackbox-memory-http",instance="http://memory-gateway.memory.svc/readyz",service="memory-gateway"}'
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: MemoryEmbedderDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: MemoryEmbedderDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: blackbox-memory-embedder
+              instance: "http://memory-embedder.memory.svc/health"
+              service: memory-embedder
+            exp_annotations:
+              summary: "The memory embedder is not serving."
+              description: "GET http://memory-embedder.memory.svc/health has failed for 10m: no ready embedder pod. Embeddings (worker embed stage, gateway recall) are failing or queueing. `kubectl -n memory get pods -l app.kubernetes.io/name=memory-embedder`; Init:Error means the model download from huggingface.co or the cache PVC failed (`kubectl -n memory logs <pod> -c fetch-model`), otherwise the pod logs."
+      - eval_time: 15m
+        alertname: MemoryGatewayDown
+        exp_alerts: []
+
+  - name: a passing probe, or one that recovers within 10m, is quiet
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-memory-embedder",instance="http://memory-embedder.memory.svc/health",service="memory-embedder"}'
+        values: "0x8 1x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MemoryEmbedderDown
+        exp_alerts: []
+
+  # --- MemoryEmbedderMetricsAbsent: no pod scraped successfully for 10m ---------------------------
+  - name: no scraped embedder pod fires after 10m
+    interval: 1m
+    input_series:
+      # Other pods of the job exist, the embedder's do not.
+      - series: 'up{job="kubernetes-pods",namespace="memory",app_kubernetes_io_name="memory-gateway",pod="memory-gateway-a"}'
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: MemoryEmbedderMetricsAbsent
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: MemoryEmbedderMetricsAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "No memory embedder pod is being scraped."
+              description: "Prometheus has had no successful scrape of any memory-embedder pod for 10m (not running, not scheduled, or the NetworkPolicy/annotations are wrong). `kubectl -n memory get pods -l app.kubernetes.io/name=memory-embedder -o wide`."
+
+  - name: one scraped replica is enough for MetricsAbsent but not for Degraded
+    interval: 1m
+    input_series:
+      - series: 'up{job="kubernetes-pods",namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a"}'
+        values: "1x60"
+      - series: 'up{job="kubernetes-pods",namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-b"}'
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MemoryEmbedderMetricsAbsent
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: MemoryEmbedderDegraded
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: MemoryEmbedderMetricsAbsent
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: MemoryEmbedderDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Only 1 of 2 memory embedder replicas is being scraped."
+              description: "One replica has been missing for 30m; capacity is halved and a second failure is an outage. `kubectl -n memory get pods -l app.kubernetes.io/name=memory-embedder -o wide` (a node drain, a stuck model download or a failed scheduling are the usual causes)."
+
+  - name: two scraped replicas are quiet
+    interval: 1m
+    input_series:
+      - series: 'up{job="kubernetes-pods",namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a"}'
+        values: "1x60"
+      - series: 'up{job="kubernetes-pods",namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-b"}'
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: MemoryEmbedderDegraded
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: MemoryEmbedderMetricsAbsent
+        exp_alerts: []
+
+  # --- MemoryEmbedderErrorRate: > 5% non-2xx over 5m, for 10m, with some traffic -------------------
+  - name: 20 percent failures fire after 10m
+    interval: 1m
+    input_series:
+      # 120 requests per minute (2/s) per replica, 20% of them rejected with 429.
+      - series: 'te_request_count{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a",method="single"}'
+        values: "0+120x40"
+      - series: 'te_request_success{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a",method="single"}'
+        values: "0+96x40"
+      - series: 'te_request_count{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-b",method="single"}'
+        values: "0+120x40"
+      - series: 'te_request_success{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-b",method="single"}'
+        values: "0+96x40"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: MemoryEmbedderErrorRate
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: MemoryEmbedderErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "More than 5% of memory embedder requests are failing."
+              description: "20% of /v1/embeddings requests failed over 5m. 429 means the replicas are saturated (see MemoryEmbedderSlow, scale the Deployment), 4xx means a client is sending bad input, 5xx means a pod problem (`kubectl -n memory logs deploy/memory-embedder`)."
+
+  - name: 1 percent failures, or failures without traffic, are quiet
+    interval: 1m
+    input_series:
+      - series: 'te_request_count{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a",method="single"}'
+        values: "0+120x40"
+      - series: 'te_request_success{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a",method="single"}'
+        values: "0+119x40"
+      # An idle pod whose only requests in the window failed: below the traffic floor (0.05/s).
+      - series: 'te_request_count{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-b",method="batch"}'
+        values: "0x40"
+      - series: 'te_request_success{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-b",method="batch"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: MemoryEmbedderErrorRate
+        exp_alerts: []
+
+  - name: a failing pod with no real traffic stays below the floor
+    interval: 1m
+    input_series:
+      - series: 'te_request_count{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a",method="single"}'
+        values: "0+1x40"
+      - series: 'te_request_success{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a",method="single"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: MemoryEmbedderErrorRate
+        exp_alerts: []
+
+  # --- MemoryEmbedderSlow: p95 of te_request_duration > 8s over 5m, for 15m -----------------------
+  - name: p95 above 8s fires after 15m
+    interval: 1m
+    input_series:
+      # 60 requests per minute; 80% finish within 1s, the rest within 20s: p95 lands in the 20s bucket.
+      - series: 'te_request_duration_bucket{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a",le="1"}'
+        values: "0+48x40"
+      - series: 'te_request_duration_bucket{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a",le="8"}'
+        values: "0+50x40"
+      - series: 'te_request_duration_bucket{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a",le="20"}'
+        values: "0+60x40"
+      - series: 'te_request_duration_bucket{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a",le="+Inf"}'
+        values: "0+60x40"
+      - series: 'te_request_count{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a",method="single"}'
+        values: "0+60x40"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MemoryEmbedderSlow
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: MemoryEmbedderSlow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Memory embedder p95 latency is above 8s."
+              description: "p95 /v1/embeddings latency is 16.4s over 5m. The embedder is saturated (offered load above its CPU capacity: see memory/embedder/README.md, \"Sizing\") or CPU-throttled on the node. Check `te_queue_size` and `kubectl -n memory top pods`."
+
+  - name: fast requests are quiet
+    interval: 1m
+    input_series:
+      - series: 'te_request_duration_bucket{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a",le="1"}'
+        values: "0+60x40"
+      - series: 'te_request_duration_bucket{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a",le="+Inf"}'
+        values: "0+60x40"
+      - series: 'te_request_count{namespace="memory",app_kubernetes_io_name="memory-embedder",pod="memory-embedder-a",method="single"}'
+        values: "0+60x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: MemoryEmbedderSlow
+        exp_alerts: []
