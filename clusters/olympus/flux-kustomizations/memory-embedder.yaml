@@ -1,0 +1,29 @@
+# Memory embedder (olympus-sdk#529, epic #444): CPU text-embeddings-inference serving
+# nomic-ai/nomic-embed-text-v1.5 over an OpenAI-compatible /v1/embeddings. Separate from `memory`,
+# `memory-gateway` and `memory-workers` on purpose: the stores, the gateway and the workers must stay
+# Ready whatever happens to the embedder (failed rollout, Hugging Face unreachable on first start,
+# QNAP cache unavailable). Nothing consumes the Service yet, so registering it changes nothing else.
+# See ../memory/embedder/README.md.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: memory-embedder
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/memory/embedder
+  prune: true
+  # The first start downloads ~550 MB from huggingface.co and warms the model up (about a minute).
+  timeout: 10m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    # Namespace `memory` (Pod Security restricted, default-deny ingress) and, transitively, the
+    # StorageClass qnap-nfs (PVC memory-embedder-cache) from nfs-provisioner.
+    - name: memory
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: memory-embedder
+      namespace: memory

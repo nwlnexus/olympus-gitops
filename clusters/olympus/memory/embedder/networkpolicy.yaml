@@ -1,0 +1,55 @@
+# Ingress allow rules for the embedder pods. The namespace is default-deny ingress
+# (../networkpolicy.yaml); NetworkPolicies are additive. Egress is unrestricted in this namespace
+# (verified read-only against the live cluster: no policy in `memory` has policyTypes Egress), so
+# the init step reaches huggingface.co (and its LFS CDN, *.hf.co) and CoreDNS without a rule.
+#
+# The kubelet's probes come from the node and are not subject to NetworkPolicy under k3s'
+# kube-router policy controller, same as for the gateway and worker pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-embedder-ingress
+  namespace: memory
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: memory-embedder
+  policyTypes:
+    - Ingress
+  ingress:
+    # The API (8080: /v1/embeddings) from the clients, and only them: the gateway (query embedding
+    # for recall) and the two worker Deployments (embed stage, extract stage). Any other pod in the
+    # namespace, including the databases and Jobs, is denied.
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [memory-gateway, memory-worker-embed, memory-worker-extract]
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Health probe from the blackbox-exporter (job blackbox-memory-embedder in
+    # ../../observability/prometheus-helmrelease.yaml, GET /health through the Service).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus-blackbox-exporter
+      ports:
+        - protocol: TCP
+          port: 8080
+    # /metrics from the Prometheus server only (job kubernetes-pods, pod annotations).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+              app.kubernetes.io/component: server
+      ports:
+        - protocol: TCP
+          port: 8080
