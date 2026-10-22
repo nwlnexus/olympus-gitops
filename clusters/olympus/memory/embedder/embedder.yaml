@@ -1,0 +1,296 @@
+# Memory embedder (nwlnexus/olympus-sdk#529, epic #444; why: #527, Ollama's embedder stalls on data-hub).
+# A small, boring CPU embedding service in ns `memory`: HuggingFace text-embeddings-inference (TEI)
+# serving nomic-ai/nomic-embed-text-v1.5 (768 dims, mean pooling, L2-normalised) behind an
+# OpenAI-compatible POST /v1/embeddings. Clients send the `search_document: ` / `search_query: `
+# prefixes themselves; the server adds nothing.
+#
+# Deployed by its own Flux Kustomization (../../flux-kustomizations/memory-embedder.yaml), like the
+# gateway and the workers, so a broken embedder rollout can never make the stores, the gateway or
+# the workers unhealthy. README.md next to this file has the pins, sizing, bump/roll/rollback steps.
+#
+# Pins (bump together, see README.md "Bumping"):
+#   image  ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4 @ the digest below (multi-arch index)
+#   model  nomic-ai/nomic-embed-text-v1.5 @ e5cf08aadaa33385f5990def41f7a23405aec398 (2025-07-21;
+#          file checksums in SHA256SUMS). Deliberately NOT the newest revision (e9b6763, 2026-04-07,
+#          "v5 Transformers"): its config.json has a duplicate `hidden_size` key that TEI's strict ONNX
+#          config parser rejects, which silently drops the server to the 1.4x slower candle backend.
+#          The weights are byte-identical in both revisions.
+#   engine TEI picks the ONNX Runtime backend because the model directory contains onnx/model.onnx
+#          (fp32, no quantisation: vectors match the Hugging Face weights to 1e-12).
+---
+# Model cache shared by both replicas. qnap-nfs is the only class here that is ReadWriteMany (the
+# iSCSI class is RWO, one node at a time); its reclaimPolicy is Delete / archiveOnDelete false, which
+# is fine for a cache that the init step rebuilds from the pinned revision in seconds (a Flux prune,
+# i.e. the documented rollback, therefore removes it too). Only the init container mounts it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memory-embedder-cache
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-embedder
+    app.kubernetes.io/part-of: memory
+spec:
+  storageClassName: qnap-nfs
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      # One model revision is ~550 MB; room for two revisions during a model roll.
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: memory-embedder
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-embedder
+    app.kubernetes.io/part-of: memory
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: memory-embedder
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+# Two replicas, a node drain may take one, never both.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: memory-embedder
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-embedder
+    app.kubernetes.io/part-of: memory
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memory-embedder
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-embedder
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-embedder
+    app.kubernetes.io/part-of: memory
+    app.kubernetes.io/component: embedder
+  annotations:
+    # stakater reloader (../../reloader): roll the pods when a referenced ConfigMap changes. The
+    # init ConfigMap has a content-hash name, so kustomize already rewrites the reference; this is
+    # belt and braces for anything added later.
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Never below two serving replicas during a rollout: surge one pod, wait for it to be Ready.
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memory-embedder
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memory-embedder
+        app.kubernetes.io/part-of: memory
+        # NOT `worker`: the worker NetworkPolicy selects part-of=memory + component=worker.
+        app.kubernetes.io/component: embedder
+      annotations:
+        # Scraped by the `kubernetes-pods` job of the cluster's Prometheus (the same mechanism that
+        # scrapes the gateway and the workers). TEI serves its te_* metrics on the API port.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      # No Kubernetes API access is needed: no token is mounted into the pod.
+      automountServiceAccountToken: false
+      # The model is loaded read-only; there is nothing to flush. 30 s lets in-flight requests finish.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        # Pod Security `restricted` (enforced by the namespace). The TEI image runs as root by default,
+        # so the user is set here; nothing in the image needs root (port 8080, model in /model, /tmp).
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        nodeAffinity:
+          # The onodes only: naraka-01 is tainted (olympus.io/role=management-hub:NoSchedule) and
+          # labelled; this keeps the embedder off it even if the taint were ever removed.
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: olympus.io/role
+                    operator: DoesNotExist
+        podAntiAffinity:
+          # One replica per node. Preferred (as for the embed workers), so a single surviving node
+          # still runs both replicas instead of leaving one Pending.
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: memory-embedder
+      initContainers:
+        # Makes sure the pinned model is on the cache PVC (downloading it from huggingface.co on the
+        # first start, bounded and retried, SHA-256 verified) and copies it to the pod-local emptyDir.
+        # Same image as the server (Debian: bash, curl, sha256sum); no second image to track.
+        - name: fetch-model
+          image: ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "/config/fetch-model.sh"]
+          env:
+            - name: MODEL_REPO
+              value: nomic-ai/nomic-embed-text-v1.5
+            # A commit sha, never a branch. Must match SHA256SUMS and the header of this file.
+            - name: MODEL_REVISION
+              value: e5cf08aadaa33385f5990def41f7a23405aec398
+            - name: FETCH_DEADLINE_SECONDS
+              value: "900"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: cache
+              mountPath: /cache
+            - name: model
+              mountPath: /model
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: embedder
+          # Pinned by digest, never by tag (cpu-1.9.4, released 2026-09-15; this is the digest of the
+          # multi-arch index, linux/amd64 is the only platform in it).
+          image: ghcr.io/huggingface/text-embeddings-inference@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+          imagePullPolicy: IfNotPresent
+          # The image ENTRYPOINT is text-embeddings-router; these are its arguments.
+          args:
+            - --model-id=/model
+            # What clients put in the `model` field of the OpenAI request (TEI ignores the field
+            # for routing; it is echoed back in the response).
+            - --served-model-name=nomic-embed-text-v1.5
+            - --port=8080
+            # Longest sequence the model was trained for is 2048 tokens (config.json
+            # max_trained_positions), and it is what Ollama's nomic-embed-text served. Longer inputs
+            # are truncated to it (auto-truncate, the default) instead of failing (Ollama answers
+            # HTTP 500 above ~7,000 characters), so an 8,000 character fact is embedded from its
+            # first ~2,000 tokens. It also bounds the memory a single batch can take (measured peak
+            # RSS 2.1 GB under the worst load, see README) and the model warm-up time.
+            - --max-batch-tokens=2048
+            # Per request: the OpenAI-style array form, up to 32 inputs (the default).
+            - --max-client-batch-size=32
+            # Requests in flight per replica (queued + running). Beyond it the server answers HTTP 429
+            # immediately instead of queueing without bound: 128 requests of ~200 characters are
+            # about 7 s of work for one replica (README: "Sizing"). Clients must retry on 429.
+            - --max-concurrent-requests=128
+            - --payload-limit=1000000
+          env:
+            # The CPU image sizes its thread pools from the node's cores, not from the cgroup quota
+            # (RAYON_NUM_THREADS=8 baked in). Keep all three equal to the CPU limit below, otherwise
+            # threads fight over the quota and get throttled. Throughput scales linearly with them
+            # (README: "Sizing").
+            - name: RAYON_NUM_THREADS
+              value: "6"
+            - name: MKL_NUM_THREADS
+              value: "6"
+            - name: OMP_NUM_THREADS
+              value: "6"
+            # The model is local: never try to reach the Hub from the server process.
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            # Default is /data (not writable here); nothing is cached there in local-model mode.
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /tmp/hf
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          startupProbe:
+            # Model load and warm-up take about 4 s; allow 5 minutes (slow node, cold page cache).
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 60
+          readinessProbe:
+            # /health runs a real (tiny) inference through the backend, so it is also false while the
+            # model is unusable. Measured: it answers within ~3 s even with a backlog of 60 maximum-
+            # length documents, so 10 s x 6 only trips when the server is really stuck.
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            # Same endpoint, slower: a wedged backend behind a live HTTP listener (the shape of the
+            # Ollama stall, olympus-sdk#527) gets the pod restarted after ~2 minutes, a merely busy
+            # pod never does.
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 6
+          resources:
+            # Measured (README: "Sizing"): throughput is linear in CPUs, about 7 embeddings/s per CPU
+            # for 80-character facts and 3.4/s per CPU for 200-character ones. Memory: 1.5 GB idle,
+            # 2.1 GB peak under the worst test load (8 x 8,000-character batches).
+            requests:
+              cpu: "2"
+              memory: 2Gi
+            limits:
+              # Not unlimited: the onodes are also the k3s control plane and etcd members.
+              cpu: "6"
+              memory: 3Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            # The verified model copy, written by the init container only.
+            - name: model
+              mountPath: /model
+              readOnly: true
+            # TEI's internal unix socket (/tmp/text-embeddings-inference-server) and scratch space.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: memory-embedder-cache
+        - name: model
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: config
+          configMap:
+            name: memory-embedder-init
+            defaultMode: 0555

@@ -2,8 +2,9 @@
 
 Namespace `memory`. Implements nwlnexus/olympus-sdk#449 (epic #444, spec sections D3, D4
 and 5.2). This directory holds the **stores** and the schema (migrations 0001-0004, see below); the
-gateway (#450, see `gateway/README.md`; deployed by its own Flux Kustomization) and workers (#453)
-come later and add their own manifests.
+gateway (#450, see `gateway/README.md`; deployed by its own Flux Kustomization), workers (#453, see
+`workers/README.md`) and the CPU embedding service (olympus-sdk#529, see `embedder/README.md`) have their
+own manifests and Flux Kustomizations.
 
 | Object | What |
 |---|---|

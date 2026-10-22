@@ -175,6 +175,28 @@ spec:
             target_label: instance
           - target_label: __address__
             replacement: blackbox-exporter.observability.svc:9115
+      # Memory embedder (olympus-sdk#529, epic #444): http_2xx probe of TEI's /health through the
+      # ClusterIP Service, so a deployment with no ready endpoint (pods still downloading or warming
+      # up the model, crashed, or the QNAP cache unavailable) reads as probe_success 0. Allowed by
+      # memory/embedder/networkpolicy.yaml (blackbox-exporter -> 8080). The embedder's own metrics
+      # (te_*) are scraped by the default `kubernetes-pods` job via the prometheus.io/* pod annotations.
+      - job_name: blackbox-memory-embedder
+        metrics_path: /probe
+        params:
+          module: [http_2xx]
+        scrape_interval: 30s
+        scrape_timeout: 10s
+        static_configs:
+          - targets: ["http://memory-embedder.memory.svc/health"]
+            labels:
+              service: memory-embedder
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.observability.svc:9115
     serverFiles:
       alerting_rules.yml:
         groups:
@@ -344,6 +366,58 @@ spec:
                 annotations:
                   summary: "The memory gateway is not ready."
                   description: "GET {{ $labels.instance }} has failed for 10m: no ready gateway pod, or Postgres (or the Access JWKS, when configured) is unreachable. `kubectl -n memory get pods -l app.kubernetes.io/name=memory-gateway` and the pod logs."
+              # --- Memory embedder (olympus-sdk#529): text-embeddings-inference on CPU, ns memory ---------
+              # probe: job blackbox-memory-embedder, /health through the Service. Any ready replica
+              # keeps it green, so this means NO replica can serve (the real outage).
+              - alert: MemoryEmbedderDown
+                expr: probe_success{job="blackbox-memory-embedder"} == 0
+                for: 10m
+                labels: { severity: critical }
+                annotations:
+                  summary: "The memory embedder is not serving."
+                  description: "GET {{ $labels.instance }} has failed for 10m: no ready embedder pod. Embeddings (worker embed stage, gateway recall) are failing or queueing. `kubectl -n memory get pods -l app.kubernetes.io/name=memory-embedder`; Init:Error means the model download from huggingface.co or the cache PVC failed (`kubectl -n memory logs <pod> -c fetch-model`), otherwise the pod logs."
+              # The pods' own series, scraped by the kubernetes-pods job. absent() covers "no pod is
+              # being scraped at all", which the probe cannot tell apart from a slow start.
+              - alert: MemoryEmbedderMetricsAbsent
+                expr: absent(up{job="kubernetes-pods", namespace="memory", app_kubernetes_io_name="memory-embedder"} == 1)
+                for: 10m
+                labels: { severity: critical }
+                annotations:
+                  summary: "No memory embedder pod is being scraped."
+                  description: "Prometheus has had no successful scrape of any memory-embedder pod for 10m (not running, not scheduled, or the NetworkPolicy/annotations are wrong). `kubectl -n memory get pods -l app.kubernetes.io/name=memory-embedder -o wide`."
+              - alert: MemoryEmbedderDegraded
+                expr: count(up{job="kubernetes-pods", namespace="memory", app_kubernetes_io_name="memory-embedder"} == 1) < 2
+                for: 30m
+                labels: { severity: warning }
+                annotations:
+                  summary: "Only {{ $value }} of 2 memory embedder replicas is being scraped."
+                  description: "One replica has been missing for 30m; capacity is halved and a second failure is an outage. `kubectl -n memory get pods -l app.kubernetes.io/name=memory-embedder -o wide` (a node drain, a stuck model download or a failed scheduling are the usual causes)."
+              # te_request_count counts every request, te_request_success the 2xx ones; the rest are
+              # 4xx/5xx (including 429 when --max-concurrent-requests is exceeded).
+              - alert: MemoryEmbedderErrorRate
+                expr: >-
+                  (
+                    1 - sum(rate(te_request_success{namespace="memory", app_kubernetes_io_name="memory-embedder"}[5m]))
+                    / sum(rate(te_request_count{namespace="memory", app_kubernetes_io_name="memory-embedder"}[5m]))
+                  ) > 0.05
+                  and sum(rate(te_request_count{namespace="memory", app_kubernetes_io_name="memory-embedder"}[5m])) > 0.05
+                for: 10m
+                labels: { severity: warning }
+                annotations:
+                  summary: "More than 5% of memory embedder requests are failing."
+                  description: "{{ $value | humanizePercentage }} of /v1/embeddings requests failed over 5m. 429 means the replicas are saturated (see MemoryEmbedderSlow, scale the Deployment), 4xx means a client is sending bad input, 5xx means a pod problem (`kubectl -n memory logs deploy/memory-embedder`)."
+              # End-to-end request time as the server sees it (queue + tokenisation + inference).
+              # A healthy replica answers a 100-token fact in well under a second and a 2,000-token
+              # document in a few seconds; sustained p95 above 8s means the pods are saturated.
+              - alert: MemoryEmbedderSlow
+                expr: >-
+                  histogram_quantile(0.95, sum by (le) (rate(te_request_duration_bucket{namespace="memory", app_kubernetes_io_name="memory-embedder"}[5m]))) > 8
+                  and sum(rate(te_request_count{namespace="memory", app_kubernetes_io_name="memory-embedder"}[5m])) > 0.05
+                for: 15m
+                labels: { severity: warning }
+                annotations:
+                  summary: "Memory embedder p95 latency is above 8s."
+                  description: "p95 /v1/embeddings latency is {{ $value | humanizeDuration }} over 5m. The embedder is saturated (offered load above its CPU capacity: see memory/embedder/README.md, \"Sizing\") or CPU-throttled on the node. Check `te_queue_size` and `kubectl -n memory top pods`."
     prometheus-pushgateway:
       enabled: false
     kube-state-metrics:
