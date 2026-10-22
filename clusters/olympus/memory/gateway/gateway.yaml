@@ -31,6 +31,12 @@ data:
   # LiteLLM alias the gateway embeds queries with (768 dimensions, design 3.2). The extraction
   # alias `memory-extract` belongs to the workers (#453), not the gateway.
   MEMORY_EMBED_ALIAS: "memory-embed"
+  # TEMPORARY, for the one-shot import (olympus-sdk#454, about 51k capture requests): the capture
+  # bucket is per client and per replica (defaults 120/min, burst 60). Two replicas at 360/min
+  # allow the importer's 5 req/s. REVERT both lines (delete them) once the import and its parity
+  # check are done; the reloader rolls the pods when this ConfigMap changes.
+  MEMORY_RATE_CAPTURE_PER_MIN: "360"
+  MEMORY_RATE_CAPTURE_BURST: "60"
   # --- Cloudflare Access (design 5.2, 5.6) -------------------------------------------------
   # OWNER-SUPPLIED PLACEHOLDERS (issue olympus-sdk#451 creates the Access application and
   # gives both values). Leave BOTH unset until then. The gateway requires both or neither
@@ -141,7 +147,7 @@ spec:
           # the olympus-sdk `memory-gateway` workflow publishes (job summary "Record image digest"
           # of the run on main, or `docker buildx imagetools inspect
           # ghcr.io/nwlnexus/memory-gateway:sha-<short>`). Pin by digest, never by tag.
-          image: ghcr.io/nwlnexus/memory-gateway@sha256:eafe1c2d13f5c21bd95e055423953f021a914fbed3a88d197dba08fd2e01e903
+          image: ghcr.io/nwlnexus/memory-gateway@sha256:a62ec383bec53ab6ab499ee5928044703a3cde4d3c26b51bce3cbdc09812de12
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
