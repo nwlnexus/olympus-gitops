@@ -34,12 +34,6 @@ data:
   # Query embeddings from the dedicated in-cluster service (olympus-sdk#529); unset to fall back to LiteLLM.
   MEMORY_EMBED_BASE_URL: "http://memory-embedder.memory.svc/v1"
   MEMORY_EMBED_MODEL: "nomic-embed-text-v1.5"
-  # TEMPORARY, for the one-shot import (olympus-sdk#454, about 51k capture requests): the capture
-  # bucket is per client and per replica (defaults 120/min, burst 60). Two replicas at 360/min
-  # allow the importer's 5 req/s. REVERT both lines (delete them) once the import and its parity
-  # check are done; the reloader rolls the pods when this ConfigMap changes.
-  MEMORY_RATE_CAPTURE_PER_MIN: "360"
-  MEMORY_RATE_CAPTURE_BURST: "60"
   # --- Cloudflare Access (design 5.2, 5.6) -------------------------------------------------
   # OWNER-SUPPLIED PLACEHOLDERS (issue olympus-sdk#451 creates the Access application and
   # gives both values). Leave BOTH unset until then. The gateway requires both or neither
@@ -150,7 +144,7 @@ spec:
           # the olympus-sdk `memory-gateway` workflow publishes (job summary "Record image digest"
           # of the run on main, or `docker buildx imagetools inspect
           # ghcr.io/nwlnexus/memory-gateway:sha-<short>`). Pin by digest, never by tag.
-          image: ghcr.io/nwlnexus/memory-gateway@sha256:2ba9b61a3e47f5ae7ceaf34cd9bb45978fec79e43d23ffda742b3a23b6c843b9
+          image: ghcr.io/nwlnexus/memory-gateway@sha256:7de5e88dd56fc5a4c385600ca8874ae335a34c35fb29e311838ceca30a83e245
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
