@@ -31,6 +31,9 @@ data:
   # LiteLLM alias the gateway embeds queries with (768 dimensions, design 3.2). The extraction
   # alias `memory-extract` belongs to the workers (#453), not the gateway.
   MEMORY_EMBED_ALIAS: "memory-embed"
+  # Query embeddings from the dedicated in-cluster service (olympus-sdk#529); unset to fall back to LiteLLM.
+  MEMORY_EMBED_BASE_URL: "http://memory-embedder.memory.svc/v1"
+  MEMORY_EMBED_MODEL: "nomic-embed-text-v1.5"
   # TEMPORARY, for the one-shot import (olympus-sdk#454, about 51k capture requests): the capture
   # bucket is per client and per replica (defaults 120/min, burst 60). Two replicas at 360/min
   # allow the importer's 5 req/s. REVERT both lines (delete them) once the import and its parity
@@ -147,7 +150,7 @@ spec:
           # the olympus-sdk `memory-gateway` workflow publishes (job summary "Record image digest"
           # of the run on main, or `docker buildx imagetools inspect
           # ghcr.io/nwlnexus/memory-gateway:sha-<short>`). Pin by digest, never by tag.
-          image: ghcr.io/nwlnexus/memory-gateway@sha256:a62ec383bec53ab6ab499ee5928044703a3cde4d3c26b51bce3cbdc09812de12
+          image: ghcr.io/nwlnexus/memory-gateway@sha256:2ba9b61a3e47f5ae7ceaf34cd9bb45978fec79e43d23ffda742b3a23b6c843b9
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
