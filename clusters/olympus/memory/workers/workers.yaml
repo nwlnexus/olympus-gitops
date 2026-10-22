@@ -29,6 +29,11 @@ data:
   LITELLM_BASE_URL: "http://100.95.232.41:4000/v1"
   MEMORY_EXTRACT_ALIAS: "memory-extract"
   MEMORY_EMBED_ALIAS: "memory-embed"
+  # Embeddings come from the dedicated in-cluster service (memory-embedder, olympus-sdk#529), not LiteLLM/Ollama
+  # (Ollama's embedder stalls under load, olympus-sdk#527). Unset these two to fall back to LiteLLM. The client
+  # appends /embeddings to a base URL that ends in /v1. Service mode defaults: 60 s timeout, concurrency 2.
+  MEMORY_EMBED_BASE_URL: "http://memory-embedder.memory.svc/v1"
+  MEMORY_EMBED_MODEL: "nomic-embed-text-v1.5"
   # No graph worker in v1: with `true` the extract worker would enqueue graph_ingest jobs that
   # nothing consumes, and MemoryQueueBacklogOld/Stuck would fire. Flip it when the Graphiti
   # ingest worker deploys (README.md of the worker, "Graph jobs").
@@ -39,7 +44,7 @@ data:
   extract-concurrency: "1"
   extract-batch-size: "1"
   # embed: 4 claim loops per pod, 4 facts per claim = one /embeddings request (worker defaults).
-  embed-concurrency: "4"
+  embed-concurrency: "2"
   embed-batch-size: "4"
 ---
 # Embed pair: 2 replicas, a node drain may take one, never both. (The extract worker is a single
@@ -117,7 +122,7 @@ spec:
         - name: memory-worker
           # Pinned by digest, never by tag. Built from olympus-sdk main (tag sha-6ff56ae) by
           # .github/workflows/memory-workers.yml.
-          image: ghcr.io/nwlnexus/memory-workers@sha256:1e0c7049f00c87248bf818e93717ccbb19304138e753febb43d3f65a08382910
+          image: ghcr.io/nwlnexus/memory-workers@sha256:77205cd3ce80fee03c25c7ecdb3f51961d0b4c3a4332aa6a09ee4d6224cc700c
           imagePullPolicy: IfNotPresent
           # The image ENTRYPOINT is `python -m memory_workers`; the stage is the argument.
           args: ["--stage", "extract"]
@@ -259,7 +264,7 @@ spec:
                     app.kubernetes.io/name: memory-worker-embed
       containers:
         - name: memory-worker
-          image: ghcr.io/nwlnexus/memory-workers@sha256:1e0c7049f00c87248bf818e93717ccbb19304138e753febb43d3f65a08382910
+          image: ghcr.io/nwlnexus/memory-workers@sha256:77205cd3ce80fee03c25c7ecdb3f51961d0b4c3a4332aa6a09ee4d6224cc700c
           imagePullPolicy: IfNotPresent
           args: ["--stage", "embed"]
           ports:
