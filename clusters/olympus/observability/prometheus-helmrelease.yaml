@@ -232,6 +232,18 @@ spec:
                   severity: critical
                 annotations:
                   summary: "Node {{ $labels.node }} on {{ $labels.cluster }} not Ready >5m."
+              # Cluster-aware reboot (olympus-sdk#304, design 2026-10-25 section 3.6): a node is
+              # never left cordoned silently, whoever cordoned it (an Olympus reboot saga, the
+              # system-upgrade-controller or a manual `kubectl cordon`). Independent of Hermes.
+              # The expr and `for` are the design's, verbatim; severity and annotations are additions.
+              - alert: OlympusNodeCordonedTooLong
+                expr: kube_node_spec_unschedulable == 1
+                for: 30m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "Node {{ $labels.node }} on {{ $labels.cluster }} has been cordoned for more than 30m."
+                  description: "{{ $labels.node }} is unschedulable. If an Olympus reboot saga owns it, `kubectl -n kube-system get lease olympus-node-maintenance` shows the saga id and node; recover per olympus-sdk docs/runbooks/2026-10-c2a-rollout.md section 16 (`atlas fleet sagas --active`). No Lease means someone else cordoned it (system-upgrade-controller, an operator): check before `kubectl uncordon`."
               - alert: KubePodCrashLooping
                 expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
                 for: 15m

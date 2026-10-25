@@ -1,0 +1,38 @@
+# Unit tests for OlympusNodeCordonedTooLong (olympus-sdk#304, cluster-aware reboot design section 3.6).
+# Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease first).
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  - name: a node cordoned for more than 30m fires, a schedulable one does not
+    interval: 1m
+    input_series:
+      - series: 'kube_node_spec_unschedulable{node="naraka-01",cluster="olympus"}'
+        values: "1x60"
+      - series: 'kube_node_spec_unschedulable{node="onode-0314ac",cluster="olympus"}'
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: OlympusNodeCordonedTooLong
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: OlympusNodeCordonedTooLong
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              node: naraka-01
+              cluster: olympus
+            exp_annotations:
+              summary: "Node naraka-01 on olympus has been cordoned for more than 30m."
+              description: "naraka-01 is unschedulable. If an Olympus reboot saga owns it, `kubectl -n kube-system get lease olympus-node-maintenance` shows the saga id and node; recover per olympus-sdk docs/runbooks/2026-10-c2a-rollout.md section 16 (`atlas fleet sagas --active`). No Lease means someone else cordoned it (system-upgrade-controller, an operator): check before `kubectl uncordon`."
+
+  - name: a normal drain-reboot-uncordon shorter than 30m stays quiet
+    interval: 1m
+    input_series:
+      - series: 'kube_node_spec_unschedulable{node="onode-0314ac",cluster="olympus"}'
+        values: "0x5 1x20 0x40"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: OlympusNodeCordonedTooLong
+        exp_alerts: []
