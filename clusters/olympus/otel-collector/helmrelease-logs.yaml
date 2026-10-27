@@ -31,6 +31,11 @@ spec:
         operator: Equal
         value: management-hub
         effect: NoSchedule
+      # olympus-sdk#567: the two agent-services control-plane nodes; logs from every node.
+      - key: olympus.io/role
+        operator: Equal
+        value: agent-services
+        effect: NoSchedule
     image:
       repository: otel/opentelemetry-collector-contrib
     presets:

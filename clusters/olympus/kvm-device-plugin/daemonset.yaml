@@ -56,6 +56,12 @@ spec:
         kubernetes.io/os: linux
         kubernetes.io/arch: amd64
         node-restriction.kubernetes.io/kvm-ci: "true"
+      # olympus-sdk#567: the KVM node moves to an agent-services node (tainted).
+      tolerations:
+        - key: olympus.io/role
+          operator: Equal
+          value: agent-services
+          effect: NoSchedule
       securityContext:
         runAsUser: 0
         runAsGroup: 0
