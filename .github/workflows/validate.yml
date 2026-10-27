@@ -1,0 +1,84 @@
+name: validate
+
+# Offline-deterministic checks for the Flux manifests (olympus-sdk#576, HW17). The job id and name
+# `validate` is the status check a ruleset requires. It runs on GitHub-hosted runners only: this
+# repository is public, so pull requests from forks must never reach self-hosted runners.
+#
+# 1. yamllint (relaxed config in .yamllint.yaml) over clusters/ and .github/.
+# 2. `kustomize build` of every directory holding a kustomization.yaml, piped into
+#    `kubeconform -strict -ignore-missing-schemas`. Built-in kinds are checked against the Kubernetes
+#    schemas; CRDs are checked against the datree CRDs-catalog when it has a schema and skipped
+#    otherwise. Flux `Kustomization` CRs live in flux-kustomizations/<app>.yaml (not in files named
+#    kustomization.yaml), so they are validated as resources of the root build instead.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  KUSTOMIZE_VERSION: v5.8.3
+  KUSTOMIZE_SHA256: cb9e31198d3f63b44848bd0afc4c8efc56e6cfef9c93a4a39a211940e6decd61
+  KUBECONFORM_VERSION: v0.8.0
+  KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+  YAMLLINT_VERSION: 1.37.1
+
+jobs:
+  validate:
+    name: validate
+    # Explicitly GitHub-hosted (see the note at the top).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install kustomize and kubeconform
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin" "$RUNNER_TEMP/dl"
+          cd "$RUNNER_TEMP/dl"
+          curl -fsSL -o kustomize.tgz \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          echo "${KUSTOMIZE_SHA256}  kustomize.tgz" | sha256sum --check --strict -
+          tar -xzf kustomize.tgz -C "$RUNNER_TEMP/bin" kustomize
+          curl -fsSL -o kubeconform.tgz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tgz" | sha256sum --check --strict -
+          tar -xzf kubeconform.tgz -C "$RUNNER_TEMP/bin" kubeconform
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Install yamllint
+        run: python3 -m pip install --user "yamllint==${YAMLLINT_VERSION}"
+
+      - name: yamllint
+        run: python3 -m yamllint -c .yamllint.yaml clusters .github
+
+      - name: kustomize build and kubeconform
+        run: |
+          set -euo pipefail
+          kustomize version
+          kubeconform -v
+          schemas='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          failed=0
+          while IFS= read -r file; do
+            dir=$(dirname "$file")
+            echo "::group::$dir"
+            if ! kustomize build "$dir" \
+              | kubeconform -strict -summary -ignore-missing-schemas \
+                  -schema-location default -schema-location "$schemas"; then
+              echo "::error title=validate failed::kustomize build or kubeconform failed for $dir"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done < <(find clusters -name kustomization.yaml | sort)
+          exit "$failed"
