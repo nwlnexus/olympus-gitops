@@ -9,7 +9,8 @@ sections 3.4, 8 and 9. Code, configuration reference and image: `packages/memory
 
 | File | What |
 |---|---|
-| `workers.yaml` | `ConfigMap/memory-workers-config`, `Deployment/memory-worker-extract` (1 replica), `Deployment/memory-worker-embed` (2 replicas), `PodDisruptionBudget/memory-worker-embed` |
+| `workers.yaml` | `Deployment/memory-worker-extract` (1 replica), `Deployment/memory-worker-embed` (2 replicas), `PodDisruptionBudget/memory-worker-embed` |
+| `workers-config.env` | the settings: `kustomization.yaml` generates `ConfigMap/memory-workers-config-<hash>` from it, so a change rolls both Deployments on reconcile (olympus-sdk#591) |
 | `externalsecret.yaml` | `Secret/memory-workers`: `DATABASE_URL` (role `memory_worker`) and `LITELLM_API_KEY`, mounted as files (`*_FILE`) |
 | `networkpolicy.yaml` | `allow-worker-ingress`: 9090 from Prometheus only |
 | `kustomization.yaml` | the three files above |
@@ -46,7 +47,7 @@ job of the cluster's Prometheus, the same way the gateway is scraped.
 (the attempt is not counted) and the process exits 0. The pod's grace period must stay above the worker's.
 A restart or rollout therefore never loses a job, at worst an extraction restarts from scratch.
 
-Settings live in `ConfigMap/memory-workers-config` (shared keys through `envFrom`, the four per-stage keys
+Settings live in `workers-config.env` (generated `ConfigMap/memory-workers-config-<hash>`) (shared keys through `envFrom`, the four per-stage keys
 `extract-*` / `embed-*` through `configMapKeyRef`). Anything not listed there keeps the worker default (README of
 the package: leases extract 600 s / embed 120 s, job timeout 1500 s / 90 s, extract window all day). Changing the
 ConfigMap or the Secret rolls the pods (stakater reloader). `MEMORY_GRAPH_ENABLED=false` stays until the Graphiti

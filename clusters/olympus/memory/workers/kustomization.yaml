@@ -8,3 +8,15 @@ resources:
   - externalsecret.yaml
   - workers.yaml
   - networkpolicy.yaml
+configMapGenerator:
+  # memory-workers-config: values in workers-config.env. The generated name has a content hash and
+  # kustomize rewrites the envFrom/configMapKeyRef references in workers.yaml to it, so a value change
+  # rolls the worker pods (olympus-sdk#591).
+  - name: memory-workers-config
+    namespace: memory
+    envs:
+      - workers-config.env
+    options:
+      labels:
+        app.kubernetes.io/name: memory-workers
+        app.kubernetes.io/part-of: memory
