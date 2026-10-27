@@ -67,6 +67,7 @@ When adding a new app: check what it needs (secrets? certs? storage?) and set `d
 2. Add `clusters/olympus/flux-kustomizations/<app>.yaml` (Flux Kustomization CRD) with appropriate `dependsOn`
 3. Add the new flux-kustomization to `clusters/olympus/kustomization.yaml`
 4. Commit and push — Flux reconciles automatically (or use `flux reconcile` to trigger immediately)
+5. To merge (the Flux deploy) without a merge command, label the PR `automerge` (`gh pr edit <n> --add-label automerge`) and `.github/workflows/automerge.yml` squash-merges it once the base branch's required checks pass (GitHub App credentials: olympus-sdk#576)
 
 ## Secrets Pattern
 
