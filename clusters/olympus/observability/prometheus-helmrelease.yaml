@@ -100,9 +100,15 @@ spec:
           - targets: ["http://100.95.232.41:4000/health/liveliness"]
             labels:
               service: litellm
-          - targets: ["http://100.95.232.41:11434/api/tags"]
+          - targets: ["http://100.95.232.41:8081/health"]
             labels:
-              service: ollama
+              service: llama-qwen36-27b
+          - targets: ["http://100.95.232.41:8082/health"]
+            labels:
+              service: llama-qwen25-7b
+          - targets: ["http://100.95.232.41:8083/health"]
+            labels:
+              service: llama-nomic
         relabel_configs:
           - source_labels: [__address__]
             target_label: __param_target
@@ -127,6 +133,20 @@ spec:
             target_label: instance
           - target_label: __address__
             replacement: blackbox-exporter.observability.svc:9115
+      # llama-server on data-hub (olympus-sdk#588): one instance per model, native /metrics.
+      - job_name: datahub-llama-server
+        metrics_path: /metrics
+        scrape_interval: 30s
+        static_configs:
+          - targets: ["100.95.232.41:8081"]
+            labels:
+              instance_name: llama-qwen36-27b
+          - targets: ["100.95.232.41:8082"]
+            labels:
+              instance_name: llama-qwen25-7b
+          - targets: ["100.95.232.41:8083"]
+            labels:
+              instance_name: llama-nomic
       # Memory platform stores (olympus-sdk#449). TCP connect to the ClusterIP Services
       # in ns `memory`; allowed by the NetworkPolicy there (blackbox-exporter only).
       # The cluster has no Prometheus operator, so these static jobs (not
@@ -260,7 +280,7 @@ spec:
                   summary: "Target {{ $labels.job }} ({{ $labels.instance }}) on {{ $labels.cluster }} down >10m."
           - name: data-hub
             rules:
-              # Fires per probed data-hub service (litellm, ollama). Postgres has its own
+              # Fires per probed data-hub service (litellm, llama-*). Postgres has its own
               # alert below, so it is excluded here to avoid a duplicate page.
               # TODO: raise litellm to severity critical once the memory workers depend
               # on it (olympus-sdk#444 wave 2+); route-by-label is already in place via
@@ -283,6 +303,31 @@ spec:
                 annotations:
                   summary: "Postgres on data-hub is not accepting connections on its tailnet address."
                   description: "TCP connect to {{ $labels.instance }} has failed for 10m. Known cause: the boot-time bind race, where postgres starts before tailscaled is up, fails to bind the tailnet IP and falls back to 127.0.0.1 only. Check `lsof -iTCP:5432 -sTCP:LISTEN` on data-hub and restart the Postgres LaunchDaemon once tailscaled is up."
+              # llama-server (olympus-sdk#588). Wedged: a request holds a slot but no token has been
+              # decoded for 10m (the watchdog on data-hub restarts it; this alerts if that fails).
+              - alert: DataHubLlamaServerWedged
+                expr: max by (instance) (llamacpp:requests_processing) > 0 and on(instance) increase(llamacpp:n_decode_total[10m]) == 0
+                for: 5m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: "llama-server {{ $labels.instance }} has a request in flight but is not decoding."
+                  description: "llamacpp:requests_processing has been above 0 with no decode progress for 15m on {{ $labels.instance }}. The server is wedged; the data-hub watchdog should have restarted it. Check the llama-server launchd job and log on data-hub."
+              - alert: DataHubLlamaServerRestarting
+                expr: resets(llamacpp:n_decode_total[1h]) >= 2
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "llama-server {{ $labels.instance }} restarted {{ $value }} times in the last hour."
+                  description: "The llamacpp:n_decode_total counter reset at least twice in 1h on {{ $labels.instance }}: the process is crash-looping or the watchdog keeps restarting it. Check the llama-server log on data-hub."
+              - alert: MemoryExtractLLMFailing
+                expr: sum(increase(memory_worker_llm_requests_total{alias="memory-extract",outcome=~"timeout|http_5xx|network_error"}[30m])) >= 3 and sum(increase(memory_worker_llm_requests_total{alias="memory-extract",outcome="ok"}[30m])) == 0
+                for: 10m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "The memory-extract LLM alias is failing and nothing is succeeding."
+                  description: "At least 3 memory-extract requests failed (timeout, http_5xx or network_error) in 30m with no successes. Check LiteLLM and llama-server (qwen25-7b, :8082) on data-hub."
               - alert: BlackboxExporterDown
                 expr: absent(up{job="blackbox-exporter"} == 1)
                 for: 10m
