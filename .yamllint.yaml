@@ -1,0 +1,5 @@
+# Relaxed yamllint config used by .github/workflows/validate.yml.
+extends: relaxed
+rules:
+  # Helm values and long URLs make a line-length limit noisy.
+  line-length: disable
