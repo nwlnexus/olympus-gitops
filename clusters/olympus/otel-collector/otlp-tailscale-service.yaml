@@ -1,0 +1,27 @@
+# Tailnet-only OTLP ingress for agent-session telemetry (olympus-sdk#565, spec decision H12): Claude Code on the
+# agent host and the Macs exports metrics and events here over the tailnet (never CF). The collector routes
+# metrics to Prometheus and events to Loki (helmrelease.yaml, pipelines metrics/agents and logs/agents).
+# No tailscale.com/funnel => reachable only inside the tailnet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: otlp-ts
+  namespace: otel
+  annotations:
+    tailscale.com/hostname: "obs-otlp"
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    app.kubernetes.io/name: opentelemetry-collector
+    app.kubernetes.io/instance: opentelemetry-collector
+    component: standalone-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP

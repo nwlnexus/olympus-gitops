@@ -4,6 +4,7 @@ resources:
   - namespace.yaml
   - helmrepository.yaml
   - helmrelease.yaml
+  - otlp-tailscale-service.yaml
   - helmrelease-logs.yaml
   - prometheus-community-helmrepository.yaml
   - node-exporter-helmrelease.yaml

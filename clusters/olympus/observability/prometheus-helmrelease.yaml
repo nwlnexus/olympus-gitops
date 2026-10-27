@@ -475,6 +475,29 @@ spec:
                 annotations:
                   summary: "Memory embedder p95 latency is above 8s."
                   description: "p95 /v1/embeddings latency is {{ $value | humanizeDuration }} over 5m. The embedder is saturated (offered load above its CPU capacity: see memory/embedder/README.md, \"Sizing\") or CPU-throttled on the node. Check `te_queue_size` and `kubectl -n memory top pods`."
+          - name: agent-sessions
+            rules:
+              # Claude Code session telemetry (olympus-sdk#565, spec decision H12): the agent host and the Macs
+              # export OTLP to the otel collector (otel-collector/helmrelease.yaml, pipeline metrics/agents),
+              # which sums the delta counters and remote-writes them here. `account` is the resource attribute
+              # nix sets per Claude account (personal, work). Thresholds are a first guess: tune them from the
+              # "agent sessions" dashboard after a week of data.
+              - alert: AgentTokensPerHourHigh
+                expr: >-
+                  sum by (account) (increase(claude_code_token_usage_tokens_total{type!="cacheRead"}[1h])) > 10000000
+                for: 5m
+                labels: { severity: warning }
+                annotations:
+                  summary: "Account {{ $labels.account }} used more than 10M input, output and cache-write tokens in the last hour."
+                  description: "{{ $value | humanize }} tokens (cache reads excluded) in the last hour for account {{ $labels.account }}. Open the \"agent sessions\" dashboard (tokens by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
+              - alert: AgentCostPerHourHigh
+                expr: >-
+                  sum by (account) (increase(claude_code_cost_usage_USD_total[1h])) > 25
+                for: 5m
+                labels: { severity: warning }
+                annotations:
+                  summary: "Account {{ $labels.account }} spent more than $25 in the last hour."
+                  description: "${{ $value | humanize }} of API cost in the last hour for account {{ $labels.account }}. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
     prometheus-pushgateway:
       enabled: false
     kube-state-metrics:
