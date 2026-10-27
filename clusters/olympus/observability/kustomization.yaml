@@ -16,3 +16,12 @@ resources:
   - loki-tailscale-service.yaml
   - prometheus-tailscale-service.yaml
   - alertmanager-resend-externalsecret.yaml
+configMapGenerator:
+  # Grafana dashboards as code; mounted by the `agents` dashboard provider in grafana-helmrelease.yaml.
+  # The name is fixed (no hash suffix) because the HelmRelease values refer to it.
+  - name: grafana-dashboard-agent-sessions
+    namespace: observability
+    files:
+      - dashboards/agent-sessions.json
+    options:
+      disableNameSuffixHash: true

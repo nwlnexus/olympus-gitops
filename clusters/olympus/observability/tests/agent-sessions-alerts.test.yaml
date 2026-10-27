@@ -1,0 +1,73 @@
+# Unit tests for the agent-sessions alerts (olympus-sdk#565, spec decision H12).
+# Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease first).
+# The series are the cumulative counters the otel collector remote-writes for Claude Code's
+# claude_code.cost.usage (unit USD) and claude_code.token.usage (unit tokens) metrics.
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  # --- AgentCostPerHourHigh: more than $25 in the last hour, for 5m -----------------------------
+  - name: cost above 25 USD per hour fires for the account that spent it, not for a quiet one
+    interval: 1m
+    input_series:
+      # personal: +1 USD every minute = 60 USD/h
+      - series: 'claude_code_cost_usage_USD_total{account="personal",vcs_repository_name="olympus-sdk",model="claude-opus-4"}'
+        values: "0+1x90"
+      # work: +0.1 USD every minute = 6 USD/h
+      - series: 'claude_code_cost_usage_USD_total{account="work",vcs_repository_name="app",model="claude-opus-4"}'
+        values: "0+0.1x90"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: AgentCostPerHourHigh
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: AgentCostPerHourHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              account: personal
+            exp_annotations:
+              summary: "Account personal spent more than $25 in the last hour."
+              description: "$60 of API cost in the last hour for account personal. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
+
+  - name: spend split across repos and models still adds up per account
+    interval: 1m
+    input_series:
+      - series: 'claude_code_cost_usage_USD_total{account="work",vcs_repository_name="a",model="m1"}'
+        values: "0+0.3x90"
+      - series: 'claude_code_cost_usage_USD_total{account="work",vcs_repository_name="b",model="m2"}'
+        values: "0+0.3x90"
+    alert_rule_test:
+      - eval_time: 75m
+        alertname: AgentCostPerHourHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              account: work
+            exp_annotations:
+              summary: "Account work spent more than $25 in the last hour."
+              description: "$36 of API cost in the last hour for account work. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
+
+  # --- AgentTokensPerHourHigh: more than 10M non-cache-read tokens in the last hour, for 5m -----
+  - name: tokens above 10M per hour fire, and cache reads do not count
+    interval: 1m
+    input_series:
+      # personal: 100k output tokens per minute = 6M/h, plus 100k input per minute = 12M/h in total
+      - series: 'claude_code_token_usage_tokens_total{account="personal",type="output",model="m"}'
+        values: "0+100000x90"
+      - series: 'claude_code_token_usage_tokens_total{account="personal",type="input",model="m"}'
+        values: "0+100000x90"
+      # work: huge cache reads only
+      - series: 'claude_code_token_usage_tokens_total{account="work",type="cacheRead",model="m"}'
+        values: "0+5000000x90"
+    alert_rule_test:
+      - eval_time: 75m
+        alertname: AgentTokensPerHourHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              account: personal
+            exp_annotations:
+              summary: "Account personal used more than 10M input, output and cache-write tokens in the last hour."
+              description: "12M tokens (cache reads excluded) in the last hour for account personal. Open the \"agent sessions\" dashboard (tokens by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."

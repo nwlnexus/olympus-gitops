@@ -127,6 +127,11 @@ spec:
         batch:
           timeout: 5s
           send_batch_size: 512
+        # Claude Code exports delta counters from many concurrent processes. Summing the deltas of each
+        # series here gives one cumulative counter per (account, repo, model, ...) that Prometheus can
+        # rate()/increase(); a stream unseen for max_stale starts again from zero (a counter reset).
+        deltatocumulative:
+          max_stale: 24h
         resource:
           attributes:
             - key: service.name
@@ -149,6 +154,15 @@ spec:
         # reached via the obs-prometheus tailnet Service over the tailnet.
         prometheusremotewrite/mgmt:
           endpoint: http://obs-prometheus.raptor-mimosa.ts.net:9090/api/v1/write
+        # Agent-session metrics (Claude Code, olympus-sdk#565) -> the same Prometheus, in-cluster. Resource
+        # attributes (account, host.name, ...) become labels so the dashboard can split by account.
+        prometheusremotewrite/agents:
+          endpoint: http://prometheus-server.observability.svc.cluster.local/api/v1/write
+          resource_to_telemetry_conversion:
+            enabled: true
+        # Agent-session events (tool results, tool decisions, API errors) -> Loki's OTLP endpoint, in-cluster.
+        otlphttp/loki-agents:
+          logs_endpoint: http://loki.observability.svc.cluster.local:3100/otlp/v1/logs
       service:
         telemetry:
           metrics:
@@ -162,4 +176,11 @@ spec:
             receivers: [prometheus]
             processors: [memory_limiter, batch]
             exporters: [prometheusremotewrite/mgmt]
-          logs: null
+          metrics/agents:
+            receivers: [otlp]
+            processors: [memory_limiter, deltatocumulative, batch]
+            exporters: [prometheusremotewrite/agents]
+          logs/agents:
+            receivers: [otlp]
+            processors: [memory_limiter, batch]
+            exporters: [otlphttp/loki-agents]

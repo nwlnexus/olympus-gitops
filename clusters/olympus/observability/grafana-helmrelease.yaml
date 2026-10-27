@@ -68,6 +68,18 @@ spec:
             editable: true
             options:
               path: /var/lib/grafana/dashboards/default
+          # Dashboards kept as code in this repo (dashboards/*.json -> ConfigMap via kustomize), mounted by
+          # `dashboardsConfigMaps` below at /var/lib/grafana/dashboards/agents.
+          - name: agents
+            orgId: 1
+            folder: ""
+            type: file
+            disableDeletion: true
+            editable: false
+            options:
+              path: /var/lib/grafana/dashboards/agents
+    dashboardsConfigMaps:
+      agents: grafana-dashboard-agent-sessions
     dashboards:
       default:
         # "Traefik Official Kubernetes Dashboard" (native v3 Prometheus metrics).
