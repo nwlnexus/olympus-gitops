@@ -11,5 +11,7 @@ spec:
   nodeSelector:
     matchExpressions:
       - {key: node-role.kubernetes.io/control-plane, operator: In, values: ["true"]}
+  tolerations:
+    - {key: olympus.io/role, operator: Equal, value: agent-services, effect: NoSchedule}
   upgrade:
     image: rancher/k3s-upgrade
