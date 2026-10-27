@@ -29,6 +29,10 @@ spec:
       passwordKey: admin-password
     # Dashboards/users on qnap-iscsi (Trident now applies fsGroup via fsType=ext4;
     # Grafana runs as uid 472).
+    # The data volume is a ReadWriteOnce qnap-iscsi PVC: a RollingUpdate starts the new pod before the old
+    # one releases the volume, so it can never attach (2026-10-27: Init stuck 6h, Flux upgrade stalled).
+    deploymentStrategy:
+      type: Recreate
     persistence:
       enabled: true
       storageClassName: qnap-iscsi
