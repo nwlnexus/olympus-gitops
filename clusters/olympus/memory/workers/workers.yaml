@@ -28,6 +28,9 @@ data:
   # Egress from ns memory is unrestricted and the gateway already uses this address.
   LITELLM_BASE_URL: "http://100.95.232.41:4000/v1"
   MEMORY_EXTRACT_ALIAS: "memory-extract"
+  # Per-call LLM timeout: llama-server (#588) does about 90 tok/s prompt and 9 tok/s output on the 27B,
+  # so a max-size chunk can need more than the 300 s default. Below LiteLLM (600 s) and the server (900 s).
+  MEMORY_EXTRACT_TIMEOUT_SECONDS: "540"
   MEMORY_EMBED_ALIAS: "memory-embed"
   # Embeddings come from the dedicated in-cluster service (memory-embedder, olympus-sdk#529), not LiteLLM/Ollama
   # (Ollama's embedder stalls under load, olympus-sdk#527). Unset these two to fall back to LiteLLM. The client
