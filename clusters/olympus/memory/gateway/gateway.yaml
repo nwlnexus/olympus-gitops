@@ -144,7 +144,7 @@ spec:
           # the olympus-sdk `memory-gateway` workflow publishes (job summary "Record image digest"
           # of the run on main, or `docker buildx imagetools inspect
           # ghcr.io/nwlnexus/memory-gateway:sha-<short>`). Pin by digest, never by tag.
-          image: ghcr.io/nwlnexus/memory-gateway@sha256:7de5e88dd56fc5a4c385600ca8874ae335a34c35fb29e311838ceca30a83e245
+          image: ghcr.io/nwlnexus/memory-gateway@sha256:ae391f040ce697db6b2d358343e6a66f0963222e4cf622ea1f533a593eaae634
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
