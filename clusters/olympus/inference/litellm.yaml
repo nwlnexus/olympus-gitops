@@ -123,7 +123,7 @@ spec:
             # client -> aliases it may call (custom_auth.py). A client also needs a key file in
             # Secret litellm-client-keys. `executor` (#197) gets a key when it exists.
             - name: LITELLM_CLIENT_SCOPES
-              value: '{"memory-workers": ["memory-extract"], "executor": ["coder-light", "coder-heavy"]}'
+              value: '{"memory-workers": ["memory-extract"], "executor": ["coder-light", "coder-medium", "coder-heavy"]}'
             - name: LITELLM_MASTER_KEY
               valueFrom:
                 secretKeyRef:

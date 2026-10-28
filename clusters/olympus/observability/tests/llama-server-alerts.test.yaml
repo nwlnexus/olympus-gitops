@@ -72,7 +72,7 @@ tests:
     input_series:
       - series: 'llamacpp:n_decode_total{instance="100.95.232.41:8082",instance_name="llama-qwen25-7b",host="datahub"}'
         values: "100 200 5 50 3 40 2 40 80 120 160 200"
-      - series: 'llamacpp:n_decode_total{instance="100.89.177.55:8082",instance_name="llama-qwen25-7b",host="a9"}'
+      - series: 'llamacpp:n_decode_total{instance="100.89.177.55:8082",instance_name="llama-qwen35-9b",host="a9"}'
         values: "100 200 300 5 50 100 3 40 80 120 160 200"
     alert_rule_test:
       - eval_time: 11m

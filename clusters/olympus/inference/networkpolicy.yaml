@@ -4,10 +4,11 @@
 #                 blackbox exporter (probe /health/readiness). Other clients (the #197 executor) get
 #                 a rule when they exist.
 #   egress        DNS (kube-system) and the two llama-server backends on the tailnet: A9
-#                 100.89.177.55 and data-hub 100.95.232.41, ports 8081-8082. Pods reach the tailnet
+#                 100.89.177.55 and data-hub 100.95.232.41, ports 8081-8082, plus the A9 alone on 8084-8085 (coder-medium, dedicated coder-heavy;
+#                 olympus-sdk#460). Pods reach the tailnet
 #                 through the node (every node runs tailscale; pod traffic is SNATed onto
 #                 tailscale0), and the tailnet ACL already grants tag:k8s -> tag:inference
-#                 tcp:8081-8083 (olympus-tailnet policy.hujson). Nothing else: no internet, so the
+#                 tcp:8081-8083 (olympus-tailnet policy.hujson; widened to 8085 in the #460 tailnet PR, merge it first). Nothing else: no internet, so the
 #                 proxy cannot phone home (LITELLM_LOCAL_MODEL_COST_MAP=True).
 # The kubelet's probes come from the node and are not subject to NetworkPolicy under k3s.
 apiVersion: networking.k8s.io/v1
@@ -85,3 +86,11 @@ spec:
           port: 8081
         - protocol: TCP
           port: 8082
+    - to:
+        - ipBlock:
+            cidr: 100.89.177.55/32
+      ports:
+        - protocol: TCP
+          port: 8084
+        - protocol: TCP
+          port: 8085

@@ -147,8 +147,8 @@ spec:
             labels:
               instance_name: llama-nomic
               host: datahub
-      # The same three llama-server instances on the A9 (olympus-sdk#530/#569). Reached over the
-      # tailnet from tag:k8s (ACL tag:k8s -> tag:inference tcp:8081-8083); the inference
+      # The five llama-server instances on the A9 (olympus-sdk#530/#569/#460). Reached over the
+      # tailnet from tag:k8s (ACL tag:k8s -> tag:inference tcp:8081-8085); the inference
       # NetworkPolicy only governs pods in ns inference, not Prometheus egress. `host` separates
       # the two hosts for the restart alerts below.
       - job_name: a9-llama-server
@@ -161,7 +161,15 @@ spec:
               host: a9
           - targets: ["100.89.177.55:8082"]
             labels:
-              instance_name: llama-qwen25-7b
+              instance_name: llama-qwen35-9b
+              host: a9
+          - targets: ["100.89.177.55:8084"]
+            labels:
+              instance_name: llama-qwen36-35b-a3b
+              host: a9
+          - targets: ["100.89.177.55:8085"]
+            labels:
+              instance_name: llama-qwen36-27b-coder
               host: a9
           - targets: ["100.89.177.55:8083"]
             labels:
@@ -268,7 +276,8 @@ spec:
       # alerts can join the two hosts on `service`). llama-server /health is a status read that does
       # not take the inference slot; the A9's own watchdog polls it too. Allowed by
       # inference/networkpolicy.yaml (blackbox-exporter -> 4000) and the tailnet ACL
-      # (tag:k8s -> tag:inference tcp:8081-8083).
+      # (tag:k8s -> tag:inference tcp:8081-8085). The new A9 services have no data-hub twin by name, so
+      # InferenceAllBackendsDown does not cover them; InferenceBackendDown does.
       - job_name: blackbox-inference-http
         metrics_path: /probe
         params:
@@ -286,7 +295,15 @@ spec:
               host: a9
           - targets: ["http://100.89.177.55:8082/health"]
             labels:
-              service: llama-qwen25-7b
+              service: llama-qwen35-9b
+              host: a9
+          - targets: ["http://100.89.177.55:8084/health"]
+            labels:
+              service: llama-qwen36-35b-a3b
+              host: a9
+          - targets: ["http://100.89.177.55:8085/health"]
+            labels:
+              service: llama-qwen36-27b-coder
               host: a9
         relabel_configs:
           - source_labels: [__address__]

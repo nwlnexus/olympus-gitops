@@ -8,9 +8,14 @@
 # tailnet 100.95.232.41). There is no third tier: when both fail the client gets the error.
 #
 #   alias           A9 (primary)                    data-hub (fallback group)
-#   memory-extract  :8081 qwen3.6-27b               memory-extract-datahub  :8081 qwen3.6-27b
-#   coder-heavy     :8081 qwen3.6-27b               coder-heavy-datahub     :8081 qwen3.6-27b
-#   coder-light     :8082 qwen2.5-7b-instruct       coder-light-datahub     :8082 qwen2.5-7b-instruct
+#   memory-extract  :8081 qwen3.6-27b (32k)         memory-extract-datahub  :8081 qwen3.6-27b
+#   coder-heavy     :8085 qwen3.6-27b-coder (64k)   coder-heavy-datahub     :8081 qwen3.6-27b
+#   coder-medium    :8084 qwen3.6-35b-a3b (64k)     coder-medium-datahub    :8081 qwen3.6-27b (no 35B there)
+#   coder-light     :8082 qwen3.5-9b (32k)          coder-light-datahub     :8082 qwen2.5-7b-instruct
+#
+# olympus-sdk#460: coder-heavy has its own A9 process (second 27B) so a coding turn never queues behind
+# memory extraction on :8081. data-hub still serves its original three instances; its 7B is a fallback
+# only (the "no qwen2.5 for coding" rule applies to the primary tier).
 #
 # `memory-embed` is NOT here: the gateway and workers embed through the in-cluster memory-embedder.
 # `coder-cloud` is NOT here: no cloud tier (owner, 2026-10-28).
@@ -36,8 +41,8 @@ model_list:
       id: a9-qwen36-27b-memory-extract
   - model_name: coder-heavy
     litellm_params:
-      model: openai/qwen3.6-27b
-      api_base: http://100.89.177.55:8081/v1
+      model: openai/qwen3.6-27b-coder
+      api_base: http://100.89.177.55:8085/v1
       api_key: not-used
       timeout: 300
       extra_body:
@@ -45,14 +50,28 @@ model_list:
           enable_thinking: false
     model_info:
       id: a9-qwen36-27b-coder-heavy
+  - model_name: coder-medium
+    litellm_params:
+      model: openai/qwen3.6-35b-a3b
+      api_base: http://100.89.177.55:8084/v1
+      api_key: not-used
+      timeout: 300
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+    model_info:
+      id: a9-qwen36-35b-a3b-coder-medium
   - model_name: coder-light
     litellm_params:
-      model: openai/qwen2.5-7b-instruct
+      model: openai/qwen3.5-9b
       api_base: http://100.89.177.55:8082/v1
       api_key: not-used
       timeout: 300
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
     model_info:
-      id: a9-qwen25-7b-coder-light
+      id: a9-qwen35-9b-coder-light
   # --- data-hub (fallback groups; clients do not call these names) ----------------------------
   - model_name: memory-extract-datahub
     litellm_params:
@@ -76,6 +95,17 @@ model_list:
           enable_thinking: false
     model_info:
       id: datahub-qwen36-27b-coder-heavy
+  - model_name: coder-medium-datahub
+    litellm_params:
+      model: openai/qwen3.6-27b
+      api_base: http://100.95.232.41:8081/v1
+      api_key: not-used
+      timeout: 210
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+    model_info:
+      id: datahub-qwen36-27b-coder-medium
   - model_name: coder-light-datahub
     litellm_params:
       model: openai/qwen2.5-7b-instruct
@@ -90,6 +120,7 @@ router_settings:
   fallbacks:
     - memory-extract: [memory-extract-datahub]
     - coder-heavy: [coder-heavy-datahub]
+    - coder-medium: [coder-medium-datahub]
     - coder-light: [coder-light-datahub]
   # One immediate retry on the same deployment for connection errors and 5xx (llama-server answers
   # 503 for the few seconds it loads after a restart: 3-7 s cold start in #530), none for timeouts
