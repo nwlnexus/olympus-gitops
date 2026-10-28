@@ -93,8 +93,12 @@ spec:
           fsGroup: 1001
           seccompProfile:
             type: RuntimeDefault
-        # Never on naraka-01 (tainted olympus.io/role=management-hub:NoSchedule; no
-        # toleration is added, and this affinity makes the intent explicit).
+        # Compute pool only: onode-030c31/0312ce/0314ac (olympus-sdk#567, owner decision
+        # 2026-10-28). `olympus.io/role DoesNotExist` keeps runners off the agent-services
+        # onodes (memory + inference); the hostname rule keeps them off naraka-01, which
+        # is an untainted general worker but has only 4 CPUs (a 4-CPU / 8 GiB runner
+        # would starve it; the scheduler would otherwise pick it for its free memory).
+        # A new general worker must be added here too (or switch to a pool label).
         affinity:
           nodeAffinity:
             requiredDuringSchedulingIgnoredDuringExecution:
@@ -102,6 +106,9 @@ spec:
                 - matchExpressions:
                     - key: olympus.io/role
                       operator: DoesNotExist
+                    - key: kubernetes.io/hostname
+                      operator: NotIn
+                      values: ["naraka-01"]
         # Soft spread over the onodes so 8 gates do not pile onto one node next to
         # runners (review m8). ScheduleAnyway: never blocks a gate from starting.
         topologySpreadConstraints:

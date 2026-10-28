@@ -5,7 +5,8 @@
 #
 # Cluster facts (verified 2026-10-19): IPv4-only; pod CIDR 10.42.0.0/16 (per-node /24),
 # service CIDR 10.43.0.0/16 (kube-dns 10.43.0.10, kubernetes 10.43.0.1), nodes
-# 192.168.253.7/.8/.9 (onodes) and .14 (naraka-01), API VIP 192.168.253.2 (kube-vip).
+# 192.168.253.7/.8/.9 (onodes), .11/.12 (agent-services onodes, control-plane since
+# olympus-sdk#567) and .14 (naraka-01), API VIP 192.168.253.2 (kube-vip).
 #
 # IPv6 CAVEAT (verified by review): the cluster is single-stack IPv4 but every pod
 # and the node's cni0 still carry fe80:: link-local addresses, and kube-router
@@ -123,6 +124,13 @@ spec:
             cidr: 192.168.253.8/32   # onode-0312ce
         - ipBlock:
             cidr: 192.168.253.9/32   # onode-0314ac
+        # The two agent-services onodes are API servers too (5 endpoints behind
+        # kubernetes.default since olympus-sdk#567); without them 2 in 5 new API
+        # connections from the controller/listeners would be dropped.
+        - ipBlock:
+            cidr: 192.168.253.11/32  # onode-0636e4
+        - ipBlock:
+            cidr: 192.168.253.12/32  # onode-062caa
         - ipBlock:
             cidr: 192.168.253.2/32   # kube-vip control-plane VIP
       ports:

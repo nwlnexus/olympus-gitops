@@ -142,8 +142,9 @@ stay pending (the listener scales, the runner pod is Pending with
 3. PR: raise `maxRunners` to 2 and `ci-runners-kvm` / `ci-runners` by one KVM pod each
    (pods, 2 / 3 CPU, 4 / 8 GiB, `requests.olympus.io/kvm`, and ephemeral in `ci-runners`).
    Prefer a non-control-plane node if one ever exists (see residual risk above).
-4. Never label naraka-01 (management hub, tainted; the scale set's affinity also
-   excludes `olympus.io/role`).
+4. Never label naraka-01 or an agent-services onode: runners belong to the compute
+   pool (onode-030c31/0312ce/0314ac, olympus-sdk#567). Every runner set's affinity
+   requires `olympus.io/role DoesNotExist` and `kubernetes.io/hostname NotIn [naraka-01]`.
 
 ### Evidence (2026-10-19, throwaway namespaces on onode-030c31, since deleted)
 

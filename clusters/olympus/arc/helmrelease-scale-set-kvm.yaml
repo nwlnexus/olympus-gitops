@@ -119,6 +119,10 @@ spec:
                       values: ["true"]
                     - key: olympus.io/role
                       operator: DoesNotExist
+                    # Compute pool only (olympus-sdk#567), as olympus-linux/olympus-gate.
+                    - key: kubernetes.io/hostname
+                      operator: NotIn
+                      values: ["naraka-01"]
         containers:
           - name: runner
             # KVM variant of our runner image (Ubuntu 22.04, actions runner, user

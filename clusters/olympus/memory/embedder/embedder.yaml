@@ -126,13 +126,17 @@ spec:
           type: RuntimeDefault
       affinity:
         nodeAffinity:
-          # The onodes only: naraka-01 is tainted (olympus.io/role=management-hub:NoSchedule) and
-          # labelled; this keeps the embedder off it even if the taint were ever removed.
+          # The compute-pool onodes only. naraka-01 is an untainted general worker since
+          # olympus-sdk#567 (4 CPUs: the embedder's 2-6 CPU inference does not belong there);
+          # the memory move to the agent-services onodes replaces this rule.
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
                   - key: olympus.io/role
                     operator: DoesNotExist
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: ["naraka-01"]
         podAntiAffinity:
           # One replica per node. Preferred (as for the embed workers), so a single surviving node
           # still runs both replicas instead of leaving one Pending.
