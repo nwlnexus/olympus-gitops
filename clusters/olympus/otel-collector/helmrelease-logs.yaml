@@ -22,15 +22,8 @@ spec:
   values:
     mode: daemonset
     fullnameOverride: otel-logs
-    # Load-bearing: node naraka-01 (former management-hub host, now part of
-    # olympus) still carries the taint olympus.io/role=management-hub:NoSchedule.
-    # This toleration is what lets the log-collection DaemonSet schedule there.
-    # Do NOT remove until that node is untainted/relabelled (a node-level op).
+    # naraka-01's former management-hub taint is gone (olympus-sdk#567, general worker).
     tolerations:
-      - key: olympus.io/role
-        operator: Equal
-        value: management-hub
-        effect: NoSchedule
       # olympus-sdk#567: the two agent-services control-plane nodes; logs from every node.
       - key: olympus.io/role
         operator: Equal
