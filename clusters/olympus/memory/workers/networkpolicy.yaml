@@ -4,7 +4,8 @@
 # kubelet's probes come from the node and are not subject to NetworkPolicy under k3s' kube-router
 # policy controller, same as for the gateway pods.
 # Egress is unrestricted in this namespace (see ../networkpolicy.yaml), so the workers reach
-# Postgres, DNS and LiteLLM on data-hub without a rule.
+# Postgres, DNS and the cluster LiteLLM (litellm.inference.svc:4000) without a rule; the inference
+# namespace's own policy admits memory-worker-extract.
 #
 # Postgres needs no change: ../networkpolicy.yaml `allow-store-ingress` admits every pod in the
 # namespace (`from: podSelector: {}`) on 5432 and 6379, which includes the worker pods.

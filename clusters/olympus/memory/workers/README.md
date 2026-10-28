@@ -1,7 +1,7 @@
 # memory-workers — deployment (olympus-sdk#453, epic #444)
 
 The queue workers of the memory gateway: they take `extract` and `embed` jobs from the Postgres queue
-(`memory.capture_queue`), call LiteLLM on data-hub and write facts and embeddings back. Design:
+(`memory.capture_queue`), call the cluster LiteLLM (`../../inference`: A9, then data-hub) and write facts and embeddings back. Design:
 [`2026-10-21-memory-gateway-contract-design.md`](https://github.com/nwlnexus/olympus-sdk/blob/main/docs/superpowers/specs/2026-10-21-memory-gateway-contract-design.md)
 sections 3.4, 8 and 9. Code, configuration reference and image: `packages/memory-workers` in olympus-sdk
 (`README.md` there lists every setting), published as `ghcr.io/nwlnexus/memory-workers` by
@@ -29,7 +29,7 @@ Not here, on purpose:
 | | `memory-worker-extract` | `memory-worker-embed` |
 |---|---|---|
 | args | `--stage extract` | `--stage embed` |
-| replicas | **1** (the GPU model on data-hub is single-slot) | 2, preferred anti-affinity across nodes |
+| replicas | **1** (the 27B llama-server is single-slot) | 2, preferred anti-affinity across nodes |
 | claim loops x batch | 1 x 1 | 4 x 4 per pod (a batch is one `/embeddings` request) |
 | rollout | `Recreate` (never two extractors at once) | rolling, `maxUnavailable: 0`, `maxSurge: 1` |
 | requests / limit | 100m, 256Mi / 1Gi | 100m, 192Mi / 512Mi |
