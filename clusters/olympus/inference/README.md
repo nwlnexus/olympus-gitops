@@ -43,9 +43,8 @@ Metrics identify the client as `api_key_alias`. A key rotated in 1Password is pi
 
 **Keys:** 1Password item `litellm-cluster` (vault Dev): `master-key` (Secret `litellm`) and `memory-workers-key`
 (file `memory-workers`; the same field feeds `../memory/workers/externalsecret.yaml`); later `executor-key`.
-During the switch from the old key, the file `memory-workers.previous` (from `litellm` / `master-key`) is a second
-accepted key of the same client (`<client>.<suffix>` files, `custom_auth.py`); remove it once the workers run with
-the new key.
+For a rotation, add a file `<client>.<suffix>` (for example `memory-workers.previous`) to the Secret: `custom_auth.py`
+accepts it as a second key of the same client until it is removed.
 
 ## Metrics and alerts
 
