@@ -16,8 +16,11 @@ own manifests and Flux Kustomizations.
 | `ExternalSecret/memory-stores` | Credentials from 1Password |
 | `NetworkPolicy` | Default deny ingress; stores reachable from this namespace and the blackbox-exporter only |
 
-Scheduling is intentionally default (no node pinning). WS12 (olympus-sdk#457) may move the
-platform to an `olympus.io/role=agent-services` node.
+Every memory workload (gateway, workers, embedder, Postgres, FalkorDB, the backup CronJobs and
+the knowledge indexer) is pinned to the agent-services onodes via nodeSelector
+`olympus.io/role: agent-services` plus the matching NoSchedule toleration (olympus-sdk#567).
+`Job/memory-migrate` is not pinned: it is a short-lived client, and changing its template would
+force a re-run.
 
 ## Prerequisite: the 1Password item
 

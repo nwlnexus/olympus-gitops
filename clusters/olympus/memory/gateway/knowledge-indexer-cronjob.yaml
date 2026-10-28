@@ -114,6 +114,14 @@ spec:
                 - name: known-hosts
                   mountPath: /etc/knowledge
                   readOnly: true
+          # olympus-sdk#567: the memory stack runs on the agent-services onodes (onode-0636e4/062caa).
+          nodeSelector:
+            olympus.io/role: agent-services
+          tolerations:
+            - key: olympus.io/role
+              operator: Equal
+              value: agent-services
+              effect: NoSchedule
           containers:
             - name: index
               # Same digest as the memory-gateway Deployment (gateway.yaml). Bump both together.

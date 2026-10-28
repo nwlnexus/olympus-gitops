@@ -35,6 +35,14 @@ spec:
             runAsGroup: 999
             seccompProfile:
               type: RuntimeDefault
+          # olympus-sdk#567: the memory stack runs on the agent-services onodes (onode-0636e4/062caa).
+          nodeSelector:
+            olympus.io/role: agent-services
+          tolerations:
+            - key: olympus.io/role
+              operator: Equal
+              value: agent-services
+              effect: NoSchedule
           containers:
             - name: pg-dump
               image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
