@@ -131,6 +131,27 @@ tests:
               summary: "LiteLLM fell back from the A9 to data-hub for memory-extract."
               description: "2 requests for memory-extract were served by the data-hub fallback in the last 15m because the A9 deployment failed. Check InferenceBackendDown and litellm_deployment_failure_responses_total by exception_class."
 
+  # A fallback counter is created by the first fallback after a LiteLLM start; increase() does not
+  # count a series' first appearance, so the 2026-10-28 drill (counter born at 3) did not fire.
+  - name: a successful-fallback counter that first appears at 3 fires
+    interval: 1m
+    input_series:
+      - series: 'litellm_deployment_successful_fallbacks_total{job="inference-litellm",requested_model="memory-extract",fallback_model="memory-extract-datahub",pod="litellm-a"}'
+        values: "_x5 3x10"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: LiteLLMFailoverActive
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: LiteLLMFailoverActive
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              requested_model: memory-extract
+            exp_annotations:
+              summary: "LiteLLM fell back from the A9 to data-hub for memory-extract."
+              description: "3 requests for memory-extract were served by the data-hub fallback in the last 15m because the A9 deployment failed. Check InferenceBackendDown and litellm_deployment_failure_responses_total by exception_class."
+
   - name: a flat successful-fallback counter is quiet
     interval: 1m
     input_series:
