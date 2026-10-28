@@ -588,14 +588,14 @@ spec:
                   summary: "{{ $labels.service }} is down on both the A9 and data-hub."
                   description: "Both backends for {{ $labels.service }} have failed their /health probe for 5m. There is no further fallback: requests to the aliases it serves fail."
               - alert: LiteLLMFailoverActive
-                expr: sum by (requested_model) (increase(litellm_deployment_successful_fallbacks_total{job="inference-litellm"}[15m])) > 0
+                expr: sum by (requested_model) ((increase(litellm_deployment_successful_fallbacks_total{job="inference-litellm"}[15m]) > 0) or (litellm_deployment_successful_fallbacks_total{job="inference-litellm"} unless litellm_deployment_successful_fallbacks_total{job="inference-litellm"} offset 15m)) > 0
                 labels:
                   severity: warning
                 annotations:
                   summary: "LiteLLM fell back from the A9 to data-hub for {{ $labels.requested_model }}."
                   description: "{{ $value | humanize }} requests for {{ $labels.requested_model }} were served by the data-hub fallback in the last 15m because the A9 deployment failed. Check InferenceBackendDown and litellm_deployment_failure_responses_total by exception_class."
               - alert: LiteLLMFallbackFailed
-                expr: sum by (requested_model) (increase(litellm_deployment_failed_fallbacks_total{job="inference-litellm"}[15m])) > 0
+                expr: sum by (requested_model) ((increase(litellm_deployment_failed_fallbacks_total{job="inference-litellm"}[15m]) > 0) or (litellm_deployment_failed_fallbacks_total{job="inference-litellm"} unless litellm_deployment_failed_fallbacks_total{job="inference-litellm"} offset 15m)) > 0
                 labels:
                   severity: critical
                 annotations:
