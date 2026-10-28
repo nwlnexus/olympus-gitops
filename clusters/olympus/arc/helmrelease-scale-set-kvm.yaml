@@ -31,11 +31,13 @@ spec:
     githubConfigSecret: arc-github-app
     runnerGroup: olympus-ci
     minRunners: 0
-    # ONE VM job at a time. Three independent caps: this value, the quota
-    # `ci-runners-kvm` (1 pod, 1 olympus.io/kvm) and the device plugin's `count: 1`
-    # per labelled node. Raise only together with a second labelled node (README.md).
+    # TWO VM jobs at a time (olympus-sdk#460: #197 agent runs must not block the VM
+    # suites). Three independent caps: this value, the quota `ci-runners-kvm`
+    # (2 pods, 2 olympus.io/kvm) and the device plugin's `count: 1` per labelled node
+    # (nodes onode-030c31 and onode-0312ce). Raise only together with another labelled
+    # node (README.md).
     # Also the drain switch (README.md, known issue #4715 applies).
-    maxRunners: 1
+    maxRunners: 2
     # Explicit controller service account (no cluster lookup at render time).
     controllerServiceAccount:
       namespace: arc-system

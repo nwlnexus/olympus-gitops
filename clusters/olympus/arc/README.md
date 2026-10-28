@@ -7,7 +7,7 @@ and, with `../kvm-device-plugin/`, #390).
 
 **Status: live.** `olympus-linux` runs with `maxRunners: 3` and `olympus-gate` with
 `maxRunners: 8` (since 2026-10-19, after the preconditions below). `olympus-kvm`
-(`maxRunners: 1`) runs nothing until a node carries the KVM label (KVM section).
+(`maxRunners: 2`) runs nothing until a node carries the KVM label (KVM section).
 
 ## Layout
 
@@ -15,7 +15,7 @@ and, with `../kvm-device-plugin/`, #390).
 |------|---------|
 | `namespace.yaml` | `arc-system` (controller + listeners), `arc-runners` (runner pods of all scale sets, PSA `restricted`) |
 | `priorityclass.yaml` | `ci-runner` and `ci-runner-kvm`, both value -1000, `preemptionPolicy: Never` (below every other workload); two classes only so the quota can scope the KVM budget |
-| `quota.yaml`, `limitrange.yaml` | hard ceilings: total 13 pods; `ci-runners-non-kvm` (olympus-linux + olympus-gate: 12 pods, 8.5 CPU / 17 GiB requests, 20 CPU / 36 GiB limits, no `/dev/kvm`) and `ci-runners-kvm` (1 pod, 2 CPU / 4 GiB requests, 3 CPU / 8 GiB limits, 1 `olympus.io/kvm`); default requests/limits for every container |
+| `quota.yaml`, `limitrange.yaml` | hard ceilings: total 14 pods; `ci-runners-non-kvm` (olympus-linux + olympus-gate: 12 pods, 8.5 CPU / 17 GiB requests, 20 CPU / 36 GiB limits, no `/dev/kvm`) and `ci-runners-kvm` (2 pods, 4 CPU / 8 GiB requests, 6 CPU / 16 GiB limits, 2 `olympus.io/kvm`); default requests/limits for every container |
 | `networkpolicy.yaml` | default-deny ingress; runner egress = DNS + public internet only (no IPv4 cluster, node, LAN or tailnet addresses); controller/listener egress adds the API server only |
 | `externalsecret.yaml` | `arc-github-app` Secret (GitHub App credentials) from 1Password via ESO |
 | `ocirepository.yaml` | both charts pinned by digest (`ghcr.io/actions/actions-runner-controller-charts`) |
@@ -35,13 +35,13 @@ image by digest, `activeDeadlineSeconds` so a stuck job cannot hold a slot for d
 |-----------|-----|------|------------------------------|
 | `olympus-linux` | CI jobs (lint, test, build) | max 3 (`maxRunners`; quota room for 4) | 2 CPU, 4 GiB / 4 CPU, 8 GiB; spread over the onodes via label `olympus.io/ci-runner`; deadline 3 h |
 | `olympus-gate` | the CI gate workflow: a poller (bash, gh, jq) that waits up to 120 min for sibling workflows | max 8 | 50m, 128Mi, 256Mi ephemeral / 500m, 512Mi, 2Gi; label `olympus.io/ci-gate`, soft spread (maxSkew 2, ScheduleAnyway); deadline 150 min |
-| `olympus-kvm` | VM suites (`vm-tests.yml`, `make vm-test`) | max 1 | 2 CPU, 4 GiB, 4 GiB ephemeral, `olympus.io/kvm: 1` / 3 CPU, 8 GiB, 15 GiB; label `olympus.io/ci-kvm`, only on nodes labelled `node-restriction.kubernetes.io/kvm-ci=true`, supplemental group 994 (`kvm`); KVM image variant by digest; deadline 2 h |
+| `olympus-kvm` | VM suites (`vm-tests.yml`, `make vm-test`) | max 2 | 2 CPU, 4 GiB, 4 GiB ephemeral, `olympus.io/kvm: 1` / 3 CPU, 8 GiB, 15 GiB; label `olympus.io/ci-kvm`, only on nodes labelled `node-restriction.kubernetes.io/kvm-ci=true`, supplemental group 994 (`kvm`); KVM image variant by digest; deadline 2 h |
 
 The gate has its own pool on purpose: if it shared the 3 `olympus-linux` slots, three open
 PRs would each hold a slot while waiting for jobs that can never be scheduled (deadlock).
 The `arc-runners` quota is split by priority class: `ci-runners-non-kvm` (12 pods, requests
 8.5 CPU / 17 GiB, limits 20 CPU / 36 GiB) is the runner budget plus the gate budget, unchanged by
-#390; `ci-runners-kvm` is one KVM pod; `ci-runners` is the sum (13 pods, and the only place
+#390; `ci-runners-kvm` is two KVM pods; `ci-runners` is the sum (14 pods, and the only place
 ephemeral storage is capped: scoped quotas cannot carry it). NetworkPolicies and the LimitRange select/apply to the
 whole namespace, so gate pods get the same isolation. The controller (`watchSingleNamespace:
 arc-runners`) serves any number of scale sets in that namespace; each adds one listener pod
@@ -80,7 +80,7 @@ with QEMU and need `/dev/kvm`. They run in an **unprivileged** runner pod under 
    `/dev/kvm`, created by the runtime with the HOST owner and mode (`root:994 0660`).
    `securityContext.supplementalGroups: [994]` (the host `kvm` group) lets uid 1001 open
    it. No capabilities, no hostPath, seccomp RuntimeDefault, no new privileges.
-3. Caps: `maxRunners: 1`, quota `ci-runners-kvm` (1 pod, 1 device), plugin `count: 1`
+3. Caps: `maxRunners: 2`, quota `ci-runners-kvm` (2 pods, 2 devices), plugin `count: 1`
    per node; requests 2 CPU / 4 GiB, limits 3 CPU / 8 GiB / 15 GiB ephemeral (3 CPU keeps
    CI at or below half of an onode's 16 cores next to an `olympus-linux` runner and
    gates, spec section 5); `activeDeadlineSeconds: 7200`. The VM
@@ -132,6 +132,11 @@ stay pending (the listener scales, the runner pod is Pending with
 `Insufficient olympus.io/kvm`).
 
 ### Adding a second KVM node
+
+Done 2026-10-28 (olympus-sdk#460): the second KVM node is `onode-0312ce` (gid 994 and
+`/dev/kvm` verified; `nested=0` via olympus-infra `host_vars`). Live label:
+`kubectl label node onode-0312ce node-restriction.kubernetes.io/kvm-ci=true`. The steps
+below are the general procedure.
 
 1. On the node: `getent group kvm` must print gid **994** (the scale set hard-codes
    `supplementalGroups: [994]`; all three onodes have 994 today). If it differs, the
