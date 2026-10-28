@@ -1,0 +1,87 @@
+# NetworkPolicies for namespace `inference` (olympus-sdk#569). Default deny in both directions,
+# then:
+#   ingress 4000  from the memory workers (ns memory), Prometheus (scrape /metrics/) and the
+#                 blackbox exporter (probe /health/readiness). Other clients (the #197 executor) get
+#                 a rule when they exist.
+#   egress        DNS (kube-system) and the two llama-server backends on the tailnet: A9
+#                 100.89.177.55 and data-hub 100.95.232.41, ports 8081-8082. Pods reach the tailnet
+#                 through the node (every node runs tailscale; pod traffic is SNATed onto
+#                 tailscale0), and the tailnet ACL already grants tag:k8s -> tag:inference
+#                 tcp:8081-8083 (olympus-tailnet policy.hujson). Nothing else: no internet, so the
+#                 proxy cannot phone home (LITELLM_LOCAL_MODEL_COST_MAP=True).
+# The kubelet's probes come from the node and are not subject to NetworkPolicy under k3s.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: inference
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-litellm
+  namespace: inference
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: litellm
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: memory
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: memory-worker-extract
+      ports:
+        - protocol: TCP
+          port: 4000
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+              app.kubernetes.io/component: server
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus-blackbox-exporter
+      ports:
+        - protocol: TCP
+          port: 4000
+  egress:
+    # DNS via CoreDNS only (the kube-dns Service DNATs to these pods), as in ../arc/networkpolicy.yaml.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 100.89.177.55/32
+        - ipBlock:
+            cidr: 100.95.232.41/32
+      ports:
+        - protocol: TCP
+          port: 8081
+        - protocol: TCP
+          port: 8082

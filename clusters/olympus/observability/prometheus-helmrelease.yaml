@@ -217,6 +217,64 @@ spec:
             target_label: instance
           - target_label: __address__
             replacement: blackbox-exporter.observability.svc:9115
+      # Inference routing (olympus-sdk#569, HW11): LiteLLM in ns `inference`. A dedicated pod job (the
+      # pods carry no prometheus.io/* annotations) so it can drop labels the generic kubernetes-pods
+      # job would keep: `hashed_api_key` (LiteLLM writes the RAW presented key there when it refuses a
+      # request) plus `client_ip` and `user_agent` (cardinality). Clients stay identifiable by
+      # `api_key_alias` (= client name, inference/custom_auth.py). Allowed by
+      # inference/networkpolicy.yaml (Prometheus -> 4000).
+      - job_name: inference-litellm
+        metrics_path: /metrics/
+        scrape_interval: 30s
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [inference]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name, __meta_kubernetes_pod_container_port_number]
+            regex: litellm;4000
+            action: keep
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+        metric_relabel_configs:
+          - regex: hashed_api_key|client_ip|user_agent
+            action: labeldrop
+      # LiteLLM readiness through its Service, and the A9 llama-server backends it routes to (the
+      # data-hub backends are already probed by blackbox-datahub-http, same `service` names, so the
+      # alerts can join the two hosts on `service`). llama-server /health is a status read that does
+      # not take the inference slot; the A9's own watchdog polls it too. Allowed by
+      # inference/networkpolicy.yaml (blackbox-exporter -> 4000) and the tailnet ACL
+      # (tag:k8s -> tag:inference tcp:8081-8083).
+      - job_name: blackbox-inference-http
+        metrics_path: /probe
+        params:
+          module: [http_2xx]
+        scrape_interval: 30s
+        scrape_timeout: 10s
+        static_configs:
+          - targets: ["http://litellm.inference.svc:4000/health/readiness"]
+            labels:
+              service: litellm
+              host: cluster
+          - targets: ["http://100.89.177.55:8081/health"]
+            labels:
+              service: llama-qwen36-27b
+              host: a9
+          - targets: ["http://100.89.177.55:8082/health"]
+            labels:
+              service: llama-qwen25-7b
+              host: a9
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.observability.svc:9115
     serverFiles:
       alerting_rules.yml:
         groups:
@@ -506,6 +564,59 @@ spec:
                 annotations:
                   summary: "Memory embedder p95 latency is above 8s."
                   description: "p95 /v1/embeddings latency is {{ $value | humanizeDuration }} over 5m. The embedder is saturated (offered load above its CPU capacity: see memory/embedder/README.md, \"Sizing\") or CPU-throttled on the node. Check `te_queue_size` and `kubectl -n memory top pods`."
+          - name: inference
+            rules:
+              # Cluster LiteLLM (olympus-sdk#569, HW11). Probes: job blackbox-inference-http above;
+              # LiteLLM metrics: job inference-litellm. Backends: A9 first, data-hub second, no third tier.
+              - alert: LiteLLMDown
+                expr: probe_success{job="blackbox-inference-http", service="litellm"} == 0
+                for: 5m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: "The cluster LiteLLM (inference/litellm) has no ready endpoint."
+                  description: "GET {{ $labels.instance }} has failed for 5m: no LiteLLM pod is ready, so memory extraction stops. Check `kubectl -n inference get pods,events` and the Flux Kustomization `inference`."
+              - alert: InferenceBackendDown
+                expr: probe_success{job="blackbox-inference-http", host="a9"} == 0
+                for: 5m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "A9 backend {{ $labels.service }} is down; LiteLLM is serving its aliases from data-hub."
+                  description: "GET {{ $labels.instance }} has failed for 5m. LiteLLM falls back to the data-hub twin of every alias on this backend (slower). Check the inference-server-* systemd unit and its watchdog on a9-mega."
+              - alert: InferenceAllBackendsDown
+                expr: (probe_success{job="blackbox-inference-http", host="a9"} == 0) and on(service) (probe_success{job="blackbox-datahub-http"} == 0)
+                for: 5m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: "{{ $labels.service }} is down on both the A9 and data-hub."
+                  description: "Both backends for {{ $labels.service }} have failed their /health probe for 5m. There is no further fallback: requests to the aliases it serves fail."
+              - alert: LiteLLMFailoverActive
+                expr: sum by (requested_model) (increase(litellm_deployment_successful_fallbacks_total{job="inference-litellm"}[15m])) > 0
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "LiteLLM fell back from the A9 to data-hub for {{ $labels.requested_model }}."
+                  description: "{{ $value | humanize }} requests for {{ $labels.requested_model }} were served by the data-hub fallback in the last 15m because the A9 deployment failed. Check InferenceBackendDown and litellm_deployment_failure_responses_total by exception_class."
+              - alert: LiteLLMFallbackFailed
+                expr: sum by (requested_model) (increase(litellm_deployment_failed_fallbacks_total{job="inference-litellm"}[15m])) > 0
+                labels:
+                  severity: critical
+                annotations:
+                  summary: "LiteLLM requests for {{ $labels.requested_model }} failed on the A9 and on the data-hub fallback."
+                  description: "{{ $value | humanize }} requests for {{ $labels.requested_model }} failed on both backends in the last 15m; the client got the error."
+              - alert: LiteLLMHighErrorRate
+                expr: >-
+                  sum(rate(litellm_proxy_total_requests_metric_total{job="inference-litellm", status_code=~"5.."}[15m]))
+                  / sum(rate(litellm_proxy_total_requests_metric_total{job="inference-litellm"}[15m])) > 0.1
+                  and sum(increase(litellm_proxy_total_requests_metric_total{job="inference-litellm", status_code=~"5.."}[15m])) >= 3
+                for: 10m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "More than 10% of LiteLLM requests return 5xx."
+                  description: "{{ $value | humanizePercentage }} of requests through the cluster LiteLLM returned 5xx over 15m. See litellm_proxy_failed_requests_metric_total by requested_model and exception_class."
           - name: agent-sessions
             rules:
               # Claude Code session telemetry (olympus-sdk#565, spec decision H12): the agent host and the Macs

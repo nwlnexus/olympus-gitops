@@ -1,0 +1,191 @@
+# LiteLLM in the cluster (olympus-sdk#569, HW11; spec decision H9). Config: litellm-config.yaml
+# (generated ConfigMap litellm-config-<hash>); auth hook: custom_auth.py; secrets:
+# externalsecret.yaml. See README.md.
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  namespace: inference
+  labels:
+    app.kubernetes.io/name: litellm
+    app.kubernetes.io/part-of: inference
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: litellm
+  ports:
+    # Port 4000 like the data-hub LiteLLM, so a client switch only changes the host.
+    - name: http
+      port: 4000
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: litellm
+  namespace: inference
+  labels:
+    app.kubernetes.io/name: litellm
+    app.kubernetes.io/part-of: inference
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: litellm
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  namespace: inference
+  labels:
+    app.kubernetes.io/name: litellm
+    app.kubernetes.io/part-of: inference
+  annotations:
+    # Restart on a master-key change. Client-key rotations are picked up without a restart
+    # (custom_auth.py re-reads changed files), but a restart is harmless.
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: litellm
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: litellm
+        app.kubernetes.io/part-of: inference
+        app.kubernetes.io/component: proxy
+      # No prometheus.io/* annotations on purpose: the dedicated scrape job `inference-litellm`
+      # (observability/prometheus-helmrelease.yaml) drops the hashed_api_key and client_ip labels,
+      # which the generic kubernetes-pods job could not.
+    spec:
+      automountServiceAccountToken: false
+      # Uvicorn finishes in-flight requests on SIGTERM; an extraction can take up to 300 s on the A9
+      # plus 210 s on data-hub, so the grace period covers the worst case before SIGKILL.
+      terminationGracePeriodSeconds: 540
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      # The agent-only onodes (spec H10): label and taint olympus.io/role=agent-services.
+      nodeSelector:
+        olympus.io/role: agent-services
+      tolerations:
+        - key: olympus.io/role
+          operator: Equal
+          value: agent-services
+          effect: NoSchedule
+      affinity:
+        podAntiAffinity:
+          # Preferred, not required: with two agent nodes a required rule would block the surge
+          # pod of a rolling update.
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: litellm
+      containers:
+        - name: litellm
+          # v1.105.1 (2026-10-13), multi-arch index digest.
+          image: ghcr.io/berriai/litellm:v1.105.1@sha256:b7b9e2c306343721802253d0dd9436b9634a2eb4e14da7c7cf06c5c7b7530802
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config=/etc/litellm/config/config.yaml
+            - --port=4000
+            - --num_workers=1
+          ports:
+            - name: http
+              containerPort: 4000
+              protocol: TCP
+          env:
+            - name: HOME
+              value: /tmp
+            # Use the cost map bundled in the image instead of fetching it from GitHub at start
+            # (egress is limited to DNS and the two backends, networkpolicy.yaml).
+            - name: LITELLM_LOCAL_MODEL_COST_MAP
+              value: "True"
+            - name: LITELLM_LOG
+              value: INFO
+            - name: LITELLM_CLIENT_KEYS_DIR
+              value: /etc/litellm/client-keys
+            # client -> aliases it may call (custom_auth.py). A client also needs a key file in
+            # Secret litellm-client-keys. `executor` (#197) gets a key when it exists.
+            - name: LITELLM_CLIENT_SCOPES
+              value: '{"memory-workers": ["memory-extract"], "executor": ["coder-light", "coder-heavy"]}'
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm
+                  key: LITELLM_MASTER_KEY
+          startupProbe:
+            httpGet:
+              path: /health/liveliness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet:
+              path: /health/liveliness
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # /health/readiness does not call the backends (a backend outage must not empty the
+          # Service: fallback happens inside LiteLLM). /health itself calls every model, so it is
+          # not used as a probe.
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          resources:
+            # ~570 MiB resident idle (local run of this image and config).
+            requests:
+              cpu: 100m
+              memory: 640Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            # config.yaml and custom_auth.py side by side: LiteLLM resolves `custom_auth:` relative
+            # to the config file's directory.
+            - name: config
+              mountPath: /etc/litellm/config
+              readOnly: true
+            - name: client-keys
+              mountPath: /etc/litellm/client-keys
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: litellm-config
+        - name: client-keys
+          secret:
+            secretName: litellm-client-keys
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi

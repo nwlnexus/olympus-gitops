@@ -1,0 +1,25 @@
+# Inference routing (olympus-sdk#569, HW11; spec H9): LiteLLM in namespace `inference` on the
+# agent-services onodes, in front of the A9 and data-hub llama-servers. Its own Kustomization so a
+# bad rollout or a missing 1Password item only makes `inference` unhealthy. Clients switch to it in
+# separate changes (memory workers: ../memory/workers/workers-config.env). See ../inference/README.md.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: inference
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/inference
+  prune: true
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    # ClusterSecretStore onepassword-connect (ExternalSecrets litellm, litellm-client-keys).
+    - name: external-secrets-config
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: litellm
+      namespace: inference

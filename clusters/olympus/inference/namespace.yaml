@@ -1,0 +1,10 @@
+# Namespace `inference` (olympus-sdk#569, HW11, spec decision H9): the cluster's only LLM routing
+# layer (LiteLLM). Pod Security `restricted`; NetworkPolicies in networkpolicy.yaml.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: inference
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

@@ -32,3 +32,4 @@ resources:
   - flux-kustomizations/memory-gateway.yaml
   - flux-kustomizations/memory-workers.yaml
   - flux-kustomizations/memory-embedder.yaml
+  - flux-kustomizations/inference.yaml

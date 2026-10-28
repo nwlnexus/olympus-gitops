@@ -1,0 +1,121 @@
+# LiteLLM proxy config for the cluster (olympus-sdk#569, HW11; spec H9; owner scope 2026-10-28:
+# no cloud tier). Rendered into ConfigMap litellm-config by kustomization.yaml (hash suffix: a
+# change here rolls the pods). No secrets in this file: the master key is LITELLM_MASTER_KEY from
+# Secret `litellm`, client keys are files from Secret `litellm-client-keys` (custom_auth.py).
+#
+# Clients call capability aliases only. Each alias has one deployment on the A9 (a9-mega,
+# llama-server, tailnet 100.89.177.55) and falls back to a twin group on data-hub (llama-server,
+# tailnet 100.95.232.41). There is no third tier: when both fail the client gets the error.
+#
+#   alias           A9 (primary)                    data-hub (fallback group)
+#   memory-extract  :8081 qwen3.6-27b               memory-extract-datahub  :8081 qwen3.6-27b
+#   coder-heavy     :8081 qwen3.6-27b               coder-heavy-datahub     :8081 qwen3.6-27b
+#   coder-light     :8082 qwen2.5-7b-instruct       coder-light-datahub     :8082 qwen2.5-7b-instruct
+#
+# `memory-embed` is NOT here: the gateway and workers embed through the in-cluster memory-embedder.
+# `coder-cloud` is NOT here: no cloud tier (owner, 2026-10-28).
+#
+# Timeouts. Worker per-call timeout 540 s (MEMORY_EXTRACT_TIMEOUT_SECONDS); llama-server 900 s.
+# A9 300 s + data-hub 210 s (+ one immediate retry on connection errors) stays below 540 s, so
+# LiteLLM always answers before the worker gives up (the #591 lesson: a client that abandons a
+# request LiteLLM still holds got its next connect blackholed). A9 p50 11.6 s / p95 16 s / max 21 s
+# per golden episode (#530), so 300 s only trips on a hung server; llama-server cancels a request
+# whose client went away, so a timed-out A9 call does not keep the slot busy.
+model_list:
+  # --- A9 (primary) --------------------------------------------------------------------------
+  - model_name: memory-extract
+    litellm_params:
+      model: openai/qwen3.6-27b
+      api_base: http://100.89.177.55:8081/v1
+      api_key: not-used
+      timeout: 300
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+    model_info:
+      id: a9-qwen36-27b-memory-extract
+  - model_name: coder-heavy
+    litellm_params:
+      model: openai/qwen3.6-27b
+      api_base: http://100.89.177.55:8081/v1
+      api_key: not-used
+      timeout: 300
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+    model_info:
+      id: a9-qwen36-27b-coder-heavy
+  - model_name: coder-light
+    litellm_params:
+      model: openai/qwen2.5-7b-instruct
+      api_base: http://100.89.177.55:8082/v1
+      api_key: not-used
+      timeout: 300
+    model_info:
+      id: a9-qwen25-7b-coder-light
+  # --- data-hub (fallback groups; clients do not call these names) ----------------------------
+  - model_name: memory-extract-datahub
+    litellm_params:
+      model: openai/qwen3.6-27b
+      api_base: http://100.95.232.41:8081/v1
+      api_key: not-used
+      timeout: 210
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+    model_info:
+      id: datahub-qwen36-27b-memory-extract
+  - model_name: coder-heavy-datahub
+    litellm_params:
+      model: openai/qwen3.6-27b
+      api_base: http://100.95.232.41:8081/v1
+      api_key: not-used
+      timeout: 210
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+    model_info:
+      id: datahub-qwen36-27b-coder-heavy
+  - model_name: coder-light-datahub
+    litellm_params:
+      model: openai/qwen2.5-7b-instruct
+      api_base: http://100.95.232.41:8082/v1
+      api_key: not-used
+      timeout: 210
+    model_info:
+      id: datahub-qwen25-7b-coder-light
+
+router_settings:
+  # Ordered fallback: A9 group first, then its data-hub twin. Nothing after that.
+  fallbacks:
+    - memory-extract: [memory-extract-datahub]
+    - coder-heavy: [coder-heavy-datahub]
+    - coder-light: [coder-light-datahub]
+  # One immediate retry on the same deployment for connection errors and 5xx (llama-server answers
+  # 503 for the few seconds it loads after a restart: 3-7 s cold start in #530), none for timeouts
+  # (a second 300 s wait would push past the worker's 540 s) or client errors.
+  num_retries: 1
+  retry_policy:
+    TimeoutErrorRetries: 0
+    BadRequestErrorRetries: 0
+    AuthenticationErrorRetries: 0
+    ContentPolicyViolationErrorRetries: 0
+    InternalServerErrorRetries: 1
+    RateLimitErrorRetries: 1
+  allowed_fails: 3
+  cooldown_time: 30
+
+litellm_settings:
+  drop_params: true
+  # Ceiling for any call that does not set its own timeout (every deployment above does).
+  request_timeout: 520
+  callbacks: ["prometheus"]
+  # /metrics is served on the API port without a key; only Prometheus can reach it
+  # (networkpolicy.yaml). The scrape job drops the key-hash and client-IP labels.
+  require_auth_for_metrics_endpoint: false
+
+general_settings:
+  # Per-client keys without a database (custom_auth.py, absorbs olympus-sdk#490).
+  custom_auth: custom_auth.user_api_key_auth
+  # No spend tracking, no UI, no database.
+  disable_spend_logs: true
