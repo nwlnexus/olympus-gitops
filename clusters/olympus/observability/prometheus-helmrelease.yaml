@@ -363,15 +363,16 @@ spec:
                   description: "qnap-iscsi allows online expansion: patch the PVC's spec.resources.requests.storage (StatefulSet volumeClaimTemplates are immutable, so see memory/README.md for the procedure)."
               # No successful backup for 36h, or no success ever and the CronJob is
               # already older than 36h (kube_cronjob_status_last_successful_time is
-              # absent until the first success).
+              # absent until the first success). Scoped to the two backup CronJobs: the knowledge
+              # indexer (olympus-sdk#563) has its own rules below.
               - alert: MemoryBackupStale
                 expr: >-
-                  (time() - kube_cronjob_status_last_successful_time{namespace="memory"} > 129600)
+                  (time() - kube_cronjob_status_last_successful_time{namespace="memory", cronjob=~"postgres-backup|falkordb-backup"} > 129600)
                   or
                   (
-                    time() - kube_cronjob_created{namespace="memory"} > 129600
+                    time() - kube_cronjob_created{namespace="memory", cronjob=~"postgres-backup|falkordb-backup"} > 129600
                     unless on (namespace, cronjob)
-                    kube_cronjob_status_last_successful_time{namespace="memory"}
+                    kube_cronjob_status_last_successful_time{namespace="memory", cronjob=~"postgres-backup|falkordb-backup"}
                   )
                 for: 5m
                 labels:
@@ -379,6 +380,36 @@ spec:
                 annotations:
                   summary: "CronJob {{ $labels.cronjob }} in ns memory has had no successful run for >36h."
                   description: "Check `kubectl -n memory get jobs,pods` and the Job logs; the backup PVC memory-backups (qnap-nfs) being unwritable or full is the likely cause."
+              # Knowledge indexer (olympus-sdk#563, gateway design section 15.6): CronJob
+              # memory/memory-knowledge-indexer, nightly at 02:40 UTC. No Prometheus operator, so no
+              # ServiceMonitor: kube-state-metrics provides the CronJob series and the gateway pods
+              # (kubernetes-pods job) the memory_knowledge_* gauges.
+              # The latest scheduled run has not succeeded: last_successful_time stays before
+              # last_schedule_time. A healthy run finishes in minutes, so 2h means it failed (or hangs).
+              # Resolves with the next successful run (manual: kubectl -n memory create job
+              # --from=cronjob/memory-knowledge-indexer knowledge-index-manual).
+              - alert: MemoryKnowledgeIndexerFailing
+                expr: >-
+                  max by (namespace, cronjob) (kube_cronjob_status_last_schedule_time{namespace="memory", cronjob="memory-knowledge-indexer"})
+                  - max by (namespace, cronjob) (kube_cronjob_status_last_successful_time{namespace="memory", cronjob="memory-knowledge-indexer"})
+                  > 0
+                for: 2h
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "The last knowledge indexer run has not succeeded."
+                  description: "CronJob memory-knowledge-indexer was scheduled and has not completed successfully for 2h, so the wiki index (memory.knowledge_page) is stale. `kubectl -n memory get jobs,pods -l app.kubernetes.io/name=memory-knowledge-indexer` and the logs of containers `clone` (deploy key, Secret memory-knowledge-indexer, GitHub) and `index` (embedder, database, guards)."
+              # Nothing indexed for 36h, by the index's own clock (max indexed_at, exported by the gateway;
+              # 0 when the table is empty). Also catches a CronJob that never succeeded, was suspended or
+              # deleted, which the rule above cannot see.
+              - alert: MemoryKnowledgeIndexStale
+                expr: time() - max(memory_knowledge_last_indexed_timestamp_seconds) > 129600
+                for: 30m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "The wiki knowledge index has not been refreshed for more than 36h."
+                  description: "The newest row of memory.knowledge_page is {{ $value | humanizeDuration }} old (or the table is empty). The `knowledge` tool and the session-start wiki hits serve stale or no pages. Check CronJob memory-knowledge-indexer (`kubectl -n memory get cronjob,jobs`) and see MemoryKnowledgeIndexerFailing."
               # Memory gateway and queue (olympus-sdk#450 task G10, design section 9). The queue
               # gauges are exported by the gateway (Q-QUEUE-METRICS, every 30 s, both replicas, hence
               # max by); scraped through the kubernetes-pods job. The expr/for/severity are the

@@ -1,0 +1,85 @@
+# Unit tests for the knowledge indexer alerts (olympus-sdk#563, gateway design section 15.6) and the
+# narrowed MemoryBackupStale. Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease).
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  # --- MemoryKnowledgeIndexerFailing ----------------------------------------------------------------
+  # Scheduled at t=0 (epoch 0 = last_schedule_time 0); the run succeeds 5 minutes later.
+  - name: a run that succeeds within minutes never fires
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_schedule_time{namespace="memory", cronjob="memory-knowledge-indexer"}'
+        values: "0x300"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="memory", cronjob="memory-knowledge-indexer"}'
+        values: "-86400x4 300x296"
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: MemoryKnowledgeIndexerFailing
+        exp_alerts: []
+
+  - name: a scheduled run that does not succeed fires after 2h
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_schedule_time{namespace="memory", cronjob="memory-knowledge-indexer"}'
+        values: "0x300"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="memory", cronjob="memory-knowledge-indexer"}'
+        values: "-86400x300"
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: MemoryKnowledgeIndexerFailing
+        exp_alerts: []
+      - eval_time: 2h30m
+        alertname: MemoryKnowledgeIndexerFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: memory
+              cronjob: memory-knowledge-indexer
+            exp_annotations:
+              summary: "The last knowledge indexer run has not succeeded."
+              description: "CronJob memory-knowledge-indexer was scheduled and has not completed successfully for 2h, so the wiki index (memory.knowledge_page) is stale. `kubectl -n memory get jobs,pods -l app.kubernetes.io/name=memory-knowledge-indexer` and the logs of containers `clone` (deploy key, Secret memory-knowledge-indexer, GitHub) and `index` (embedder, database, guards)."
+
+  # --- MemoryKnowledgeIndexStale --------------------------------------------------------------------
+  - name: an index older than 36h fires; a fresh one does not
+    interval: 1m
+    input_series:
+      # Indexed at t=0, never again: stale after 36h, fires 30m later.
+      - series: 'memory_knowledge_last_indexed_timestamp_seconds{pod="memory-gateway-a"}'
+        values: "0x2600"
+      # The other replica reports the same value.
+      - series: 'memory_knowledge_last_indexed_timestamp_seconds{pod="memory-gateway-b"}'
+        values: "0x2600"
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: MemoryKnowledgeIndexStale
+        exp_alerts: []
+      - eval_time: 38h
+        alertname: MemoryKnowledgeIndexStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The wiki knowledge index has not been refreshed for more than 36h."
+              description: "The newest row of memory.knowledge_page is 1d 14h 0m 0s old (or the table is empty). The `knowledge` tool and the session-start wiki hits serve stale or no pages. Check CronJob memory-knowledge-indexer (`kubectl -n memory get cronjob,jobs`) and see MemoryKnowledgeIndexerFailing."
+
+  # --- MemoryBackupStale ignores the indexer ---------------------------------------------------------
+  - name: backup staleness covers the backup CronJobs only
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="memory", cronjob="memory-knowledge-indexer"}'
+        values: "0x2600"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="memory", cronjob="postgres-backup"}'
+        values: "0x2600"
+    alert_rule_test:
+      - eval_time: 40h
+        alertname: MemoryBackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: memory
+              cronjob: postgres-backup
+            exp_annotations:
+              summary: "CronJob postgres-backup in ns memory has had no successful run for >36h."
+              description: "Check `kubectl -n memory get jobs,pods` and the Job logs; the backup PVC memory-backups (qnap-nfs) being unwritable or full is the likely cause."
