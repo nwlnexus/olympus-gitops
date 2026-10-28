@@ -1,0 +1,174 @@
+# Knowledge indexer (olympus-sdk#563, harness spec H7b; contract: olympus-sdk
+# docs/superpowers/specs/2026-10-21-memory-gateway-contract-design.md section 15.2).
+#
+# Nightly: clone nwlnexus/second-brain (private) with a read-only deploy key, split wiki/**/*.md by
+# section, embed changed sections with the in-cluster embedder, upsert memory.knowledge_page by
+# (path, heading) and delete sections/pages that are gone (migration 0007). The gateway serves the
+# table read-only through the `knowledge` MCP tool, GET /knowledge and the session-start wiki hits.
+#
+#   init  `clone`  alpine/git as nobody: copies the deploy key to a 0600 file (ssh refuses a group-readable
+#                  key), clones --depth 1 with GitHub's ed25519 host key pinned (StrictHostKeyChecking=yes,
+#                  no TOFU), writes `git rev-parse HEAD` to /work/commit.
+#   main  `index`  the gateway image (same digest as gateway.yaml: bump both together), running
+#                  `node dist/knowledge/cli.js index` as role memory_worker (grants in 0007).
+#
+# The run is all-or-nothing: any read/embed/write failure exits 1 before the transaction commits, and two
+# guards refuse to empty the table (zero sections read, or more than half of the rows deleted).
+# Monitoring (no Prometheus operator here, so no ServiceMonitor; see ../README.md "Monitoring"):
+# kube-state-metrics' kube_cronjob_* series feed MemoryKnowledgeIndexerFailing, and the gateway's
+# memory_knowledge_* gauges (kubernetes-pods scrape) feed MemoryKnowledgeIndexStale
+# (../../observability/prometheus-helmrelease.yaml, group `memory`).
+# Prerequisite: the 1Password item `second-brain-deploy-key` (see knowledge-indexer-externalsecret.yaml).
+# Until it exists the pod waits in Init (secret volume missing) and the Job fails at activeDeadlineSeconds.
+# Run once by hand: kubectl -n memory create job --from=cronjob/memory-knowledge-indexer knowledge-index-manual
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memory-knowledge-indexer
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-knowledge-indexer
+    app.kubernetes.io/part-of: memory
+data:
+  # GitHub's published SSH host key (`gh api meta --jq .ssh_keys`, 2026-10-27). GitHub rotates it rarely and
+  # announces it; a rotation fails the clone loudly (host key mismatch), it never trusts a new key silently.
+  known_hosts: |
+    github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: memory-knowledge-indexer
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-knowledge-indexer
+    app.kubernetes.io/part-of: memory
+spec:
+  # 02:40 UTC: before the 03:00 backups, after the evening's wiki edits.
+  schedule: "40 2 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: memory-knowledge-indexer
+            app.kubernetes.io/part-of: memory
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            # The gateway image is private (same pull secret as gateway.yaml).
+            - name: ghcr-pull
+          securityContext:
+            # Pod Security `restricted`. 65534 (nobody) exists in both images' /etc/passwd, which ssh needs.
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            - name: clone
+              image: docker.io/alpine/git:v2.49.1@sha256:c0280cf9572316299b08544065d3bf35db65043d5e3963982ec50647d2746e26
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  install -m 600 /run/secrets/knowledge/SSH_PRIVATE_KEY /tmp/id
+                  export GIT_SSH_COMMAND="ssh -i /tmp/id -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/knowledge/known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes"
+                  git clone --quiet --depth 1 --single-branch --branch main git@github.com:nwlnexus/second-brain.git /work/repo
+                  git -C /work/repo rev-parse HEAD > /work/commit
+                  rm -f /tmp/id
+                  echo "cloned second-brain at $(cat /work/commit)"
+              env:
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
+                - name: secrets
+                  mountPath: /run/secrets/knowledge
+                  readOnly: true
+                - name: known-hosts
+                  mountPath: /etc/knowledge
+                  readOnly: true
+          containers:
+            - name: index
+              # Same digest as the memory-gateway Deployment (gateway.yaml). Bump both together.
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:87116d0d0ea8064818f4db087a0e9e60d2e6f268f2e58fe4adbd46b9d277c681
+              imagePullPolicy: IfNotPresent
+              command:
+                - node
+                - dist/knowledge/cli.js
+                - index
+                - --dir
+                - /work/repo
+                - --commit-file
+                - /work/commit
+              env:
+                - name: DATABASE_URL_FILE
+                  value: /run/secrets/knowledge/DATABASE_URL
+                - name: MEMORY_EMBED_BASE_URL
+                  value: http://memory-embedder.memory.svc/v1
+                - name: MEMORY_EMBED_MODEL
+                  value: nomic-embed-text-v1.5
+                - name: LOG_LEVEL
+                  value: info
+              securityContext:
+                # The image's own USER (as in gateway.yaml); group 65534 (the pod's) reads the 0440 Secret files.
+                runAsUser: 10001
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+                - name: secrets
+                  mountPath: /run/secrets/knowledge
+                  readOnly: true
+          volumes:
+            - name: work
+              emptyDir:
+                sizeLimit: 256Mi
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
+            - name: secrets
+              secret:
+                secretName: memory-knowledge-indexer
+                defaultMode: 0440
+            - name: known-hosts
+              configMap:
+                name: memory-knowledge-indexer

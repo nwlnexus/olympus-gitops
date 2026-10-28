@@ -28,3 +28,4 @@ configMapGenerator:
       - migrations/0002_core.sql
       - migrations/0003_queue_and_graph.sql
       - migrations/0004_roles.sql
+      - migrations/0007_knowledge.sql

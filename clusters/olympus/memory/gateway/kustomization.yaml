@@ -9,3 +9,6 @@ resources:
   - gateway.yaml
   - tailscale-service.yaml
   - networkpolicy.yaml
+  # Knowledge indexer (olympus-sdk#563): nightly wiki index, runs the gateway image.
+  - knowledge-indexer-externalsecret.yaml
+  - knowledge-indexer-cronjob.yaml

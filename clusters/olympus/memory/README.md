@@ -1,7 +1,7 @@
 # memory — data stores for the memory platform
 
 Namespace `memory`. Implements nwlnexus/olympus-sdk#449 (epic #444, spec sections D3, D4
-and 5.2). This directory holds the **stores** and the schema (migrations 0001-0004, see below); the
+and 5.2). This directory holds the **stores** and the schema (migrations 0001-0004 and 0007, see below); the
 gateway (#450, see `gateway/README.md`; deployed by its own Flux Kustomization), workers (#453, see
 `workers/README.md`) and the CPU embedding service (olympus-sdk#529, see `embedder/README.md`) have their
 own manifests and Flux Kustomizations.
@@ -43,7 +43,7 @@ the Postgres password later: change the 1Password field, then
 Migrations are plain SQL files in `migrations/`, named `NNNN_short_description.sql`
 (zero-padded, next free number), applied in filename order by `Job/memory-migrate`.
 
-1. Create `migrations/<next number>_<what>.sql` (the next free number is `0005`). It must be **idempotent** (`CREATE ... IF NOT EXISTS`,
+1. Create `migrations/<next number>_<what>.sql` (the next free number is `0008`; `0005` and `0006` are reserved for the Postgres graph of the gateway design §3.6, and `0007_knowledge` is the wiki index of olympus-sdk#563). It must be **idempotent** (`CREATE ... IF NOT EXISTS`,
    `ADD COLUMN IF NOT EXISTS`, `DO $$ ... $$` guards), because it is run once per database but
    may be replayed by hand or after a restore. Do not put `BEGIN`/`COMMIT` in it: the runner
    wraps each file and its ledger row in one transaction, so a failing file leaves nothing behind.
@@ -209,3 +209,8 @@ blackbox-exporter) and a `memory` rule group: `MemoryStoreDown`, `MemoryStorePVC
 alerts of the design (section 9). The gateway's own metrics (:9090) are scraped by the default `kubernetes-pods`
 job through the `prometheus.io/*` pod annotations. Rules are unit-tested:
 `python3 ../observability/tests/check_prometheus.py` (promtool and PyYAML required).
+
+The knowledge indexer (olympus-sdk#563, `gateway/knowledge-indexer-cronjob.yaml`) is watched the same way, without a
+ServiceMonitor: `MemoryKnowledgeIndexerFailing` (kube-state-metrics: the latest scheduled run has not succeeded for
+2h) and `MemoryKnowledgeIndexStale` (the gateway's `memory_knowledge_last_indexed_timestamp_seconds`, older than
+36h or never). `MemoryBackupStale` covers the two backup CronJobs only.

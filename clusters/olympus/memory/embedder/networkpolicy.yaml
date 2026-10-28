@@ -18,14 +18,15 @@ spec:
     - Ingress
   ingress:
     # The API (8080: /v1/embeddings) from the clients, and only them: the gateway (query embedding
-    # for recall) and the two worker Deployments (embed stage, extract stage). Any other pod in the
+    # for recall), the two worker Deployments (embed stage, extract stage) and the knowledge indexer
+    # CronJob (wiki sections, olympus-sdk#563). Any other pod in the
     # namespace, including the databases and Jobs, is denied.
     - from:
         - podSelector:
             matchExpressions:
               - key: app.kubernetes.io/name
                 operator: In
-                values: [memory-gateway, memory-worker-embed, memory-worker-extract]
+                values: [memory-gateway, memory-worker-embed, memory-worker-extract, memory-knowledge-indexer]
       ports:
         - protocol: TCP
           port: 8080
