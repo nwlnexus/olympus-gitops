@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Applied by the Flux Kustomization `inference` (../flux-kustomizations/inference.yaml).
+# See README.md.
+resources:
+  - namespace.yaml
+  - externalsecret.yaml
+  - litellm.yaml
+  - networkpolicy.yaml
+configMapGenerator:
+  # litellm-config: the proxy config and the per-client auth hook. The generated name carries a
+  # content hash, so any change to either file rolls the Deployment on the next reconcile.
+  - name: litellm-config
+    namespace: inference
+    files:
+      - config.yaml=litellm-config.yaml
+      - custom_auth.py
+    options:
+      labels:
+        app.kubernetes.io/name: litellm
+        app.kubernetes.io/part-of: inference

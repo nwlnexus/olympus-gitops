@@ -1,0 +1,217 @@
+# Unit tests for the inference alert group (olympus-sdk#569, HW11): LiteLLMDown, InferenceBackendDown,
+# InferenceAllBackendsDown, LiteLLMFailoverActive, LiteLLMFallbackFailed, LiteLLMHighErrorRate.
+# Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease first).
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  # --- LiteLLMDown: readiness probe failing for 5m ---------------------------------------------
+  - name: a failing litellm readiness probe fires after 5m
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-inference-http",service="litellm",host="cluster",instance="http://litellm.inference.svc:4000/health/readiness"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: LiteLLMDown
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: LiteLLMDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: blackbox-inference-http
+              service: litellm
+              host: cluster
+              instance: "http://litellm.inference.svc:4000/health/readiness"
+            exp_annotations:
+              summary: "The cluster LiteLLM (inference/litellm) has no ready endpoint."
+              description: "GET http://litellm.inference.svc:4000/health/readiness has failed for 5m: no LiteLLM pod is ready, so memory extraction stops. Check `kubectl -n inference get pods,events` and the Flux Kustomization `inference`."
+
+  - name: a passing litellm readiness probe is quiet
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-inference-http",service="litellm",host="cluster",instance="http://litellm.inference.svc:4000/health/readiness"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: LiteLLMDown
+        exp_alerts: []
+
+  # --- InferenceBackendDown: an A9 backend failing its probe for 5m ----------------------------
+  - name: a failing A9 backend probe fires after 5m, the litellm probe does not
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-inference-http",service="llama-qwen36-27b",host="a9",instance="http://100.89.177.55:8081/health"}'
+        values: "0x20"
+      - series: 'probe_success{job="blackbox-inference-http",service="litellm",host="cluster",instance="http://litellm.inference.svc:4000/health/readiness"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: InferenceBackendDown
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: InferenceBackendDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: blackbox-inference-http
+              service: llama-qwen36-27b
+              host: a9
+              instance: "http://100.89.177.55:8081/health"
+            exp_annotations:
+              summary: "A9 backend llama-qwen36-27b is down; LiteLLM is serving its aliases from data-hub."
+              description: "GET http://100.89.177.55:8081/health has failed for 5m. LiteLLM falls back to the data-hub twin of every alias on this backend (slower). Check the inference-server-* systemd unit and its watchdog on a9-mega."
+
+  - name: a healthy A9 backend is quiet
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-inference-http",service="llama-qwen36-27b",host="a9",instance="http://100.89.177.55:8081/health"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: InferenceBackendDown
+        exp_alerts: []
+
+  # --- InferenceAllBackendsDown: A9 and data-hub both down for the same service ----------------
+  - name: both hosts down for a service fires
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-inference-http",service="llama-qwen36-27b",host="a9",instance="http://100.89.177.55:8081/health"}'
+        values: "0x20"
+      - series: 'probe_success{job="blackbox-datahub-http",service="llama-qwen36-27b",instance="http://100.95.232.41:8081/health"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: InferenceAllBackendsDown
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: InferenceAllBackendsDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: blackbox-inference-http
+              service: llama-qwen36-27b
+              host: a9
+              instance: "http://100.89.177.55:8081/health"
+            exp_annotations:
+              summary: "llama-qwen36-27b is down on both the A9 and data-hub."
+              description: "Both backends for llama-qwen36-27b have failed their /health probe for 5m. There is no further fallback: requests to the aliases it serves fail."
+
+  - name: A9 down with data-hub up is quiet
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-inference-http",service="llama-qwen36-27b",host="a9",instance="http://100.89.177.55:8081/health"}'
+        values: "0x20"
+      - series: 'probe_success{job="blackbox-datahub-http",service="llama-qwen36-27b",instance="http://100.95.232.41:8081/health"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: InferenceAllBackendsDown
+        exp_alerts: []
+
+  # --- LiteLLMFailoverActive: successful fallbacks in the last 15m (no `for`) -------------------
+  - name: an increasing successful-fallback counter fires
+    interval: 1m
+    input_series:
+      - series: 'litellm_deployment_successful_fallbacks_total{job="inference-litellm",requested_model="memory-extract",fallback_model="memory-extract-datahub",pod="litellm-a"}'
+        values: "0x5 1x5 2x5 3x5"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: LiteLLMFailoverActive
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: LiteLLMFailoverActive
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              requested_model: memory-extract
+            exp_annotations:
+              summary: "LiteLLM fell back from the A9 to data-hub for memory-extract."
+              description: "2 requests for memory-extract were served by the data-hub fallback in the last 15m because the A9 deployment failed. Check InferenceBackendDown and litellm_deployment_failure_responses_total by exception_class."
+
+  - name: a flat successful-fallback counter is quiet
+    interval: 1m
+    input_series:
+      - series: 'litellm_deployment_successful_fallbacks_total{job="inference-litellm",requested_model="memory-extract",fallback_model="memory-extract-datahub",pod="litellm-a"}'
+        values: "7x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: LiteLLMFailoverActive
+        exp_alerts: []
+
+  # --- LiteLLMFallbackFailed: failed fallbacks in the last 15m (no `for`) -----------------------
+  - name: an increasing failed-fallback counter fires
+    interval: 1m
+    input_series:
+      - series: 'litellm_deployment_failed_fallbacks_total{job="inference-litellm",requested_model="memory-extract",fallback_model="memory-extract-datahub",pod="litellm-a"}'
+        values: "0x5 1x5 2x5 3x5"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: LiteLLMFallbackFailed
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: LiteLLMFallbackFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              requested_model: memory-extract
+            exp_annotations:
+              summary: "LiteLLM requests for memory-extract failed on the A9 and on the data-hub fallback."
+              description: "2 requests for memory-extract failed on both backends in the last 15m; the client got the error."
+
+  - name: a flat failed-fallback counter is quiet
+    interval: 1m
+    input_series:
+      - series: 'litellm_deployment_failed_fallbacks_total{job="inference-litellm",requested_model="memory-extract",fallback_model="memory-extract-datahub",pod="litellm-a"}'
+        values: "7x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: LiteLLMFallbackFailed
+        exp_alerts: []
+
+  # --- LiteLLMHighErrorRate: >10% 5xx and >= 3 errors over 15m, for 10m -------------------------
+  - name: a high 5xx ratio with enough errors fires
+    interval: 1m
+    input_series:
+      - series: 'litellm_proxy_total_requests_metric_total{job="inference-litellm",status_code="500",requested_model="memory-extract",pod="litellm-a"}'
+        values: "0+2x40"
+      - series: 'litellm_proxy_total_requests_metric_total{job="inference-litellm",status_code="200",requested_model="memory-extract",pod="litellm-a"}'
+        values: "0+6x40"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: LiteLLMHighErrorRate
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: LiteLLMHighErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "More than 10% of LiteLLM requests return 5xx."
+              description: "25% of requests through the cluster LiteLLM returned 5xx over 15m. See litellm_proxy_failed_requests_metric_total by requested_model and exception_class."
+
+  - name: a low 5xx ratio is quiet
+    interval: 1m
+    input_series:
+      - series: 'litellm_proxy_total_requests_metric_total{job="inference-litellm",status_code="500",requested_model="memory-extract",pod="litellm-a"}'
+        values: "0+1x5 5x35"
+      - series: 'litellm_proxy_total_requests_metric_total{job="inference-litellm",status_code="200",requested_model="memory-extract",pod="litellm-a"}'
+        values: "0+50x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: LiteLLMHighErrorRate
+        exp_alerts: []
+
+  - name: a high ratio from fewer than 3 errors is quiet
+    interval: 1m
+    input_series:
+      - series: 'litellm_proxy_total_requests_metric_total{job="inference-litellm",status_code="500",requested_model="memory-extract",pod="litellm-a"}'
+        values: "0x20 1x20 2x20"
+      - series: 'litellm_proxy_total_requests_metric_total{job="inference-litellm",status_code="200",requested_model="memory-extract",pod="litellm-a"}'
+        values: "0x20 1x20 2x20"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: LiteLLMHighErrorRate
+        exp_alerts: []
