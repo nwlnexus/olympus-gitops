@@ -5,6 +5,10 @@ file name = client name), and LITELLM_CLIENT_SCOPES (JSON, client -> list of ali
 aliases that client may call. Files are re-read when they change, so a rotated key (ESO refresh)
 takes effect without a restart. A key that matches no file is refused (401); an alias outside the
 client's scope is refused (403).
+
+A client may hold more than one key during a rotation: a file named `<client>.<suffix>` (for
+example `memory-workers.previous`) is a second key of `<client>`. Remove it once every caller has
+the new key.
 """
 import hmac
 import json
@@ -29,9 +33,10 @@ def _keys() -> dict:
     if stamp != _cache["stamp"]:
         keys = {}
         for p in files:
+            client = p.name.split(".", 1)[0]
             value = p.read_text().strip()
-            if value and p.name in _SCOPES:
-                keys[p.name] = value
+            if value and client in _SCOPES:
+                keys[p.name] = (client, value)
         _cache.update(stamp=stamp, keys=keys)
     return _cache["keys"]
 
@@ -39,7 +44,7 @@ def _keys() -> dict:
 async def user_api_key_auth(request: Request, api_key: str) -> UserAPIKeyAuth:
     presented = (api_key or "").removeprefix("Bearer ").strip()
     client = next(
-        (c for c, k in _keys().items() if presented and hmac.compare_digest(presented.encode(), k.encode())),
+        (c for c, k in _keys().values() if presented and hmac.compare_digest(presented.encode(), k.encode())),
         None,
     )
     if client is None:

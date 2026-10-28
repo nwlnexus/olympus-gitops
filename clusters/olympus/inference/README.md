@@ -41,10 +41,11 @@ Only inference routes and the model list are open; no admin, UI or key managemen
 Metrics identify the client as `api_key_alias`. A key rotated in 1Password is picked up after the ESO refresh
 (1 h, or `kubectl annotate externalsecret ... force-sync=$(date +%s)`) without a restart.
 
-**TEMPORARY:** until the owner creates the 1Password item `litellm-cluster` (vault Dev; fields `master-key`,
-`memory-workers-key`, later `executor-key`), the master key and the `memory-workers` key both come from the
-existing item `litellm` / `master-key`, which is what the workers send today. Then switch the remoteRefs here
-and in `../memory/workers/externalsecret.yaml` in one PR.
+**Keys:** 1Password item `litellm-cluster` (vault Dev): `master-key` (Secret `litellm`) and `memory-workers-key`
+(file `memory-workers`; the same field feeds `../memory/workers/externalsecret.yaml`); later `executor-key`.
+During the switch from the old key, the file `memory-workers.previous` (from `litellm` / `master-key`) is a second
+accepted key of the same client (`<client>.<suffix>` files, `custom_auth.py`); remove it once the workers run with
+the new key.
 
 ## Metrics and alerts
 
