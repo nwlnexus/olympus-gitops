@@ -138,12 +138,35 @@ spec:
           - targets: ["100.95.232.41:8081"]
             labels:
               instance_name: llama-qwen36-27b
+              host: datahub
           - targets: ["100.95.232.41:8082"]
             labels:
               instance_name: llama-qwen25-7b
+              host: datahub
           - targets: ["100.95.232.41:8083"]
             labels:
               instance_name: llama-nomic
+              host: datahub
+      # The same three llama-server instances on the A9 (olympus-sdk#530/#569). Reached over the
+      # tailnet from tag:k8s (ACL tag:k8s -> tag:inference tcp:8081-8083); the inference
+      # NetworkPolicy only governs pods in ns inference, not Prometheus egress. `host` separates
+      # the two hosts for the restart alerts below.
+      - job_name: a9-llama-server
+        metrics_path: /metrics
+        scrape_interval: 30s
+        static_configs:
+          - targets: ["100.89.177.55:8081"]
+            labels:
+              instance_name: llama-qwen36-27b
+              host: a9
+          - targets: ["100.89.177.55:8082"]
+            labels:
+              instance_name: llama-qwen25-7b
+              host: a9
+          - targets: ["100.89.177.55:8083"]
+            labels:
+              instance_name: llama-nomic
+              host: a9
       # Memory platform stores (olympus-sdk#449). TCP connect to the ClusterIP Services
       # in ns `memory`; allowed by the NetworkPolicy there (blackbox-exporter only).
       # The cluster has no Prometheus operator, so these static jobs (not
@@ -359,20 +382,30 @@ spec:
               # llama-server (olympus-sdk#588). Wedged: a request holds a slot but no token has been
               # decoded for 10m (the watchdog on data-hub restarts it; this alerts if that fails).
               - alert: DataHubLlamaServerWedged
-                expr: max by (instance) (llamacpp:requests_processing) > 0 and on(instance) increase(llamacpp:n_decode_total[10m]) == 0
+                expr: max by (instance) (llamacpp:requests_processing{host="datahub"}) > 0 and on(instance) increase(llamacpp:n_decode_total{host="datahub"}[10m]) == 0
                 for: 5m
                 labels:
                   severity: critical
                 annotations:
                   summary: "llama-server {{ $labels.instance }} has a request in flight but is not decoding."
                   description: "llamacpp:requests_processing has been above 0 with no decode progress for 15m on {{ $labels.instance }}. The server is wedged; the data-hub watchdog should have restarted it. Check the llama-server launchd job and log on data-hub."
-              - alert: DataHubLlamaServerRestarting
-                expr: resets(llamacpp:n_decode_total[1h]) >= 2
+              # Restarts on either host: llamacpp:n_decode_total is a monotonic counter that resets
+              # to 0 when the process restarts (crash, watchdog kill, deploy). The 15m window outlasts
+              # the 30s scrape so a single restart is always seen; the alert clears 15m later.
+              - alert: InferenceInstanceRestarted
+                expr: resets(llamacpp:n_decode_total[15m]) > 0
                 labels:
                   severity: warning
                 annotations:
-                  summary: "llama-server {{ $labels.instance }} restarted {{ $value }} times in the last hour."
-                  description: "The llamacpp:n_decode_total counter reset at least twice in 1h on {{ $labels.instance }}: the process is crash-looping or the watchdog keeps restarting it. Check the llama-server log on data-hub."
+                  summary: "llama-server {{ $labels.instance_name }} on {{ $labels.host }} restarted."
+                  description: "The llamacpp:n_decode_total counter on {{ $labels.instance }} reset in the last 15m: the process restarted (crash, watchdog or deploy). A one-off after a deploy is expected; repeats mean InferenceInstanceRestartLoop. Check the inference-server-* unit (a9) or the launchd job (data-hub) and its watchdog log."
+              - alert: InferenceInstanceRestartLoop
+                expr: resets(llamacpp:n_decode_total[1h]) >= 3
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "llama-server {{ $labels.instance_name }} on {{ $labels.host }} restarted {{ $value }} times in the last hour."
+                  description: "The llamacpp:n_decode_total counter reset {{ $value }} times in 1h on {{ $labels.instance }}: the process is crash-looping or its watchdog keeps killing it. Read the server log and the watchdog's decision log."
               - alert: MemoryExtractLLMFailing
                 expr: sum(increase(memory_worker_llm_requests_total{alias="memory-extract",outcome=~"timeout|http_5xx|network_error"}[30m])) >= 3 and sum(increase(memory_worker_llm_requests_total{alias="memory-extract",outcome="ok"}[30m])) == 0
                 for: 10m
