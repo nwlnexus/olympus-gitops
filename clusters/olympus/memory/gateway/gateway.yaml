@@ -24,14 +24,12 @@ data:
   MEMORY_PORT: "8080"
   MEMORY_METRICS_PORT: "9090"
   LOG_LEVEL: "info"
-  # LiteLLM on data-hub (tailnet IP, name-independent) for query embeddings (design 6.3).
-  # The API key is NOT here: it is in Secret memory-gateway (LITELLM_API_KEY_FILE).
-  # Egress to this address from ns memory is untested (T-TS), see README.md.
-  LITELLM_BASE_URL: "http://100.95.232.41:4000/v1"
-  # LiteLLM alias the gateway embeds queries with (768 dimensions, design 3.2). The extraction
-  # alias `memory-extract` belongs to the workers (#453), not the gateway.
+  # No LITELLM_BASE_URL: the data-hub LiteLLM is retired (olympus-sdk#569) and the cluster LiteLLM
+  # has no embedding alias, so query embeddings come only from memory-embedder below (with it down,
+  # recall degrades to text-only, design 6.3). MEMORY_EMBED_ALIAS is the alias name recorded with
+  # the embeddings (768 dimensions, design 3.2).
   MEMORY_EMBED_ALIAS: "memory-embed"
-  # Query embeddings from the dedicated in-cluster service (olympus-sdk#529); unset to fall back to LiteLLM.
+  # Query embeddings from the dedicated in-cluster service (olympus-sdk#529).
   MEMORY_EMBED_BASE_URL: "http://memory-embedder.memory.svc/v1"
   MEMORY_EMBED_MODEL: "nomic-embed-text-v1.5"
   # --- Cloudflare Access (design 5.2, 5.6) -------------------------------------------------
@@ -161,8 +159,6 @@ spec:
             # do not show up in `kubectl describe pod` or in a crash dump of the environment.
             - name: DATABASE_URL_FILE
               value: /run/secrets/memory-gateway/DATABASE_URL
-            - name: LITELLM_API_KEY_FILE
-              value: /run/secrets/memory-gateway/LITELLM_API_KEY
           startupProbe:
             httpGet:
               path: /healthz
