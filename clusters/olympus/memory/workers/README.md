@@ -69,8 +69,7 @@ item can only make `memory-workers` unhealthy, never the stores or the gateway.
 ## Prerequisites (1Password, vault Dev; all exist today)
 
 - `memory-stores` field `worker-db-password` (the migrate Job already set the role's password from it);
-- `litellm` field `master-key` (TEMPORARY: per-client virtual keys come with olympus-sdk#490, then change the
-  `remoteRef` in `externalsecret.yaml`);
+- `litellm-cluster` field `memory-workers-key` (the workers' own key for the cluster LiteLLM, olympus-sdk#569);
 - `gh-pull-secret` (via the gateway's `ghcr-pull`).
 
 Missing items leave the pods in `ContainerCreating` (the Secret volume cannot mount); nothing else is hurt.
