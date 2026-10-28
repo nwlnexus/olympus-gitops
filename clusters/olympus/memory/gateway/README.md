@@ -9,7 +9,7 @@ sections 5.6, 6.1 and 9. Image: `ghcr.io/nwlnexus/memory-gateway`, built by
 |---|---|
 | `gateway.yaml` | `ConfigMap/memory-gateway-config`, `Service/memory-gateway` (80 -> 8080), `PodDisruptionBudget`, `Deployment/memory-gateway` (2 replicas) |
 | `tailscale-service.yaml` | `Service/memory-ts`, LoadBalancer class `tailscale`, tailnet host `memory` (port 80 -> 8080). No Funnel, no cloudflared |
-| `externalsecret.yaml` | `Secret/memory-gateway`: `DATABASE_URL` (role `memory_gateway`) and `LITELLM_API_KEY`, mounted as files |
+| `externalsecret.yaml` | `Secret/memory-gateway`: `DATABASE_URL` (role `memory_gateway`), mounted as a file |
 | `ghcr-pull-externalsecret.yaml` | `Secret/ghcr-pull` (image pull; the package is private) |
 | `networkpolicy.yaml` | `allow-gateway-ingress`: 8080 from the Tailscale proxy pod and the blackbox exporter, 9090 from Prometheus |
 
@@ -37,7 +37,6 @@ Before step 2 the 1Password items must exist (otherwise the ExternalSecrets fail
 `ContainerCreating`; nothing else is hurt):
 
 - `memory-stores` fields `gateway-db-password` (exists; the migrate Job already set the role's password from it);
-- `litellm` field `master-key` in vault Dev (TEMPORARY: per-client virtual keys come with olympus-sdk#490);
 - `gh-pull-secret` fields `username` and `credential` (exists; used by mem0 and ingress-discovery), unless the
   GHCR package is made public, in which case drop `ghcr-pull-externalsecret.yaml` and the `imagePullSecrets` entry.
 
@@ -49,7 +48,6 @@ To disable again: remove the line from `../../kustomization.yaml` (`prune: true`
 |---|---|---|
 | Image digest | `gateway.yaml` (`image:`) | placeholder (64 zeros), see above |
 | `MEMORY_ACCESS_TEAM_DOMAIN` (`https://<team>.cloudflareaccess.com`) and `MEMORY_ACCESS_AUD` | commented out in the ConfigMap in `gateway.yaml` | issue olympus-sdk#451 creates the Access application. Uncomment **both** (or neither) when it does |
-| LiteLLM key | 1Password `litellm` / `master-key` | exists today as the master key; replaced by a virtual key in #490 |
 
 With the two Access values unset the gateway starts, the Access-JWT path is disabled (a request carrying only
 an Access JWT is refused with 401) and gateway keys (`Authorization: Bearer mgw_...`) work, which is all
@@ -69,19 +67,11 @@ kubectl -n memory run curl --rm -i --restart=Never --image=curlimages/curl:8.10.
 Also: the Prometheus target `kubernetes-pods` for the two pods is `up`, `probe_success{job="blackbox-memory-http"}` is
 1, and `promtool` accepted the alert rules (`../../observability/tests/check_prometheus.py`).
 
-### T-TS: pod-to-tailnet egress to LiteLLM (UNTESTED from ns `memory`)
+### LiteLLM
 
-Nothing in this change could run a pod, so egress from ns `memory` to `100.95.232.41:4000` is untested. Evidence
-it works: Prometheus (ns `observability`, also no egress policy) probes the same address every 30 s and
-`probe_success{job="blackbox-datahub-http",service="litellm"}` is 1, and this namespace has no egress policy.
-One-line check to run before relying on it:
-
-```sh
-kubectl -n memory run t-ts --rm -i --restart=Never --image=curlimages/curl:8.10.1 --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":100,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"t-ts","image":"curlimages/curl:8.10.1","args":["-sS","-m","5","-o","/dev/null","-w","%{http_code}\n","http://100.95.232.41:4000/health/liveliness"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
-```
-
-Expect `200`. If it times out, the gateway still works: recall degrades to text-only (`degraded: ["embedder"]`,
-design 6.3) and `/readyz` does not depend on LiteLLM.
+None since olympus-sdk#569: the data-hub LiteLLM is retired and the gateway embeds queries through
+`memory-embedder` only (no `LITELLM_BASE_URL`); if the embedder is down, recall degrades to text-only
+(`degraded: ["embedder"]`, design 6.3) and `/readyz` does not depend on it.
 
 ## Operations
 

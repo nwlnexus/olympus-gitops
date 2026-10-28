@@ -97,9 +97,6 @@ spec:
         scrape_interval: 30s
         scrape_timeout: 10s
         static_configs:
-          - targets: ["http://100.95.232.41:4000/health/liveliness"]
-            labels:
-              service: litellm
           - targets: ["http://100.95.232.41:8081/health"]
             labels:
               service: llama-qwen36-27b
@@ -338,11 +335,9 @@ spec:
                   summary: "Target {{ $labels.job }} ({{ $labels.instance }}) on {{ $labels.cluster }} down >10m."
           - name: data-hub
             rules:
-              # Fires per probed data-hub service (litellm, llama-*). Postgres has its own
-              # alert below, so it is excluded here to avoid a duplicate page.
-              # TODO: raise litellm to severity critical once the memory workers depend
-              # on it (olympus-sdk#444 wave 2+); route-by-label is already in place via
-              # the `service` label.
+              # Fires per probed data-hub service (llama-*). Postgres has its own alert below,
+              # so it is excluded here to avoid a duplicate page. The data-hub LiteLLM is retired
+              # (olympus-sdk#569); the cluster LiteLLM has its own alerts (group inference).
               - alert: DataHubServiceDown
                 expr: probe_success{job=~"blackbox-datahub-.*", service!="postgres"} == 0
                 for: 10m
