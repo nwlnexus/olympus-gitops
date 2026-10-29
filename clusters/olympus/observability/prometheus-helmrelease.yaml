@@ -42,6 +42,9 @@ spec:
     # Alertmanager → Resend email (Phase 7). Server auto-wires to the bundled AM.
     alertmanager:
       enabled: true
+      # Alertmanager itself is ClusterIP-only; the "View in Alertmanager" button in the e-mails
+      # opens Grafana's alert list instead (Alertmanager datasource in grafana-helmrelease.yaml).
+      baseURL: https://grafana.nwlnexus.net/alerting/list
       persistence:
         enabled: true
         storageClass: qnap-iscsi

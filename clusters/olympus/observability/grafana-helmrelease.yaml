@@ -58,6 +58,16 @@ spec:
             uid: tempo
             url: http://tempo.observability.svc.cluster.local:3100
             access: proxy
+          # Prometheus Alertmanager, so firing/resolved alerts (and silences) are visible under
+          # Grafana → Alerting with the "Alertmanager" picker; the alert e-mails link here too.
+          - name: Alertmanager
+            type: alertmanager
+            uid: alertmanager
+            url: http://prometheus-alertmanager.observability.svc.cluster.local:9093
+            access: proxy
+            jsonData:
+              implementation: prometheus
+              handleGrafanaManagedAlerts: false
     # File-based dashboard provider + grafana.com dashboard import (downloaded by an
     # init container at startup; needs egress to grafana.com).
     dashboardProviders:
