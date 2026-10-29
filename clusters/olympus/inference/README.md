@@ -6,9 +6,9 @@ Clients call capability aliases; each alias goes to the A9 first and falls back 
 | Alias | Primary: A9 (`100.89.177.55`) | Fallback: data-hub (`100.95.232.41`) | Clients |
 |---|---|---|---|
 | `memory-extract` | `:8081` qwen3.6-27b | `:8081` qwen3.6-27b (group `memory-extract-datahub`) | memory workers |
-| `coder-heavy` | `:8085` qwen3.6-27b-coder (own process, 64k) | `:8081` qwen3.6-27b (`coder-heavy-datahub`) | #197 executor (not built yet) |
-| `coder-medium` | `:8084` qwen3.6-35b-a3b (MoE, 3B active, 64k) | `:8081` qwen3.6-27b (`coder-medium-datahub`; data-hub has no 35B) | #197 executor (not built yet) |
-| `coder-light` | `:8082` qwen3.5-9b | `:8082` qwen2.5-7b-instruct (`coder-light-datahub`, fallback only) | #197 executor (not built yet) |
+| `coder-heavy` | `:8085` qwen3.6-27b-coder (own process, 64k) | `:8081` qwen3.6-27b (`coder-heavy-datahub`) | #197 executor (olympus-kvm runners; key pending, #642) |
+| `coder-medium` | `:8084` qwen3.6-35b-a3b (MoE, 3B active, 64k) | `:8081` qwen3.6-27b (`coder-medium-datahub`; data-hub has no 35B) | #197 executor (olympus-kvm runners; key pending, #642) |
+| `coder-light` | `:8082` qwen3.5-9b | `:8082` qwen2.5-7b-instruct (`coder-light-datahub`, fallback only) | #197 executor (olympus-kvm runners; key pending, #642) |
 
 Not here: `memory-embed` (the gateway and workers embed through `memory/embedder`), `coder-cloud` (no cloud tier).
 
@@ -43,7 +43,13 @@ Metrics identify the client as `api_key_alias`. A key rotated in 1Password is pi
 (1 h, or `kubectl annotate externalsecret ... force-sync=$(date +%s)`) without a restart.
 
 **Keys:** 1Password item `litellm-cluster` (vault Dev): `master-key` (Secret `litellm`) and `memory-workers-key`
-(file `memory-workers`; the same field feeds `../memory/workers/externalsecret.yaml`); later `executor-key`.
+(file `memory-workers`; the same field feeds `../memory/workers/externalsecret.yaml`); `executor-key` (#642, added by the
+owner; ExternalSecret `litellm-executor-key` -> Secret `litellm-executor-key`, mounted as file `executor` through a projected
+volume with `optional: true`, kept apart so a missing field never affects the other two ExternalSecrets). Limits for the
+executor (`LITELLM_CLIENT_LIMITS`): 60 requests/min and 3 parallel requests per replica.
+
+Who may call LiteLLM (ingress 4000): memory workers (`memory`), Prometheus and blackbox (`observability`), `olympus-kvm`
+runner pods (`arc-runners`, label `olympus.io/ci-kvm`; executor scope `coder-*` only).
 For a rotation, add a file `<client>.<suffix>` (for example `memory-workers.previous`) to the Secret: `custom_auth.py`
 accepts it as a second key of the same client until it is removed.
 

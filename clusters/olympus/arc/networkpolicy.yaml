@@ -25,6 +25,10 @@
 # Egress: DNS + the PUBLIC internet only. Runner pods therefore cannot reach any cluster Service
 # or Pod (10.42/16, 10.43/16), any node (192.168.253.0/24), the LAN (QNAP, UniFi),
 # the tailnet (100.64.0.0/10) or the link-local range (169.254.0.0/16).
+# One exception (olympus-sdk#642): pods labelled olympus.io/ci-kvm=true (the olympus-kvm scale
+# set only) may also reach the cluster LiteLLM, pods app.kubernetes.io/name=litellm in `inference`,
+# on TCP 4000 (policy egress-litellm-kvm below; policies are additive). The matching ingress is in
+# ../inference/networkpolicy.yaml.
 # NOTE: "public internet" is any public address (GitHub, crates.io, npm, ghcr.io
 # ...). A per-host allowlist (spec section 5) needs an L7/FQDN-aware policy,
 # which kube-router cannot do; this is the strongest rule expressible with
@@ -74,6 +78,32 @@ spec:
               - 100.64.0.0/10      # tailnet (CGNAT)
               - 169.254.0.0/16     # link-local
               - 127.0.0.0/8
+---
+# olympus-sdk#642: the executor (Claude Code on olympus-kvm) reaches the cluster LiteLLM and
+# nothing else inside the cluster. Additive to egress-dns-and-internet. kube-proxy DNATs the
+# Service to the pod before policy evaluation, so the pod selector is what matters.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-litellm-kvm
+  namespace: arc-runners
+spec:
+  podSelector:
+    matchLabels:
+      olympus.io/ci-kvm: "true"
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: inference
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: litellm
+      ports:
+        - protocol: TCP
+          port: 4000
 ---
 # ---------------------------------------------------------------------------
 # arc-system: controller + listener. No ingress at all (nothing scrapes them;

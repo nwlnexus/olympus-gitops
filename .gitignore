@@ -1,2 +1,4 @@
 1780249511
 .worktrees/
+__pycache__/
+*.pyc
