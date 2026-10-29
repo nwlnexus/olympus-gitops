@@ -14,7 +14,7 @@ spec:
   dependsOn:
     # ClusterSecretStore onepassword-connect (ExternalSecret memory-stores).
     - name: external-secrets-config
-    # StorageClass qnap-iscsi (database and graph PVCs).
+    # StorageClass qnap-iscsi (database PVC).
     - name: qnap-storage
     # StorageClass qnap-nfs (backup PVC).
     - name: nfs-provisioner
@@ -22,8 +22,4 @@ spec:
     - apiVersion: apps/v1
       kind: StatefulSet
       name: postgres
-      namespace: memory
-    - apiVersion: apps/v1
-      kind: StatefulSet
-      name: falkordb
       namespace: memory

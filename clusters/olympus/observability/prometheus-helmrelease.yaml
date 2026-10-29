@@ -193,9 +193,6 @@ spec:
           - targets: ["postgres.memory.svc:5432"]
             labels:
               service: memory-postgres
-          - targets: ["falkordb.memory.svc:6379"]
-            labels:
-              service: memory-falkordb
         relabel_configs:
           - source_labels: [__address__]
             target_label: __param_target
@@ -454,8 +451,8 @@ spec:
                   summary: "Memory store {{ $labels.service }} is not accepting connections."
                   description: "TCP connect to {{ $labels.instance }} from the cluster has failed for 10m. Check `kubectl -n memory get pods,pvc` and the pod logs; a missing Secret `memory-stores` (1Password item of the same name) or an unattached iSCSI volume are the usual causes."
               # kubelet_volume_stats_* is exposed twice (jobs kubernetes-nodes and
-              # kubernetes-api-servers), hence max by (...). Covers the two data PVCs
-              # (data-postgres-0, data-falkordb-0) and the NFS backup PVC when it reports stats.
+              # kubernetes-api-servers), hence max by (...). Covers the data PVC
+              # (data-postgres-0) and the NFS backup PVC when it reports stats.
               - alert: MemoryStorePVCFillingUp
                 expr: >-
                   max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace="memory"})
@@ -469,16 +466,16 @@ spec:
                   description: "qnap-iscsi allows online expansion: patch the PVC's spec.resources.requests.storage (StatefulSet volumeClaimTemplates are immutable, so see memory/README.md for the procedure)."
               # No successful backup for 36h, or no success ever and the CronJob is
               # already older than 36h (kube_cronjob_status_last_successful_time is
-              # absent until the first success). Scoped to the two backup CronJobs: the knowledge
+              # absent until the first success). Scoped to the Postgres backup CronJob: the knowledge
               # indexer (olympus-sdk#563) has its own rules below.
               - alert: MemoryBackupStale
                 expr: >-
-                  (time() - kube_cronjob_status_last_successful_time{namespace="memory", cronjob=~"postgres-backup|falkordb-backup"} > 129600)
+                  (time() - kube_cronjob_status_last_successful_time{namespace="memory", cronjob="postgres-backup"} > 129600)
                   or
                   (
-                    time() - kube_cronjob_created{namespace="memory", cronjob=~"postgres-backup|falkordb-backup"} > 129600
+                    time() - kube_cronjob_created{namespace="memory", cronjob="postgres-backup"} > 129600
                     unless on (namespace, cronjob)
-                    kube_cronjob_status_last_successful_time{namespace="memory", cronjob=~"postgres-backup|falkordb-backup"}
+                    kube_cronjob_status_last_successful_time{namespace="memory", cronjob="postgres-backup"}
                   )
                 for: 5m
                 labels:

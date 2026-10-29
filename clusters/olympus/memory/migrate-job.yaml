@@ -7,8 +7,7 @@
 # content-hash suffix, so any change to a migration changes the Job's pod template;
 # the `force: enabled` annotation makes Flux delete and recreate the Job (its
 # template is immutable), which re-runs the runner. Already-applied versions are
-# skipped, so a re-run only applies what is new. (Same annotation as
-# ../mem0/init-config-job.yaml.)
+# skipped, so a re-run only applies what is new.
 #
 # Rules the runner enforces:
 #   - each file runs in ONE transaction together with its ledger INSERT, so a failed

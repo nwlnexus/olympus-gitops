@@ -26,7 +26,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ingress-discovery
-          # Pinned by tag (matches mem0's tag-pin convention). The pushed tag is
+          # Pinned by tag. The pushed tag is
           # the short commit sha from olympus-sdk. Immutable digest equivalent:
           #   sha256:1e439266b0d70f2efa2359f233dfd84cc5a0003ec7a300885951475006717f1a
           image: ghcr.io/nwlnexus/ingress-discovery:8977a56

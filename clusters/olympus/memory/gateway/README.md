@@ -14,7 +14,7 @@ sections 5.6, 6.1 and 9. Image: `ghcr.io/nwlnexus/memory-gateway`, built by
 | `networkpolicy.yaml` | `allow-gateway-ingress`: 8080 from the Tailscale proxy pod and the blackbox exporter, 9090 from Prometheus |
 
 The stores' own policy (`../networkpolicy.yaml`) already admits every pod in the namespace, so
-Postgres and FalkorDB needed no change for the gateway pods.
+Postgres needed no change for the gateway pods.
 
 ## Why a separate Flux Kustomization
 
@@ -37,7 +37,7 @@ Before step 2 the 1Password items must exist (otherwise the ExternalSecrets fail
 `ContainerCreating`; nothing else is hurt):
 
 - `memory-stores` fields `gateway-db-password` (exists; the migrate Job already set the role's password from it);
-- `gh-pull-secret` fields `username` and `credential` (exists; used by mem0 and ingress-discovery), unless the
+- `gh-pull-secret` fields `username` and `credential` (exists; also used by ingress-discovery), unless the
   GHCR package is made public, in which case drop `ghcr-pull-externalsecret.yaml` and the `imagePullSecrets` entry.
 
 To disable again: remove the line from `../../kustomization.yaml` (`prune: true` then deletes the objects).
