@@ -20,16 +20,10 @@ Merging this branch deploys to the live `olympus` cluster via Flux. Do ALL of th
 following first, or the controller will start, fail to publish (401), and log errors.
 
 1. **Mint a Hermes machine token for the controller.**
-   In IRIS (Access → Tokens) or via the GraphQL `issueMachineToken` mutation, mint a
-   token that carries the `publish:app-launchers` capability. Record both the **token
-   value** (shown once) and its **token id**.
+   In IRIS (Access tokens → New token), mint a token that carries the
+   `publish:app-launchers` capability. Record the **token value** (shown once).
 
-2. **Point Hermes at that token's id and redeploy Hermes.**
-   Set the Hermes Worker secret `APP_LAUNCHER_PUBLISH_TOKEN_ID` to the id from step 1
-   (`wrangler secret put APP_LAUNCHER_PUBLISH_TOKEN_ID`), then redeploy Hermes so the
-   `publishAppLauncherSnapshot` mutation accepts the controller's bearer token.
-
-3. **Create the 1Password item the ExternalSecret reads.**
+2. **Create the 1Password item the ExternalSecret reads.**
    This repo's ExternalSecrets use the **1Password Connect** provider
    (`onepassword-connect` ClusterSecretStore, vault `Dev` only) — addressed by item
    name + field, NOT `op://` URIs. Create:
@@ -44,14 +38,15 @@ following first, or the controller will start, fail to publish (401), and log er
    > The private-image pull secret (`ghcr-pull`) reuses the existing 1Password item
    > `gh-pull-secret` (vault Dev) — no new item needed for image pulls.
 
-4. **Confirm publish target.** The controller publishes to `api.nwlnexus.net`
+3. **Confirm publish target.** The controller publishes to `api.nwlnexus.net`
    (set as `HERMES_URL=https://api.nwlnexus.net/graphql` in `deployment.yaml`).
 
 ## Token rotation
 
 `HERMES_PUBLISH_TOKEN` is rotated by updating the `hermes-publish-token` field on the
-1Password `ingress-discovery` item (ExternalSecret refreshInterval is 1h) and the
-corresponding `APP_LAUNCHER_PUBLISH_TOKEN_ID` in Hermes if a new token id is issued.
+1Password `ingress-discovery` item (ExternalSecret refreshInterval is 1h). Rotate in IRIS
+(Access tokens → Rotate) to keep the token id and its capabilities; Hermes needs no change,
+since `publish:app-launchers` is stored on the token itself (olympus-sdk migration 0006).
 
 ## Controller env (set by deployment.yaml)
 
