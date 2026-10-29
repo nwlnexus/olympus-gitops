@@ -5,11 +5,9 @@ resources:
   - externalsecret.yaml
   - networkpolicy.yaml
   - postgres.yaml
-  - falkordb.yaml
   - migrate-job.yaml
   - backup-pvc.yaml
   - backup-postgres-cronjob.yaml
-  - backup-falkordb-cronjob.yaml
 # Config files live next to the manifests and become hash-suffixed ConfigMaps, so a
 # change to any of them rolls the consuming pod (StatefulSet/Job) automatically.
 configMapGenerator:
@@ -17,10 +15,6 @@ configMapGenerator:
     namespace: memory
     files:
       - postgresql.conf=config/postgresql.conf
-  - name: falkordb-config
-    namespace: memory
-    files:
-      - falkordb.conf=config/falkordb.conf
   - name: memory-migrations
     namespace: memory
     files:

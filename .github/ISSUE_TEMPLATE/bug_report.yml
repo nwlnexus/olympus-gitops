@@ -12,7 +12,7 @@ body:
     attributes:
       label: Title
       description: A short summary of the bug
-      placeholder: e.g. openmemory pod crashloops on add
+      placeholder: e.g. memory-gateway pod crashloops on start
     validations:
       required: true
 

@@ -1,10 +1,9 @@
 # Memory platform data stores (nwlnexus/olympus-sdk#449, epic #444, spec D3/D4/5.2).
-# `restricted` is enforced: both stores run as uid/gid 999, non-root, no privilege
-# escalation, all capabilities dropped, seccomp RuntimeDefault (see postgres.yaml and
-# falkordb.yaml), and so do the migration Job and the backup CronJobs. Neither image
-# needs root at runtime: the pgvector image is the official postgres image (supports
-# `--user 999:999`), and FalkorDB's data directory is a mounted PVC that fsGroup makes
-# writable (the image's own entrypoint is bypassed, see falkordb.yaml).
+# `restricted` is enforced: the Postgres store runs as uid/gid 999, non-root, no privilege
+# escalation, all capabilities dropped, seccomp RuntimeDefault (see postgres.yaml), and so
+# do the migration Job and the backup CronJob. The pgvector image is the official postgres
+# image (supports `--user 999:999`) and needs no root at runtime. (FalkorDB, the second
+# store, was removed under olympus-sdk#456.)
 apiVersion: v1
 kind: Namespace
 metadata:

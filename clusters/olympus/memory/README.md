@@ -1,7 +1,7 @@
 # memory — data stores for the memory platform
 
 Namespace `memory`. Implements nwlnexus/olympus-sdk#449 (epic #444, spec sections D3, D4
-and 5.2). This directory holds the **stores** and the schema (migrations 0001-0004 and 0007, see below); the
+and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0004 and 0007, see below); the
 gateway (#450, see `gateway/README.md`; deployed by its own Flux Kustomization), workers (#453, see
 `workers/README.md`) and the CPU embedding service (olympus-sdk#529, see `embedder/README.md`) have their
 own manifests and Flux Kustomizations.
@@ -9,14 +9,18 @@ own manifests and Flux Kustomizations.
 | Object | What |
 |---|---|
 | `StatefulSet/postgres` | Postgres 16 + pgvector (`pgvector/pgvector:pg16`, pinned by digest), database `memory`, 50Gi `qnap-iscsi` PVC `data-postgres-0` |
-| `StatefulSet/falkordb` | FalkorDB (`falkordb/falkordb:v4.22.2`, pinned by digest), 20Gi `qnap-iscsi` PVC `data-falkordb-0`, RDB + AOF persistence |
-| `Service/postgres`, `Service/falkordb` | ClusterIP, ports 5432 / 6379. `*-headless` are the StatefulSet identities. Nothing exposes them outside the cluster |
+| `Service/postgres` | ClusterIP, port 5432. `postgres-headless` is the StatefulSet identity. Nothing exposes it outside the cluster |
 | `Job/memory-migrate` + `migrations/` | Versioned, idempotent SQL applied in order, ledger in `memory.schema_migrations` |
-| `CronJob/postgres-backup`, `CronJob/falkordb-backup` | Nightly 03:00 / 03:15 UTC to PVC `memory-backups` (10Gi, `qnap-nfs`), 14 kept of each |
+| `CronJob/postgres-backup` | Nightly 03:00 UTC to PVC `memory-backups` (10Gi, `qnap-nfs`), 14 kept |
 | `ExternalSecret/memory-stores` | Credentials from 1Password |
-| `NetworkPolicy` | Default deny ingress; stores reachable from this namespace and the blackbox-exporter only |
+| `NetworkPolicy` | Default deny ingress; Postgres reachable from this namespace and the blackbox-exporter only |
 
-Every memory workload (gateway, workers, embedder, Postgres, FalkorDB, the backup CronJobs and
+FalkorDB (the Graphiti graph store) was removed under olympus-sdk#456: Graphiti was dropped on
+2026-10-21 and the graph, when it ships, lives in Postgres (gateway design §3.6). Its final RDB
+dumps stay in `memory-backups` under `falkordb/`; the PVC `data-falkordb-0` was not created from
+git (StatefulSet volumeClaimTemplate) and is deleted by hand (#456).
+
+Every memory workload (gateway, workers, embedder, Postgres, the backup CronJob and
 the knowledge indexer) is pinned to the agent-services onodes via nodeSelector
 `olympus.io/role: agent-services` plus the matching NoSchedule toleration (olympus-sdk#567).
 `Job/memory-migrate` is not pinned: it is a short-lived client, and changing its template would
@@ -27,19 +31,19 @@ force a re-run.
 The ExternalSecret reads a **new** item in vault **Dev**:
 
 - item name: `memory-stores`
-- fields: `postgres-password`, `falkordb-password`, `gateway-db-password`,
+- fields: `postgres-password`, `gateway-db-password`,
   `worker-db-password` (concealed; generate each with `openssl rand -hex 24`). The last two
   are the passwords of the Postgres roles `memory_gateway` and `memory_worker` (migration
-  0004); the stores themselves only need the first two.
+  0004); the store itself only needs the first. (`falkordb-password` is no longer read and
+  can be deleted from the item.)
 
 Create it before the PR is merged. Until it exists the Secret `memory-stores` does not,
-both StatefulSets wait in `CreateContainerConfigError`, and the `memory` Flux Kustomization
+the StatefulSet waits in `CreateContainerConfigError`, and the `memory` Flux Kustomization
 stays not-Ready (nothing depends on it).
 
 `POSTGRES_PASSWORD` is only read when Postgres initialises an empty data directory. To rotate
 the Postgres password later: change the 1Password field, then
 `kubectl -n memory exec postgres-0 -- psql -U postgres -c "ALTER ROLE postgres PASSWORD '<new>'"`
-(FalkorDB re-reads its password on the next pod restart).
 
 ## Adding a migration
 
@@ -120,8 +124,9 @@ from the Secret `memory-stores` (keys `gateway-db-password` and `worker-db-passw
 
 ## Backups
 
-Both CronJobs write to the `memory-backups` PVC (`qnap-nfs`), in `postgres/` and `falkordb/`
-subdirectories, each keeping the newest 14 files. Files are written under a dot-prefixed temp
+The CronJob writes to the `memory-backups` PVC (`qnap-nfs`), in `postgres/`, keeping the
+newest 14 files. `falkordb/` and `retired-456/` hold the final exports of FalkorDB, OpenMemory
+(qdrant snapshot, SQLite registry) and Moneta (D1 SQL) from olympus-sdk#456; nothing rotates them. Files are written under a dot-prefixed temp
 name, verified, then renamed; retention runs only after a verified write. The PVC carries
 `kustomize.toolkit.fluxcd.io/prune: disabled` because the `qnap-nfs` class has
 `reclaimPolicy: Delete` / `archiveOnDelete: false` (deleting the PVC deletes every backup).
@@ -129,10 +134,6 @@ name, verified, then renamed; retention runs only after a verified write. The PV
 Run one on demand: `kubectl -n memory create job --from=cronjob/postgres-backup pg-backup-manual`.
 
 - **Postgres:** `pg_dump --format=custom` of database `memory` to `postgres/memory-<UTC>.dump`.
-- **FalkorDB:** `redis-cli --rdb` pulls an RDB snapshot over the network (server-side fork, as
-  BGSAVE does) to `falkordb/falkordb-<UTC>.rdb`. This is used instead of `BGSAVE` + file copy
-  because the data PVC is ReadWriteOnce and cannot be shared with a second pod. Between backups,
-  the data PVC itself holds RDB snapshots plus the AOF.
 
 ### Restore Postgres
 
@@ -165,23 +166,6 @@ Replace `DUMP` with a file from the listing. To rebuild into an empty cluster in
 `memory` Kustomization create the stores and run `memory-migrate` first (creates the extension
 and schema), then run the same restore.
 
-### Restore FalkorDB
-
-1. `flux suspend kustomization memory -n flux-system`, then
-   `kubectl -n memory scale statefulset falkordb --replicas=0`.
-2. With a temporary pod that mounts PVC `data-falkordb-0` and `memory-backups`, delete
-   `appendonlydir/` and `dump.rdb` in the data volume and copy the chosen
-   `falkordb/falkordb-<UTC>.rdb` to `dump.rdb` there (owner uid/gid 999).
-3. Start a temporary `redis-server --appendonly no --dir <data> --loadmodule ...falkordb.so`
-   (same image) so the RDB is loaded, run `CONFIG SET appendonly yes`, wait for
-   `aof_rewrite_in_progress:0` in `INFO persistence`, then `SHUTDOWN`.
-4. `kubectl -n memory scale statefulset falkordb --replicas=1` and
-   `flux resume kustomization memory -n flux-system`.
-
-(A Redis 7+ server started with `appendonly yes` and no AOF present may come up empty instead of
-loading `dump.rdb`, which is why step 3 converts through a temporary AOF-off instance.) This procedure has not been exercised in the
-cluster; rehearse it once after the first backup exists.
-
 ## Growing a volume
 
 `qnap-iscsi` allows expansion and `reclaimPolicy: Retain`. StatefulSet `volumeClaimTemplates` are
@@ -195,18 +179,18 @@ Alert `MemoryStorePVCFillingUp` fires at 80% for 30m.
 
 ## Network
 
-Default-deny ingress for the namespace. Postgres and FalkorDB accept connections from pods in
+Default-deny ingress for the namespace. Postgres accepts connections from pods in
 `memory` and from the blackbox-exporter pod in `observability`. Egress is unrestricted. Note
 that default-deny also covers future pods here: the gateway (#450) has its own allow rules in
 `gateway/networkpolicy.yaml` (Tailscale proxy and blackbox exporter to 8080, Prometheus to 9090);
-the stores' rule already admits the gateway pods.
+the store's rule already admits the gateway pods.
 
 ## Monitoring
 
 The cluster runs the community `prometheus` chart without the Prometheus operator, so
 ServiceMonitor/PrometheusRule objects would be inert. Instead
 `../observability/prometheus-helmrelease.yaml` has a `blackbox-memory-tcp` scrape job
-(tcp_connect to `postgres.memory.svc:5432` and `falkordb.memory.svc:6379` through the
+(tcp_connect to `postgres.memory.svc:5432` through the
 blackbox-exporter) and a `memory` rule group: `MemoryStoreDown`, `MemoryStorePVCFillingUp`,
 `MemoryBackupStale`, plus the gateway's `blackbox-memory-http` probe (`/readyz`) and the queue/capture/gateway
 alerts of the design (section 9). The gateway's own metrics (:9090) are scraped by the default `kubernetes-pods`

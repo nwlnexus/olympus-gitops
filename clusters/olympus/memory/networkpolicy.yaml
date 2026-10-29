@@ -18,11 +18,11 @@ spec:
   policyTypes:
     - Ingress
 ---
-# Postgres (5432) and FalkorDB (6379) accept connections only from
+# Postgres (5432) accepts connections only from
 #   - any pod in this namespace (gateway, workers, migration Job, backup CronJobs), and
 #   - the blackbox-exporter in `observability` (tcp_connect probes, see
 #     ../observability/prometheus-helmrelease.yaml).
-# Nothing else, in particular no exposure outside the cluster: the Services are
+# Nothing else, in particular no exposure outside the cluster: the Service is
 # ClusterIP/headless only and no Tailscale/Cloudflare object points at them.
 # Clients that live in other namespaces later (e.g. a Tailscale proxy fronting the
 # GATEWAY, #450) get their own rule on the gateway pods, not on the stores.
@@ -36,7 +36,7 @@ spec:
     matchExpressions:
       - key: app.kubernetes.io/name
         operator: In
-        values: [postgres, falkordb]
+        values: [postgres]
   policyTypes:
     - Ingress
   ingress:
@@ -45,8 +45,6 @@ spec:
       ports:
         - protocol: TCP
           port: 5432
-        - protocol: TCP
-          port: 6379
     - from:
         - namespaceSelector:
             matchLabels:
@@ -57,5 +55,3 @@ spec:
       ports:
         - protocol: TCP
           port: 5432
-        - protocol: TCP
-          port: 6379

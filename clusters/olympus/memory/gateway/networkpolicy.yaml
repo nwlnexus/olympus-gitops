@@ -3,7 +3,7 @@
 # Egress is unrestricted in this namespace (see ../networkpolicy.yaml), so the gateway can reach
 # Postgres, DNS and LiteLLM on data-hub without a rule.
 #
-# Postgres and FalkorDB need no change: ../networkpolicy.yaml `allow-store-ingress` already
+# Postgres needs no change: ../networkpolicy.yaml `allow-store-ingress` already
 # admits every pod in the namespace (podSelector {}), which includes the gateway pods.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

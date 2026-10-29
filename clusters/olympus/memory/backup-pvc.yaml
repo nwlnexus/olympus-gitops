@@ -1,9 +1,10 @@
-# Backup target for both CronJobs (postgres/ and falkordb/ subdirectories).
+# Backup target for the Postgres CronJob (postgres/). falkordb/ and retired-456/ hold the
+# final dumps of the stores retired under olympus-sdk#456; nothing rotates them.
 # `qnap-nfs` is the nfs-subdir-external-provisioner class (NFS export on the QNAP);
 # its reclaimPolicy is Delete and archiveOnDelete is false, so deleting this PVC
 # deletes every backup. Flux `prune` is therefore disabled for this object: removing
 # it from git will NOT delete it (delete it by hand if you really mean to).
-# ReadWriteMany so the two nightly CronJobs can overlap without Multi-Attach issues.
+# ReadWriteMany so a backup Job and a restore/helper pod can mount it at once.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

@@ -2,7 +2,6 @@
 # http://memory.<tailnet>.ts.net. No tailscale.com/funnel and no cloudflared route: the public
 # path (https://memory.nwlnexus.io through Cloudflare Access) is olympus-sdk#451.
 # Only the app port is published; the metrics port 9090 is never routed (design 6.1).
-# Follows ../../mem0/tailscale-service.yaml.
 apiVersion: v1
 kind: Service
 metadata:

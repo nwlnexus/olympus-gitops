@@ -50,8 +50,8 @@ A restart or rollout therefore never loses a job, at worst an extraction restart
 Settings live in `workers-config.env` (generated `ConfigMap/memory-workers-config-<hash>`) (shared keys through `envFrom`, the four per-stage keys
 `extract-*` / `embed-*` through `configMapKeyRef`). Anything not listed there keeps the worker default (README of
 the package: leases extract 600 s / embed 120 s, job timeout 1500 s / 90 s, extract window all day). Changing the
-ConfigMap or the Secret rolls the pods (stakater reloader). `MEMORY_GRAPH_ENABLED=false` stays until the Graphiti
-ingest worker exists, otherwise `graph_ingest` jobs would pile up and trip the queue backlog alerts.
+ConfigMap or the Secret rolls the pods (stakater reloader). `MEMORY_GRAPH_ENABLED=false` stays until the Postgres
+graph extraction ships (olympus-sdk#516), otherwise `graph_ingest` jobs would pile up and trip the queue backlog alerts.
 
 Connections: each pod opens `concurrency + 4` Postgres connections as `memory_worker` (5 for extract, 8 per embed
 pod), 21 in total against `max_connections = 100` (the gateway uses its own pool).
