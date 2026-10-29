@@ -2,10 +2,10 @@
 # (spec 5.2). Single instance. State: 50Gi `qnap-iscsi` PVC (allowVolumeExpansion,
 # reclaimPolicy Retain: the PV survives deletion of the PVC/StatefulSet).
 #
-# Scheduling: intentionally left default (no nodeSelector/affinity/tolerations).
-# The onodes carry no taints and naraka-01 is tainted `olympus.io/role=management-hub`,
-# so these land on an onode today. WS12 (olympus-sdk#457) may move the memory
-# platform to an `olympus.io/role=agent-services` node; do it then, not now.
+# Scheduling: pinned to the agent-services onodes (olympus-sdk#567, owner decision
+# 2026-10-28) with nodeSelector `olympus.io/role: agent-services` plus the matching
+# NoSchedule toleration. The PVC is qnap-iscsi RWO with no PV node affinity (Trident runs
+# on every node), so moving nodes is a detach/attach: a brief outage, not a data move.
 #
 # Reachability: ClusterIP `postgres` for clients, headless `postgres-headless` for the
 # StatefulSet identity. No Ingress/Tailscale/Cloudflare object exists for it.
@@ -68,6 +68,14 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
+      # olympus-sdk#567: the memory stack runs on the agent-services onodes (onode-0636e4/062caa).
+      nodeSelector:
+        olympus.io/role: agent-services
+      tolerations:
+        - key: olympus.io/role
+          operator: Equal
+          value: agent-services
+          effect: NoSchedule
       containers:
         - name: postgres
           # pgvector/pgvector:pg16 (= 0.8.7-pg16, Debian bookworm), multi-arch index

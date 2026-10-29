@@ -1,6 +1,7 @@
 # FalkorDB (Redis + graph module), the Graphiti graph store (spec D4/5.2). Single
 # instance. State: 20Gi `qnap-iscsi` PVC (expandable, reclaimPolicy Retain).
-# Scheduling is left default; see the note in postgres.yaml (WS12, olympus-sdk#457).
+# Scheduling: pinned to the agent-services onodes (olympus-sdk#567); see the note in
+# postgres.yaml (the qnap-iscsi PVC re-attaches on the new node: a brief outage, no data move).
 #
 # The image's own entrypoint (/var/lib/falkordb/bin/run.sh) is replaced by the
 # command below. It is a ~20-line script that (a) starts the FalkorDB Browser UI
@@ -70,6 +71,14 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
+      # olympus-sdk#567: the memory stack runs on the agent-services onodes (onode-0636e4/062caa).
+      nodeSelector:
+        olympus.io/role: agent-services
+      tolerations:
+        - key: olympus.io/role
+          operator: Equal
+          value: agent-services
+          effect: NoSchedule
       containers:
         - name: falkordb
           # falkordb/falkordb:v4.22.2 (== :latest on 2026-10-20), multi-arch index

@@ -124,19 +124,15 @@ spec:
         fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
+      # olympus-sdk#567: the memory stack runs on the agent-services onodes (onode-0636e4/062caa).
+      nodeSelector:
+        olympus.io/role: agent-services
+      tolerations:
+        - key: olympus.io/role
+          operator: Equal
+          value: agent-services
+          effect: NoSchedule
       affinity:
-        nodeAffinity:
-          # The compute-pool onodes only. naraka-01 is an untainted general worker since
-          # olympus-sdk#567 (4 CPUs: the embedder's 2-6 CPU inference does not belong there);
-          # the memory move to the agent-services onodes replaces this rule.
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: olympus.io/role
-                    operator: DoesNotExist
-                  - key: kubernetes.io/hostname
-                    operator: NotIn
-                    values: ["naraka-01"]
         podAntiAffinity:
           # One replica per node. Preferred (as for the embed workers), so a single surviving node
           # still runs both replicas instead of leaving one Pending.

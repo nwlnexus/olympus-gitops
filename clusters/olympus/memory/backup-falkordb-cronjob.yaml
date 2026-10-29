@@ -37,6 +37,14 @@ spec:
             runAsGroup: 999
             seccompProfile:
               type: RuntimeDefault
+          # olympus-sdk#567: the memory stack runs on the agent-services onodes (onode-0636e4/062caa).
+          nodeSelector:
+            olympus.io/role: agent-services
+          tolerations:
+            - key: olympus.io/role
+              operator: Equal
+              value: agent-services
+              effect: NoSchedule
           containers:
             - name: rdb-dump
               image: falkordb/falkordb:v4.22.2@sha256:03f53c46223ac2c0aab05ede7c6a8d9299255b7fd228909424f2c453f7a8cfcd
