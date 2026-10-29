@@ -91,7 +91,7 @@ spec:
         - name: memory-worker
           # Pinned by digest, never by tag. Built from olympus-sdk main (tag sha-9a7b248) by
           # .github/workflows/memory-workers.yml.
-          image: ghcr.io/nwlnexus/memory-workers@sha256:e3ccfce6632fd0ed063a57339b8e1b1a3775f95cfd5463b7ae967fce54840939
+          image: ghcr.io/nwlnexus/memory-workers@sha256:4ad9fb1fdb3a5c4c28bddf920852218056f4fbd5ac0bf29c578fb65b14cfd52f
           imagePullPolicy: IfNotPresent
           # The image ENTRYPOINT is `python -m memory_workers`; the stage is the argument.
           args: ["--stage", "extract"]
@@ -241,7 +241,7 @@ spec:
                     app.kubernetes.io/name: memory-worker-embed
       containers:
         - name: memory-worker
-          image: ghcr.io/nwlnexus/memory-workers@sha256:e3ccfce6632fd0ed063a57339b8e1b1a3775f95cfd5463b7ae967fce54840939
+          image: ghcr.io/nwlnexus/memory-workers@sha256:4ad9fb1fdb3a5c4c28bddf920852218056f4fbd5ac0bf29c578fb65b14cfd52f
           imagePullPolicy: IfNotPresent
           args: ["--stage", "embed"]
           ports:
