@@ -686,8 +686,8 @@ spec:
                 for: 5m
                 labels: { severity: warning }
                 annotations:
-                  summary: "Account {{ $labels.account }} spent more than $25 in the last hour."
-                  description: "${{ $value | humanize }} of API cost in the last hour for account {{ $labels.account }}. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
+                  summary: "Account {{ $labels.account }} used more than $25 of API-equivalent Claude usage in the last hour."
+                  description: "${{ $value | humanize }} of API-equivalent usage (list price; on a Max plan this counts against the plan, it is not billed) in the last hour for account {{ $labels.account }}. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
     prometheus-pushgateway:
       enabled: false
     kube-state-metrics:

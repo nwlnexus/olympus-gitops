@@ -28,8 +28,8 @@ tests:
               severity: warning
               account: personal
             exp_annotations:
-              summary: "Account personal spent more than $25 in the last hour."
-              description: "$60 of API cost in the last hour for account personal. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
+              summary: "Account personal used more than $25 of API-equivalent Claude usage in the last hour."
+              description: "$60 of API-equivalent usage (list price; on a Max plan this counts against the plan, it is not billed) in the last hour for account personal. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
 
   - name: spend split across repos and models still adds up per account
     interval: 1m
@@ -46,8 +46,8 @@ tests:
               severity: warning
               account: work
             exp_annotations:
-              summary: "Account work spent more than $25 in the last hour."
-              description: "$36 of API cost in the last hour for account work. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
+              summary: "Account work used more than $25 of API-equivalent Claude usage in the last hour."
+              description: "$36 of API-equivalent usage (list price; on a Max plan this counts against the plan, it is not billed) in the last hour for account work. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
 
   # --- AgentTokensPerHourHigh: more than 10M non-cache-read tokens in the last hour, for 5m -----
   - name: tokens above 10M per hour fire, and cache reads do not count
