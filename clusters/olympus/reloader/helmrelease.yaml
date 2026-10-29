@@ -15,4 +15,8 @@ spec:
         namespace: reloader
   values:
     reloader:
-      watchGlobally: false
+      # Cluster-wide: every namespace carries reloader.stakater.com/auto annotations (memory, inference,
+      # arc, ...). With watchGlobally false the chart installs namespace Roles only, Reloader watched
+      # nothing outside its own namespace, and ConfigMap/Secret changes never rolled pods
+      # (olympus-sdk#623: the 2026-10-28 extract-worker 401 outage and the forget-limit change).
+      watchGlobally: true
