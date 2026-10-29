@@ -6,8 +6,9 @@ Clients call capability aliases; each alias goes to the A9 first and falls back 
 | Alias | Primary: A9 (`100.89.177.55`) | Fallback: data-hub (`100.95.232.41`) | Clients |
 |---|---|---|---|
 | `memory-extract` | `:8081` qwen3.6-27b | `:8081` qwen3.6-27b (group `memory-extract-datahub`) | memory workers |
-| `coder-heavy` | `:8081` qwen3.6-27b | `:8081` qwen3.6-27b (`coder-heavy-datahub`) | #197 executor (not built yet) |
-| `coder-light` | `:8082` qwen2.5-7b-instruct | `:8082` qwen2.5-7b-instruct (`coder-light-datahub`) | #197 executor (not built yet) |
+| `coder-heavy` | `:8085` qwen3.6-27b-coder (own process, 64k) | `:8081` qwen3.6-27b (`coder-heavy-datahub`) | #197 executor (not built yet) |
+| `coder-medium` | `:8084` qwen3.6-35b-a3b (MoE, 3B active, 64k) | `:8081` qwen3.6-27b (`coder-medium-datahub`; data-hub has no 35B) | #197 executor (not built yet) |
+| `coder-light` | `:8082` qwen3.5-9b | `:8082` qwen2.5-7b-instruct (`coder-light-datahub`, fallback only) | #197 executor (not built yet) |
 
 Not here: `memory-embed` (the gateway and workers embed through `memory/embedder`), `coder-cloud` (no cloud tier).
 
@@ -17,7 +18,7 @@ Not here: `memory-embed` (the gateway and workers embed through `memory/embedder
 | `custom_auth.py` | per-client keys without a database (absorbs olympus-sdk#490) |
 | `litellm.yaml` | `Service/litellm` (:4000), `PodDisruptionBudget/litellm`, `Deployment/litellm` (2 replicas, agent-services onodes) |
 | `externalsecret.yaml` | `Secret/litellm` (master key) and `Secret/litellm-client-keys` (one file per client) |
-| `networkpolicy.yaml` | default deny; in: memory-worker-extract, Prometheus, blackbox; out: CoreDNS and the two backends on 8081-8082 |
+| `networkpolicy.yaml` | default deny; in: memory-worker-extract, Prometheus, blackbox; out: CoreDNS, both backends on 8081-8082 and the A9 on 8084-8085 |
 
 URL for clients: `http://litellm.inference.svc:4000/v1`.
 
@@ -50,7 +51,7 @@ accepts it as a second key of the same client until it is removed.
 
 Scraped by the dedicated job `inference-litellm` (`../observability/prometheus-helmrelease.yaml`), which drops
 `hashed_api_key` (LiteLLM writes the raw presented key into it when it refuses a request), `client_ip` and
-`user_agent`. Probes: job `blackbox-inference-http` (LiteLLM readiness, A9 `:8081`/`:8082` `/health`); data-hub
+`user_agent`. Probes: job `blackbox-inference-http` (LiteLLM readiness, A9 `:8081`/`:8082`/`:8084`/`:8085` `/health`); data-hub
 backends are probed by `blackbox-datahub-http`. Alerts (group `inference`, tests in
 `../observability/tests/inference-alerts.test.yaml`): `LiteLLMDown`, `InferenceBackendDown`,
 `InferenceAllBackendsDown`, `LiteLLMFailoverActive`, `LiteLLMFallbackFailed`, `LiteLLMHighErrorRate`.
