@@ -121,9 +121,15 @@ spec:
             - name: LITELLM_CLIENT_KEYS_DIR
               value: /etc/litellm/client-keys
             # client -> aliases it may call (custom_auth.py). A client also needs a key file in
-            # Secret litellm-client-keys. `executor` (#197) gets a key when it exists.
+            # Secret litellm-client-keys (or litellm-executor-key for `executor`, #642: optional,
+            # absent until the owner adds the 1Password field; then 401 for that client only).
             - name: LITELLM_CLIENT_SCOPES
               value: '{"memory-workers": ["memory-extract"], "executor": ["coder-light", "coder-medium", "coder-heavy"]}'
+            # client -> {rpm, parallel} caps (custom_auth.py), so a runaway executor run cannot
+            # starve other A9 clients. Counted per replica (no shared cache; 2 replicas), so the
+            # cluster-wide ceiling is up to 2x these values.
+            - name: LITELLM_CLIENT_LIMITS
+              value: '{"executor": {"rpm": 60, "parallel": 3}}'
             - name: LITELLM_MASTER_KEY
               valueFrom:
                 secretKeyRef:
@@ -183,9 +189,16 @@ spec:
         - name: config
           configMap:
             name: litellm-config
+        # One directory of key files from two Secrets (projected). litellm-executor-key is
+        # optional: pods start and keep serving the other clients while it does not exist.
         - name: client-keys
-          secret:
-            secretName: litellm-client-keys
+          projected:
+            sources:
+              - secret:
+                  name: litellm-client-keys
+              - secret:
+                  name: litellm-executor-key
+                  optional: true
         - name: tmp
           emptyDir:
             sizeLimit: 256Mi

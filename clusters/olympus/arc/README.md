@@ -16,7 +16,7 @@ and, with `../kvm-device-plugin/`, #390).
 | `namespace.yaml` | `arc-system` (controller + listeners), `arc-runners` (runner pods of all scale sets, PSA `restricted`) |
 | `priorityclass.yaml` | `ci-runner` and `ci-runner-kvm`, both value -1000, `preemptionPolicy: Never` (below every other workload); two classes only so the quota can scope the KVM budget |
 | `quota.yaml`, `limitrange.yaml` | hard ceilings: total 14 pods; `ci-runners-non-kvm` (olympus-linux + olympus-gate: 12 pods, 8.5 CPU / 17 GiB requests, 20 CPU / 36 GiB limits, no `/dev/kvm`) and `ci-runners-kvm` (2 pods, 4 CPU / 8 GiB requests, 6 CPU / 16 GiB limits, 2 `olympus.io/kvm`); default requests/limits for every container |
-| `networkpolicy.yaml` | default-deny ingress; runner egress = DNS + public internet only (no IPv4 cluster, node, LAN or tailnet addresses); controller/listener egress adds the API server only |
+| `networkpolicy.yaml` | default-deny ingress; runner egress = DNS + public internet only (no IPv4 cluster, node, LAN or tailnet addresses), plus `egress-litellm-kvm`: pods labelled `olympus.io/ci-kvm` (olympus-kvm only) may reach the `inference` LiteLLM pods on TCP 4000 (executor, olympus-sdk#642); controller/listener egress adds the API server only |
 | `externalsecret.yaml` | `arc-github-app` Secret (GitHub App credentials) from 1Password via ESO |
 | `ocirepository.yaml` | both charts pinned by digest (`ghcr.io/actions/actions-runner-controller-charts`) |
 | `helmrelease-controller.yaml` | `gha-runner-scale-set-controller` (release `arc`, CRDs `CreateReplace`, `watchSingleNamespace: arc-runners`, image pinned by digest) |

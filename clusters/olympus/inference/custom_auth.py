@@ -21,6 +21,9 @@ from litellm.proxy.common_utils.http_parsing_utils import _read_request_body
 
 _KEYS_DIR = pathlib.Path(os.environ.get("LITELLM_CLIENT_KEYS_DIR", "/etc/litellm/client-keys"))
 _SCOPES = {c: list(a) for c, a in json.loads(os.environ.get("LITELLM_CLIENT_SCOPES", "{}")).items()}
+# Optional per-client caps, JSON: {"client": {"rpm": N, "parallel": M}}. LiteLLM enforces them from
+# the returned UserAPIKeyAuth (in memory, per replica; there is no database or shared cache).
+_LIMITS = json.loads(os.environ.get("LITELLM_CLIENT_LIMITS", "{}"))
 _cache: dict = {"stamp": None, "keys": {}}
 # Routes a client key may call: inference and the model list. Everything else (admin, UI, key
 # management) is refused; this proxy has no database and no admin clients.
@@ -57,4 +60,12 @@ async def user_api_key_auth(request: Request, api_key: str) -> UserAPIKeyAuth:
         if model is not None and model not in allowed:
             raise HTTPException(status_code=403, detail=f"client {client} may not use {model}")
     # api_key is a hash: LiteLLM puts it in metric labels (hashed_api_key) and logs.
-    return UserAPIKeyAuth(api_key=hash_token(presented), key_alias=client, user_id=client, models=allowed)
+    limits = _LIMITS.get(client, {})
+    return UserAPIKeyAuth(
+        api_key=hash_token(presented),
+        key_alias=client,
+        user_id=client,
+        models=allowed,
+        rpm_limit=limits.get("rpm"),
+        max_parallel_requests=limits.get("parallel"),
+    )
