@@ -123,11 +123,9 @@ spec:
             # The same image name as olympus-linux; the runner tag is now a multi-arch
             # manifest list (amd64 + arm64, olympus-sdk#694), so the digest is the INDEX digest
             # and the kubelet picks the arm64 entry on these nodes.
-            # TODO(olympus-sdk#694): PLACEHOLDER digest, not a real image. Replace with the
-            # index digest printed by the runner-image workflow once the olympus-sdk PR is
-            # merged and a multi-arch image is pushed, in the same PR that bumps olympus-linux.
-            # Until then a job picked up by this set fails with ImagePullBackOff.
-            image: ghcr.io/nwlnexus/olympus-ci-runner@sha256:0000000000000000000000000000000000000000000000000000000000000000
+            # Index digest from runner-image run 41216712374 (olympus-sdk main, 2026-10-31): linux/amd64 + linux/arm64.
+            # The amd64 scale sets stay on their single-arch pin until they are moved deliberately.
+            image: ghcr.io/nwlnexus/olympus-ci-runner@sha256:e45e955bed258dec4bb23ef3eec4902689fb63bb4f2cef891ba10801b73a3753
             command: ["/home/runner/run.sh"]
             resources:
               requests:
