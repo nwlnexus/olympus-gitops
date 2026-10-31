@@ -1,0 +1,158 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  # The release name is also the runner scale set name, i.e. the `runs-on:` label.
+  # `olympus-arm64`: runners on the arm64 Linux VMs that run on the Mac minis (k3s agents
+  # labelled olympus.io/host=mac-mini, tainted olympus.io/arch=arm64:NoSchedule;
+  # olympus-sdk#694, decision H20). Copy of olympus-linux with the node selection, the
+  # toleration, maxRunners and the resource limits changed; keep the rest in step.
+  name: olympus-arm64
+  namespace: arc-runners
+spec:
+  interval: 1h
+  # Chart pinned by digest through an OCIRepository (see helmrepository.yaml).
+  chartRef:
+    kind: OCIRepository
+    name: gha-runner-scale-set
+    namespace: arc-system
+  dependsOn:
+    - name: arc
+      namespace: arc-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    githubConfigUrl: https://github.com/nwlnexus
+    # Pre-defined Secret from externalsecret.yaml (GitHub App credentials).
+    githubConfigSecret: arc-github-app
+    runnerGroup: olympus-ci
+    minRunners: 0
+    # One runner per VM (two VMs: mmini-01-vm, mmini-02-vm), enforced by the topology
+    # spread below. Also the drain switch (README.md); known issue #4715 as olympus-linux.
+    maxRunners: 2
+    # Explicit controller service account (no cluster lookup at render time).
+    controllerServiceAccount:
+      namespace: arc-system
+      name: arc-gha-rs-controller
+    # containerMode intentionally unset ("none"): jobs run directly in the runner
+    # container. No docker-in-docker, nothing privileged. Jobs needing Docker stay
+    # on hosted runners (spec R6).
+    listenerTemplate:
+      spec:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          seccompProfile:
+            type: RuntimeDefault
+        containers:
+          - name: listener
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+              limits:
+                cpu: 250m
+                memory: 128Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+        # The listener is a Go controller image (multi-arch) that needs no arm64 node. It
+        # stays on amd64 compute nodes: it has no toleration for the arm64 taint, and the
+        # selector says so explicitly. (ARC's listener pod does not inherit the runner
+        # template's nodeSelector/tolerations, only this listenerTemplate.)
+        nodeSelector:
+          kubernetes.io/arch: amd64
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: olympus.io/role
+                      operator: DoesNotExist
+    template:
+      metadata:
+        labels:
+          # NOT olympus.io/ci-runner: that label belongs to olympus-linux and its topology spread.
+          olympus.io/ci-runner-arm64: "true"
+      spec:
+        # The runner container does not talk to the Kubernetes API in this mode;
+        # the chart's service account ("-no-permission") has no RBAC anyway.
+        automountServiceAccountToken: false
+        priorityClassName: ci-runner
+        # Hard wall-clock cap for the pod (olympus-sdk#390 review m1): a stuck job cannot
+        # hold a slot for days. Longest jobs (release builds) take well under 1 h; 3 h is ample. The kubelet kills the runner; ARC
+        # 0.15.0 then deletes the EphemeralRunner if a job was assigned (the job fails
+        # as "runner lost") or recreates the pod if none was, so the slot is freed.
+        activeDeadlineSeconds: 10800
+        enableServiceLinks: false
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001          # `runner` user in the runner image (numeric: required by runAsNonRoot)
+          runAsGroup: 1001
+          fsGroup: 1001
+          seccompProfile:
+            type: RuntimeDefault
+        # arm64 pool only: the Mac-mini VMs. They carry the NoSchedule taint, so nothing else
+        # lands there and this is the only runner set that tolerates it. The arch selector
+        # keeps the image honest (a multi-arch index, but the pool is arm64 by design).
+        nodeSelector:
+          kubernetes.io/arch: arm64
+          olympus.io/host: mac-mini
+        tolerations:
+          - key: olympus.io/arch
+            operator: Equal
+            value: arm64
+            effect: NoSchedule
+        # One runner per VM: a 4 CPU / 7 GiB runner fills most of a 6 vCPU / 12 GiB VM (kubelet
+        # reserves cpu 1, memory 3Gi like the onodes, README.md), so a second would not fit
+        # anyway. DoNotSchedule makes it explicit; a third job waits for a free VM.
+        topologySpreadConstraints:
+          - maxSkew: 1
+            topologyKey: kubernetes.io/hostname
+            whenUnsatisfiable: DoNotSchedule
+            labelSelector:
+              matchLabels:
+                olympus.io/ci-runner-arm64: "true"
+        containers:
+          - name: runner
+            # The same image name as olympus-linux; the runner tag is now a multi-arch
+            # manifest list (amd64 + arm64, olympus-sdk#694), so the digest is the INDEX digest
+            # and the kubelet picks the arm64 entry on these nodes.
+            # Index digest from runner-image run 41216712374 (olympus-sdk main, 2026-10-31): linux/amd64 + linux/arm64.
+            # The amd64 scale sets stay on their single-arch pin until they are moved deliberately.
+            image: ghcr.io/nwlnexus/olympus-ci-runner@sha256:e45e955bed258dec4bb23ef3eec4902689fb63bb4f2cef891ba10801b73a3753
+            command: ["/home/runner/run.sh"]
+            resources:
+              requests:
+                cpu: "2"
+                memory: 4Gi
+                ephemeral-storage: 4Gi
+              limits:
+                cpu: "4"
+                memory: 7Gi
+                ephemeral-storage: 15Gi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+              # readOnlyRootFilesystem is NOT set: the runner writes its config,
+              # _diag logs and tool caches under /home/runner and the root fs is
+              # discarded with the (ephemeral) pod anyway. The work dir and /tmp are
+              # emptyDirs with size limits so a job cannot fill the node disk.
+            volumeMounts:
+              - name: work
+                mountPath: /home/runner/_work
+              - name: tmp
+                mountPath: /tmp
+        volumes:
+          - name: work
+            emptyDir:
+              sizeLimit: 12Gi
+          - name: tmp
+            emptyDir:
+              sizeLimit: 2Gi
