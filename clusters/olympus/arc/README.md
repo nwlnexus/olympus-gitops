@@ -22,6 +22,7 @@ and, with `../kvm-device-plugin/`, #390).
 | `helmrelease-controller.yaml` | `gha-runner-scale-set-controller` (release `arc`, CRDs `CreateReplace`, `watchSingleNamespace: arc-runners`, image pinned by digest) |
 | `helmrelease-scale-set.yaml` | `gha-runner-scale-set` release `olympus-linux` (`runs-on: olympus-linux`), no container mode |
 | `helmrelease-scale-set-gate.yaml` | scale set `olympus-gate` (`runs-on: olympus-gate`), tiny pods for the CI gate poller |
+| `helmrelease-scale-set-arm64.yaml` | scale set `olympus-arm64` (`runs-on: olympus-arm64`), runners on the arm64 Linux VMs of the Mac minis (olympus-sdk#694, H20); see the arm64 section |
 | `helmrelease-scale-set-kvm.yaml` | scale set `olympus-kvm` (`runs-on: olympus-kvm`), the QEMU VM suites, `/dev/kvm` via the device plugin |
 | `../kvm-device-plugin/` | separate Flux app: `generic-device-plugin` DaemonSet (our mirror, digest-pinned) advertising `/dev/kvm` as `olympus.io/kvm` on nodes labelled `node-restriction.kubernetes.io/kvm-ci=true`; its PriorityClass `ci-device-plugin` and a ValidatingAdmissionPolicy pinning the image (the one PSA `privileged` namespace; see KVM below) |
 
@@ -35,6 +36,7 @@ image by digest, `activeDeadlineSeconds` so a stuck job cannot hold a slot for d
 |-----------|-----|------|------------------------------|
 | `olympus-linux` | CI jobs (lint, test, build) | max 3 (`maxRunners`; quota room for 4) | 2 CPU, 4 GiB / 4 CPU, 8 GiB; spread over the onodes via label `olympus.io/ci-runner`; deadline 3 h |
 | `olympus-gate` | the CI gate workflow: a poller (bash, gh, jq) that waits up to 120 min for sibling workflows | max 8 | 50m, 128Mi, 256Mi ephemeral / 500m, 512Mi, 2Gi; label `olympus.io/ci-gate`, soft spread (maxSkew 2, ScheduleAnyway); deadline 150 min |
+| `olympus-arm64` | arm64 jobs on the Mac-mini VMs (nothing routes there yet; `arm64-runner-smoke.yml` is the first user) | max 2, one per VM | 2 CPU, 4 GiB, 4 GiB ephemeral / 4 CPU, 7 GiB, 15 GiB; label `olympus.io/ci-runner-arm64`, deadline 3 h |
 | `olympus-kvm` | VM suites (`vm-tests.yml`, `make vm-test`) | max 2 | 2 CPU, 4 GiB, 4 GiB ephemeral, `olympus.io/kvm: 1` / 3 CPU, 8 GiB, 15 GiB; label `olympus.io/ci-kvm`, only on nodes labelled `node-restriction.kubernetes.io/kvm-ci=true`, supplemental group 994 (`kvm`); KVM image variant by digest; deadline 2 h |
 
 The gate has its own pool on purpose: if it shared the 3 `olympus-linux` slots, three open
@@ -52,6 +54,30 @@ tag and digest of both OCIRepository objects). `watchSingleNamespace` removes th
 cluster-wide ClusterRole; the consequence is that scale sets must live in
 `arc-runners` (all three do; the former `arc-runners-kvm` placeholder namespace was
 removed in #390 because KVM needs no PSA exception).
+
+## arm64: `olympus-arm64` (olympus-sdk#694, decision H20)
+
+The Mac minis each run one Linux arm64 VM as a k3s agent labelled `olympus.io/host=mac-mini` and
+tainted `olympus.io/arch=arm64:NoSchedule` (6 vCPU / 12 GiB, kubelet reserves as on the onodes). Every
+other image in the cluster is amd64, so the taint keeps everything else off; only workloads that opt in
+tolerate it. `olympus-arm64` is a copy of `olympus-linux` with: `nodeSelector`
+`kubernetes.io/arch: arm64` + `olympus.io/host: mac-mini`, a toleration for the taint, `maxRunners: 2`
+with a hard hostname spread (one runner per VM), and a 4 CPU / 7 GiB limit that fits the VM after the
+reserves. Same runner group `olympus-ci`, same hardening and the same image **name** as `olympus-linux`;
+the runner tag is a multi-arch manifest list (olympus-sdk `ci/runner/README.md`), pinned by its index digest.
+
+- **Listener and controller stay on amd64.** The listener pod is created from `listenerTemplate`, not the
+  runner template, so it never gets the toleration; `listenerTemplate` also sets `kubernetes.io/arch: amd64`.
+  The controller has no toleration either. Both images are multi-arch anyway.
+- **Image pin.** `helmrelease-scale-set-arm64.yaml` carries a placeholder digest (all zeros) until the
+  olympus-sdk multi-arch image exists; replace it with the index digest, and move `olympus-linux` to the same
+  digest in the same PR (it works on amd64 with the index too). Until then jobs on this set fail with
+  `ImagePullBackOff`; with `minRunners: 0` and nothing routed to it, that costs nothing.
+- **Quota.** `arc-runners` quotas were raised for 2 pods (see `quota.yaml`); the pool is shared with
+  `olympus-linux`.
+- **Rollout order.** (1) olympus-sdk PR merged, image pushed; (2) digest bumped here; (3) VMs joined to k3s;
+  (4) dispatch `arm64-runner-smoke.yml`. Merging before the VMs exist is harmless: the set has no nodes to
+  schedule on and no workflow requests it.
 
 ## KVM: `olympus-kvm` and the device plugin (olympus-sdk#390)
 

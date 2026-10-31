@@ -12,3 +12,4 @@ resources:
   - helmrelease-scale-set.yaml
   - helmrelease-scale-set-gate.yaml
   - helmrelease-scale-set-kvm.yaml
+  - helmrelease-scale-set-arm64.yaml
