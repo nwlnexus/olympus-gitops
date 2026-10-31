@@ -69,10 +69,10 @@ the runner tag is a multi-arch manifest list (olympus-sdk `ci/runner/README.md`)
 - **Listener and controller stay on amd64.** The listener pod is created from `listenerTemplate`, not the
   runner template, so it never gets the toleration; `listenerTemplate` also sets `kubernetes.io/arch: amd64`.
   The controller has no toleration either. Both images are multi-arch anyway.
-- **Image pin.** `helmrelease-scale-set-arm64.yaml` carries a placeholder digest (all zeros) until the
-  olympus-sdk multi-arch image exists; replace it with the index digest, and move `olympus-linux` to the same
-  digest in the same PR (it works on amd64 with the index too). Until then jobs on this set fail with
-  `ImagePullBackOff`; with `minRunners: 0` and nothing routed to it, that costs nothing.
+- **Image pin.** `helmrelease-scale-set-arm64.yaml` pins the multi-arch **index** digest from olympus-sdk's
+  runner-image run 41216712374 (linux/amd64 + linux/arm64); the kubelet picks the arm64 entry. The amd64 sets
+  (`olympus-linux`, `olympus-gate`) stay on their single-arch pin until they are moved deliberately: the
+  index's amd64 image has a newer Ubuntu base, so moving them is its own change.
 - **Quota.** `arc-runners` quotas were raised for 2 pods (see `quota.yaml`); the pool is shared with
   `olympus-linux`.
 - **Rollout order.** (1) olympus-sdk PR merged, image pushed; (2) digest bumped here; (3) VMs joined to k3s;
