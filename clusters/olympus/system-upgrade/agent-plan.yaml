@@ -11,6 +11,10 @@ spec:
   nodeSelector:
     matchExpressions:
       - {key: node-role.kubernetes.io/control-plane, operator: DoesNotExist}
+  # The Mac-mini arm64 VMs (olympus-sdk#694, H20) carry this taint; without the toleration their upgrade
+  # job can never schedule and they would stay on the old k3s. rancher/k3s-upgrade is multi-arch.
+  tolerations:
+    - {key: olympus.io/arch, operator: Equal, value: arm64, effect: NoSchedule}
   prepare:
     image: rancher/k3s-upgrade
     args: [prepare, server-plan]
