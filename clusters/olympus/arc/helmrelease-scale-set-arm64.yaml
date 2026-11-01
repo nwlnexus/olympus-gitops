@@ -2,9 +2,9 @@ apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   # The release name is also the runner scale set name, i.e. the `runs-on:` label.
-  # `olympus-arm64`: runners on the arm64 Linux VMs that run on the Mac minis (k3s agents
-  # labelled olympus.io/host=mac-mini, tainted olympus.io/arch=arm64:NoSchedule;
-  # olympus-sdk#694, decision H20). Copy of olympus-linux with the node selection, the
+  # `olympus-arm64`: runners on the arm64 Linux VMs that run on the Macs (k3s agents tainted
+  # olympus.io/arch=arm64:NoSchedule; mmini-01-vm and mmini-02-vm (olympus.io/host=mac-mini,
+  # olympus-sdk#694, decision H20) and data-hub-vm (olympus.io/host=mac-studio, #701)). Copy of olympus-linux with the node selection, the
   # toleration, maxRunners and the resource limits changed; keep the rest in step.
   name: olympus-arm64
   namespace: arc-runners
@@ -30,9 +30,9 @@ spec:
     githubConfigSecret: arc-github-app
     runnerGroup: olympus-ci
     minRunners: 0
-    # One runner per VM (two VMs: mmini-01-vm, mmini-02-vm), enforced by the topology
+    # One runner per VM (three VMs: mmini-01-vm, mmini-02-vm, data-hub-vm), enforced by the topology
     # spread below. Also the drain switch (README.md); known issue #4715 as olympus-linux.
-    maxRunners: 2
+    maxRunners: 3
     # Explicit controller service account (no cluster lookup at render time).
     controllerServiceAccount:
       namespace: arc-system
@@ -97,12 +97,11 @@ spec:
           fsGroup: 1001
           seccompProfile:
             type: RuntimeDefault
-        # arm64 pool only: the Mac-mini VMs. They carry the NoSchedule taint, so nothing else
-        # lands there and this is the only runner set that tolerates it. The arch selector
-        # keeps the image honest (a multi-arch index, but the pool is arm64 by design).
+        # arm64 pool only: the Mac VMs, the cluster's only arm64 nodes. They carry the NoSchedule
+        # taint, so nothing else lands there and this is the only runner set that tolerates it. The
+        # arch selector covers every Mac (mac-mini and mac-studio) and keeps the image honest.
         nodeSelector:
           kubernetes.io/arch: arm64
-          olympus.io/host: mac-mini
         tolerations:
           - key: olympus.io/arch
             operator: Equal
