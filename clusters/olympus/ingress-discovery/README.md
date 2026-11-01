@@ -8,8 +8,8 @@ Hermes (a Cloudflare Worker, NOT in-cluster) at `https://api.nwlnexus.net/graphq
 Controller code + image ship from **olympus-sdk** (`packages/ingress-discovery`).
 This directory is manifests only.
 
-- Image: `ghcr.io/nwlnexus/ingress-discovery:8977a56`
-  (digest `sha256:1e439266b0d70f2efa2359f233dfd84cc5a0003ec7a300885951475006717f1a`)
+- Image: `ghcr.io/nwlnexus/ingress-discovery@sha256:dcf85070f6551f4327ae59be842715b4fb75f8323ce87c80642c111c5820c92d`
+  (tag `6d4faef`; multi-arch index, linux/amd64 + linux/arm64, olympus-sdk#707)
 - Namespace: `ingress-discovery`
 - Replicas: 1 (leader-elected via a `coordination.k8s.io` Lease; safe to bump to 2 for HA)
 - Health: `GET /healthz` on port 8080 (liveness + readiness; not gated on leadership)

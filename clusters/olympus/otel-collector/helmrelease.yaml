@@ -23,6 +23,14 @@ spec:
     mode: deployment
     replicaCount: 1
     fullnameOverride: opentelemetry-collector
+    # arm64 opt-in (olympus-sdk#707): the image is a multi-arch index with linux/arm64, so this pod may also
+    # run on the Mac VMs (taint olympus.io/arch=arm64:NoSchedule). No arch preference: requests,
+    # LeastAllocated scoring and the descheduler place it.
+    tolerations:
+      - key: olympus.io/arch
+        operator: Equal
+        value: arm64
+        effect: NoSchedule
     annotations:
       reloader.stakater.com/auto: "true"
     image:
