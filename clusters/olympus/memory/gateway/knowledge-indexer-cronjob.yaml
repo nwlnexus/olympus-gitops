@@ -125,7 +125,7 @@ spec:
           containers:
             - name: index
               # Same digest as the memory-gateway Deployment (gateway.yaml). Bump both together.
-              image: ghcr.io/nwlnexus/memory-gateway@sha256:04bde6e5d4308cd8dd2dff28f189948539095ec27145ef5eb3950315969cdb75
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:161d78568132af74d42c44954095f9cc10536cd138955cc1158068c0b46727b9
               imagePullPolicy: IfNotPresent
               command:
                 - node

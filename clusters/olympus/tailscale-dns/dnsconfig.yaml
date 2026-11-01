@@ -7,3 +7,10 @@ spec:
     image:
       repo: tailscale/k8s-nameserver
       tag: stable
+    # arm64 opt-in (olympus-sdk#707): tailscale/k8s-nameserver is a multi-arch index with linux/arm64.
+    pod:
+      tolerations:
+        - key: olympus.io/arch
+          operator: Equal
+          value: arm64
+          effect: NoSchedule

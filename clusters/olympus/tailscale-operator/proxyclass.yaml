@@ -11,6 +11,13 @@ metadata:
 spec:
   statefulSet:
     pod:
+      # arm64 opt-in (olympus-sdk#707): tailscale/tailscale is a multi-arch index with linux/arm64, so the
+      # proxy pods may also run on the Mac VMs (taint olympus.io/arch=arm64:NoSchedule).
+      tolerations:
+        - key: olympus.io/arch
+          operator: Equal
+          value: arm64
+          effect: NoSchedule
       tailscaleContainer:
         resources:
           requests:
@@ -24,6 +31,13 @@ metadata:
 spec:
   statefulSet:
     pod:
+      # arm64 opt-in (olympus-sdk#707): tailscale/tailscale is a multi-arch index with linux/arm64, so the
+      # proxy pods may also run on the Mac VMs (taint olympus.io/arch=arm64:NoSchedule).
+      tolerations:
+        - key: olympus.io/arch
+          operator: Equal
+          value: arm64
+          effect: NoSchedule
       tailscaleContainer:
         resources:
           requests:

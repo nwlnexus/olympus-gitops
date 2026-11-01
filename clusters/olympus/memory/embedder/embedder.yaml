@@ -142,6 +142,16 @@ spec:
             matchLabels:
               app.kubernetes.io/name: memory-embedder
       affinity:
+        # amd64 only (olympus-sdk#707): text-embeddings-inference publishes linux/amd64 only (this
+        # digest is a single-entry index). Required, so lifting the arm64 taint or adding a toleration
+        # can never schedule it on an arm64 node (exec format error).
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values: [amd64]
         podAntiAffinity:
           # One replica per node. Preferred (as for the embed workers), so a single surviving node
           # still runs both replicas instead of leaving one Pending.

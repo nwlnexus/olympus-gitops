@@ -678,6 +678,14 @@ spec:
       enabled: false
     kube-state-metrics:
       enabled: true
+      # arm64 opt-in (olympus-sdk#707): the image is a multi-arch index with linux/arm64, so this pod may also
+      # run on the Mac VMs (taint olympus.io/arch=arm64:NoSchedule). No arch preference: requests,
+      # LeastAllocated scoring and the descheduler place it.
+      tolerations:
+        - key: olympus.io/arch
+          operator: Equal
+          value: arm64
+          effect: NoSchedule
       resources:
         requests:
           cpu: 10m

@@ -29,6 +29,12 @@ spec:
         operator: Equal
         value: agent-services
         effect: NoSchedule
+      # olympus-sdk#707: the arm64 Mac VMs now run opted-in workloads, so collect their pod logs too
+      # (the collector image is a multi-arch index with linux/arm64).
+      - key: olympus.io/arch
+        operator: Equal
+        value: arm64
+        effect: NoSchedule
     image:
       repository: otel/opentelemetry-collector-contrib
     presets:
