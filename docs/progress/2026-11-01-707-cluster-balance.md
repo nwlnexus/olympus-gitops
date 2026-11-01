@@ -17,7 +17,7 @@
 | 2 | descheduler logs + PDB + k3s-health-gate.sh | >=1 eviction, gate PASS | todo |
 | 3 | pods per node | max <=35%, naraka-01 >3, >=5 on arm64 | todo |
 | 4 | skopeo per arm64 workload; events on arm64 nodes 24 h | arm64 in index; none | todo |
-| 5 | imagetools inspect x3 | arm64 listed | todo |
+| 5 | imagetools inspect x3 | arm64 listed | PASS 11-01 (skopeo: 3 OCI indexes amd64+arm64) |
 
 Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9, onode-0636e4 5, onode-062caa 5, naraka-01 3, Mac VMs 0 (non-DS). 75/116 containers without cpu request. Arch survey: scratchpad arch-2026-11-01.txt (41 multi+arm64, 1 amd64-only TEI, 9 unknown).
 
@@ -28,13 +28,17 @@ Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9,
 | 1 | Requests from Prometheus p95 7 d usage, all workloads without requests | opus survey, sonnet edits | done 9fdc161 (docs/sizing/2026-11-01-requests.md) |
 | 2 | topologySpread (hostname, ScheduleAnyway) on multi-replica; PDBs | opus subagent | done 01e11c0 (spread on 5 multi-replica Deployments; cloudflared PDB) |
 | 3 | descheduler via Flux (CronJob 30 min; exclusions; PDB-aware) | opus subagent | done 4364791 (docs/sizing/2026-11-01-descheduler.md) |
-| 4 | arm64 opt-in: toleration + soft affinity for multi-arch workloads; amd64 pin for the rest | sonnet survey, opus review | todo |
-| 5 | olympus-sdk: multi-arch builds for our 3 images | sonnet subagent | olympus-sdk#708 verifier PASS (build), automerge; publish check after merge |
+| 4 | arm64 opt-in: toleration for multi-arch stateless; amd64 pin for the rest; pin new index digests | opus subagent | doing |
+| 5 | olympus-sdk: multi-arch builds for our 3 images | sonnet subagent | merged 6d4faef; indexes published |
 
 ## Evidence log
 
 | When | Command | Exit | Key output | Commit |
 |---|---|---|---|---|
+| 11-01 | gitops #185 merged (steps 1-3) | - | verifier PASS; Flux applied d4d8d49; descheduler CronJob */30 | gitops main |
+| 11-01 | pods per node after #185 (non-DS) | 0 | onode-030c31 15, onode-0314ac 12, naraka-01 12, onode-0312ce 10, onode-0636e4 5, onode-062caa 5 | - |
+| 11-01 | descheduler run 17:30Z | 0 | 030c31 overutilized; 4 underutilized; evicted 0 (all pods < minPodAge 1h after the 17:17 rollout) | - |
+| 11-01 | skopeo --raw sha-6d4faef / 6d4faef | 0 | memory-gateway index 161d7856 = recorded DIGEST; memory-workers b2e00a4a = DIGEST; ingress-discovery dcf85070; all linux/amd64,linux/arm64 | sdk 6d4faef |
 | 11-01 | prometheus limit 2Gi->3Gi, request 2240Mi (owner yes) | 0 | helm template: requests 40m/2240Mi, limits memory 3Gi | 0e8b3c7 |
 | 11-01 | steps 2-3 validation: yamllint; kustomize+kubeconform root 53 valid; helm template descheduler 0.37.0; policy decoded by v0.37.0 binary | 0 | 0 invalid; CronJob */30; strict decode OK | 4364791 |
 | 11-01 | claim-verifier olympus-sdk#708 | - | PASS: 3 image jobs build linux/arm64 (gateway pnpm under QEMU 358s; ingress-discovery cross-compile 35s); no push on PR | 8ca6280 |
