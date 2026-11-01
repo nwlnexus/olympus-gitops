@@ -25,21 +25,24 @@ Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9,
 
 | Step | What | Model | Status |
 |---|---|---|---|
-| 1 | Requests from Prometheus p95 7 d usage, all workloads without requests | opus survey, sonnet edits | todo |
-| 2 | topologySpread (hostname, ScheduleAnyway) on multi-replica; PDBs | sonnet | todo |
-| 3 | descheduler via Flux (CronJob 30 min; exclusions; PDB-aware) | opus | todo |
+| 1 | Requests from Prometheus p95 7 d usage, all workloads without requests | opus survey, sonnet edits | done 9fdc161 (docs/sizing/2026-11-01-requests.md) |
+| 2 | topologySpread (hostname, ScheduleAnyway) on multi-replica; PDBs | opus subagent | doing |
+| 3 | descheduler via Flux (CronJob 30 min; exclusions; PDB-aware) | opus subagent | doing |
 | 4 | arm64 opt-in: toleration + soft affinity for multi-arch workloads; amd64 pin for the rest | sonnet survey, opus review | todo |
-| 5 | olympus-sdk: multi-arch builds for our 3 images | sonnet | todo |
+| 5 | olympus-sdk: multi-arch builds for our 3 images | sonnet subagent | doing |
 
 ## Evidence log
 
 | When | Command | Exit | Key output | Commit |
 |---|---|---|---|---|
+| 11-01 | yamllint; kustomize+kubeconform 31 dirs; promtool; helm template 22 HelmReleases | 0 | failed=0; all requests on intended containers | 9fdc161 |
 
 ## Decisions
 
 - Taint stays on the Mac VMs; workloads opt in (toleration + preferred affinity), amd64-only ones get a hard amd64 selector.
 - Requests from measured usage (p95), not guesses; no new limits.
+- Exceptions to Done-when 1 (not Flux-managed): 1password/onepassword-connect (hand Helm), trident-controller (TridentOrchestrator CR), tailscale/nameserver (DNSConfig has no resources) = 9 containers.
+- Kept: embedder cpu 2 (throughput reservation); redpanda broker (chart ties requests to limits). prometheus-server request capped at its 2Gi limit (peak 1994Mi): limit raise is an owner decision.
 - Order: requests -> spread -> descheduler -> arm64 opt-in (descheduler needs requests to judge utilisation).
 
 ## Blocked-on
