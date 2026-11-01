@@ -1,0 +1,122 @@
+# kubernetes-sigs/descheduler as a CronJob every 30 minutes (olympus-sdk#707 step 3). The scheduler only
+# places a pod once; the descheduler evicts pods from crowded nodes so the scheduler re-places them on
+# emptier ones. Only the three balance plugins run. Threshold reasoning and the per-node figures they were
+# tuned against: docs/sizing/2026-11-01-descheduler.md.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: descheduler
+  namespace: descheduler
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: descheduler
+      version: "0.37.0"
+      sourceRef:
+        kind: HelmRepository
+        name: descheduler
+        namespace: descheduler
+  values:
+    kind: CronJob
+    schedule: "*/30 * * * *"
+    # Keep the last runs' pods so `kubectl -n descheduler logs` shows what was evicted.
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 3
+    # A run takes seconds; never let a stuck one overlap the next (the chart already sets Forbid).
+    activeDeadlineSeconds: 600
+    image:
+      # v0.37.0, multi-arch index digest (linux/amd64, arm, arm64).
+      tag: "v0.37.0@sha256:88deef34ff5c85cb69676d7073dd641bd5c35b156bc1ef4a35ca8fbf9644da98"
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    cmdOptions:
+      v: 3
+    deschedulerPolicy:
+      # Bounded evictions per run instead of a dry-run soak: at most 3 pods leave any one node and at most
+      # 10 pods are evicted cluster-wide per 30-minute run.
+      maxNoOfPodsToEvictPerNode: 3
+      maxNoOfPodsToEvictTotal: 10
+      profiles:
+        - name: balance
+          pluginConfig:
+            - name: DefaultEvictor
+              args:
+                # A pod must fit some other node (resources, taints, node affinity/selector) before it is
+                # evicted, so nothing is evicted into Pending.
+                nodeFit: true
+                # A pod younger than an hour is left alone: no re-evicting a pod the last run just moved
+                # (anti-thrash for the soft ScheduleAnyway spread constraints).
+                minPodAge: 1h
+                podProtections:
+                  # Default protections stay on: pods with local storage (emptyDir/hostPath), system-critical
+                  # pods (system-cluster-critical / system-node-critical), DaemonSet pods and failed bare pods
+                  # are never evicted.
+                  extraEnabled:
+                    - PodsWithPVC
+                  config:
+                    PodsWithPVC:
+                      # qnap-iscsi is ReadWriteOnce: evicting means an iSCSI detach/attach and the volume's
+                      # only consumer is down until it re-attaches. qnap-nfs (RWX) pods stay evictable.
+                      protectedStorageClasses:
+                        - name: qnap-iscsi
+                # Namespaces never evicted from (reasons in docs/sizing/2026-11-01-descheduler.md):
+                namespaceLabelSelector:
+                  matchExpressions:
+                    - key: kubernetes.io/metadata.name
+                      operator: NotIn
+                      values:
+                        - kube-system
+                        - flux-system
+                        - trident
+                        - tailscale
+                        - arc-system
+                        - arc-runners
+                        - memory
+                        - system-upgrade
+                        - descheduler
+                # Stateful singletons, excluded by label as well (their qnap-iscsi PVCs already protect them;
+                # this keeps them safe if a volume ever moves to another class).
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/name
+                      operator: NotIn
+                      values:
+                        - postgres
+                        - redpanda
+                        - prometheus
+                        - loki
+                        - tempo
+            - name: LowNodeUtilization
+              args:
+                # Requests-based (not live usage). After step 1's requests every node's cpu request is under
+                # 15% and memory under 30%, so the pod count is the dimension that separates crowded from
+                # empty nodes: under 16% pods (17 or fewer of 110) and under 20% cpu and memory is
+                # underutilised; over 19% pods (21 or more) or over 50% cpu or memory is overutilised.
+                thresholds:
+                  cpu: 20
+                  memory: 20
+                  pods: 16
+                targetThresholds:
+                  cpu: 50
+                  memory: 50
+                  pods: 19
+            - name: RemoveDuplicates
+            - name: RemovePodsViolatingTopologySpreadConstraint
+              args:
+                # Every spread constraint in this repo is soft (ScheduleAnyway, olympus-sdk#707 step 2); the
+                # default (DoNotSchedule only) would make this plugin a no-op here.
+                constraints:
+                  - DoNotSchedule
+                  - ScheduleAnyway
+          plugins:
+            balance:
+              enabled:
+                - LowNodeUtilization
+                - RemoveDuplicates
+                - RemovePodsViolatingTopologySpreadConstraint
