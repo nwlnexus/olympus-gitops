@@ -20,9 +20,18 @@ FalkorDB (the Graphiti graph store) was removed under olympus-sdk#456: Graphiti 
 dumps stay in `memory-backups` under `falkordb/`; the PVC `data-falkordb-0` was not created from
 git (StatefulSet volumeClaimTemplate) and is deleted by hand (#456).
 
-Every memory workload (gateway, workers, embedder, Postgres, the backup CronJob and
-the knowledge indexer) is pinned to the agent-services onodes via nodeSelector
-`olympus.io/role: agent-services` plus the matching NoSchedule toleration (olympus-sdk#567).
+Scheduling (owner decision 2026-11-01, olympus-sdk#707; until then every memory workload was
+pinned to the agent-services onodes, olympus-sdk#567):
+
+- **Spread across the cluster, the arm64 Mac VMs included:** the gateway, both workers and the
+  knowledge indexer. No nodeSelector; they tolerate `olympus.io/role=agent-services` (so
+  onode-0636e4/062caa stay usable) and `olympus.io/arch=arm64` (their images are multi-arch
+  indexes). Pods reach the tailnet (LiteLLM's backends) through the node's own tailscaled, and every
+  node, the Mac VMs included, is `tag:k8s` on the tailnet.
+- **Spread across the amd64 nodes only:** the backup CronJob. Its `memory-backups` PVC is qnap-nfs and
+  the Mac VMs have no NFS client (nfs-common), so it has no arm64 toleration until they do.
+- **Still pinned** (nodeSelector `olympus.io/role: agent-services` plus the toleration): Postgres
+  (stateful, qnap-iscsi RWO; a move is a detach/attach) and the embedder (amd64-only image).
 `Job/memory-migrate` is not pinned: it is a short-lived client, and changing its template would
 force a re-run.
 

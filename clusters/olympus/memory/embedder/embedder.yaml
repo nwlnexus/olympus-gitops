@@ -124,7 +124,8 @@ spec:
         fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
-      # olympus-sdk#567: the memory stack runs on the agent-services onodes (onode-0636e4/062caa).
+      # Stays pinned to the agent-services onodes (olympus-sdk#567) when the rest of the memory stack
+      # spreads (#707): the TEI image is amd64-only, and TEI wants their CPU.
       nodeSelector:
         olympus.io/role: agent-services
       tolerations:
