@@ -132,6 +132,15 @@ spec:
           operator: Equal
           value: agent-services
           effect: NoSchedule
+      # Spread by node, soft (ScheduleAnyway): the scheduler scores for an even spread and the descheduler
+      # (clusters/olympus/descheduler) rebalances skew later; never leaves a replica Pending (olympus-sdk#707).
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: memory-embedder
       affinity:
         podAntiAffinity:
           # One replica per node. Preferred (as for the embed workers), so a single surviving node
