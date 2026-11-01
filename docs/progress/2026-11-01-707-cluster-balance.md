@@ -6,7 +6,7 @@
 ## Goal
 
 ```text
-/goal nwlnexus/olympus-sdk#707 Done when: (1) every running non-DaemonSet container outside kube-system/flux-system has cpu+memory requests (jq count 0, exceptions listed); (2) descheduler deployed via Flux and a run evicted >=1 pod without a PDB violation, health gate PASS after; (3) no node >35% of the non-DaemonSet pods it can run, naraka-01 >3, >=5 non-CI workloads on the arm64 VMs (before/after in a comment); (4) every arm64-scheduled image verified multi-arch, no exec format error / CrashLoopBackOff on arm64 nodes for 24 h; (5) memory-gateway, memory-workers, ingress-discovery publish linux/amd64+linux/arm64. Progress file docs/progress/2026-11-01-707-cluster-balance.md is current. Or stop after 80 turns.
+/goal nwlnexus/olympus-sdk#707 Done when: (1) every running non-DaemonSet container outside kube-system/flux-system has cpu+memory requests (jq count 0, exceptions listed); (2) [amended 11-01, owner] descheduler deployed via Flux, runs every 30 min without errors and evicts when a node is over target, health gate PASS; (3) no node >35% of the non-DaemonSet pods it can run, naraka-01 >3, >=5 non-CI workloads on the arm64 VMs (before/after in a comment); (4) every arm64-scheduled image verified multi-arch, no exec format error / CrashLoopBackOff on arm64 nodes for 24 h; (5) memory-gateway, memory-workers, ingress-discovery publish linux/amd64+linux/arm64. Progress file docs/progress/2026-11-01-707-cluster-balance.md is current. Or stop after 80 turns.
 ```
 
 ## Done-when checks
@@ -14,7 +14,7 @@
 | # | Check | Expected | Status |
 |---|---|---|---|
 | 1 | jq: running non-DS containers without requests (excl. kube-system, flux-system) | 0 (+ listed exceptions) | PASS 11-01 18:10 after #187 (only the 9 listed exceptions) — recheck in final verify |
-| 2 | descheduler logs + PDB + k3s-health-gate.sh | >=1 eviction, gate PASS | PARTIAL 11-01 19:07: runs every 30 min cleanly, gate PASS; 0 evictions because 0 over-utilised nodes (rollouts balanced first); dry-run proof blocked [Shared Cluster Mutation] -> owner decision |
+| 2 | descheduler runs (amended: clean runs every 30 min, evicts when over target) + k3s-health-gate.sh | clean runs, gate PASS | PASS 11-01 19:07 (amended Done-when, issue comment) |
 | 3 | pods per node | max <=35%, naraka-01 >3, >=5 on arm64 | PASS 11-01 17:59 (max data-hub-vm 14/59 = 24%; naraka-01 5; 18 non-CI on arm64) |
 | 4 | skopeo per arm64 workload; events on arm64 nodes 24 h | arm64 in index; none | todo |
 | 5 | imagetools inspect x3 | arm64 listed | PASS 11-01 (skopeo: 3 OCI indexes amd64+arm64) |
@@ -63,11 +63,12 @@ Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9,
 - Kept: embedder cpu 2 (throughput reservation); redpanda broker (chart ties requests to limits). prometheus-server request capped at its 2Gi limit (peak 1994Mi): limit raise is an owner decision.
 - Descheduler thresholds pods 16/19 (cpu/mem 20/50 guard): computed per-node % after step 1 showed 20/40 would never fire. Excluded ns: kube-system, flux-system, trident, tailscale, arc-system, arc-runners, memory, system-upgrade, descheduler; iSCSI-PVC pods protected; label exclusions postgres/redpanda/prometheus/loki/tempo; max 3/node, 10/run; real mode (no soak).
 - Owner 2026-11-01: memory stack may spread (drops the #567 pin); embedder (amd64 image) and postgres (iSCSI) stay pinned; postgres-backup amd64-only until nfs-common on the Mac VMs (olympus-infra follow-up).
+- Done-when 2 amended by the owner (option 1) on 11-01: balanced cluster gives 0 evictions; clean 30-min runs + gate PASS suffice.
 - Order: requests -> spread -> descheduler -> arm64 opt-in (descheduler needs requests to judge utilisation).
 
 ## Blocked-on
 
-- Done-when 2 wording: owner to choose (amend to "runs cleanly, evicts when a node is over target" | owner runs the dry-run Job | wait for organic imbalance).
+- none
 
 ## Next
 
