@@ -58,10 +58,11 @@ removed in #390 because KVM needs no PSA exception).
 ## arm64: `olympus-arm64` (olympus-sdk#694, decision H20)
 
 The Mac minis each run one Linux arm64 VM as a k3s agent labelled `olympus.io/host=mac-mini` and
-tainted `olympus.io/arch=arm64:NoSchedule` (6 vCPU / 12 GiB, kubelet reserves as on the onodes). Every
+tainted `olympus.io/arch=arm64:NoSchedule` (6 vCPU / 12 GiB, kubelet reserves as on the onodes); data-hub
+runs a third, `olympus.io/host=mac-studio` (8 vCPU / 32 GiB, olympus-sdk#701). Every
 other image in the cluster is amd64, so the taint keeps everything else off; only workloads that opt in
 tolerate it. `olympus-arm64` is a copy of `olympus-linux` with: `nodeSelector`
-`kubernetes.io/arch: arm64` + `olympus.io/host: mac-mini`, a toleration for the taint, `maxRunners: 2`
+`kubernetes.io/arch: arm64` (every Mac VM; they are the only arm64 nodes), a toleration for the taint, `maxRunners: 3`
 with a hard hostname spread (one runner per VM), and a 4 CPU / 7 GiB limit that fits the VM after the
 reserves. Same runner group `olympus-ci`, same hardening and the same image **name** as `olympus-linux`;
 the runner tag is a multi-arch manifest list (olympus-sdk `ci/runner/README.md`), pinned by its index digest.
