@@ -164,9 +164,10 @@ spec:
                 seconds: 5
           resources:
             # ~570 MiB resident idle (local run of this image and config).
+            # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
             requests:
-              cpu: 100m
-              memory: 640Mi
+              cpu: 10m
+              memory: 768Mi
             limits:
               memory: 1Gi
           securityContext:

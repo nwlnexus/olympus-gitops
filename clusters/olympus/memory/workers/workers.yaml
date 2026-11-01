@@ -148,9 +148,10 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 3
           resources:
+            # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
             requests:
-              cpu: 100m
-              memory: 256Mi
+              cpu: 10m
+              memory: 96Mi
             limits:
               memory: 1Gi
           securityContext:
@@ -288,9 +289,10 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 3
           resources:
+            # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
             requests:
-              cpu: 100m
-              memory: 192Mi
+              cpu: 10m
+              memory: 80Mi
             limits:
               memory: 512Mi
           securityContext:

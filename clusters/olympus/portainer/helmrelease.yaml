@@ -28,6 +28,11 @@ spec:
           secretKeyRef:
             name: portainer-agent-secret
             key: AGENT_SECRET
+    resources:
+      # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
+      requests:
+        cpu: 10m
+        memory: 160Mi
     service:
       type: ClusterIP
     ingress:

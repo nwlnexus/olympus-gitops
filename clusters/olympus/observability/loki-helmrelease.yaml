@@ -68,6 +68,17 @@ spec:
       # Keep WAL/cache local on qnap-iscsi.
     singleBinary:
       replicas: 1
+      resources:
+        # Memory from the 7-day max working set x 1.2 (Go, spiky), docs/sizing/2026-11-01-requests.md.
+        requests:
+          cpu: 20m
+          memory: 640Mi
+    # The loki-sc-rules sidecar container.
+    sidecar:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 112Mi
       persistence:
         enabled: true
         storageClass: qnap-iscsi

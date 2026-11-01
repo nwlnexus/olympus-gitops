@@ -191,8 +191,9 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 3
           resources:
+            # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
             requests:
-              cpu: 100m
+              cpu: 40m
               memory: 192Mi
             limits:
               memory: 512Mi

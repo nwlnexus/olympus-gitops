@@ -31,6 +31,14 @@ spec:
   values:
     operatorConfig:
       hostname: compute-hub-operator
+      resources:
+        # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
+        requests:
+          cpu: 10m
+          memory: 64Mi
+    # Proxies for Services/Ingresses without their own ProxyClass get requests from proxyclass.yaml.
+    proxyConfig:
+      defaultProxyClass: proxy-sized
     # Identity-enforced kubectl/k9s access over the tailnet. The operator's
     # API server proxy (https://compute-hub-operator.<tailnet>.ts.net)
     # authenticates the caller's Tailscale identity and impersonates k8s groups

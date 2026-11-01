@@ -33,6 +33,11 @@ spec:
       targetPath: tempo.storage.trace.s3.secret_key
   values:
     tempo:
+      resources:
+        # Memory from the 7-day max working set x 1.2 (Go, spiky), docs/sizing/2026-11-01-requests.md.
+        requests:
+          cpu: 10m
+          memory: 640Mi
       storage:
         trace:
           backend: s3
