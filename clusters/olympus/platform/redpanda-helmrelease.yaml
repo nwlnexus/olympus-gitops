@@ -23,3 +23,8 @@ spec:
           - redpanda.platform.svc.cluster.local:9092
     ingress:
       enabled: false
+    resources:
+      # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
+      requests:
+        cpu: 10m
+        memory: 192Mi

@@ -16,6 +16,21 @@ spec:
   values:
     crds:
       enabled: true
+    resources:
+      # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
+      requests:
+        cpu: 10m
+        memory: 112Mi
+    cainjector:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 128Mi
+    webhook:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 96Mi
     extraArgs:
       # Use public DNS for DNS-01 challenge verification — avoids CoreDNS
       # custom zone interference (e.g. tailscale-dns overrides causing SERVFAIL)

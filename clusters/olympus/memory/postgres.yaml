@@ -128,9 +128,10 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 6
           resources:
+            # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
             requests:
-              cpu: 500m
-              memory: 1Gi
+              cpu: 20m
+              memory: 832Mi
             limits:
               memory: 2Gi
           volumeMounts:

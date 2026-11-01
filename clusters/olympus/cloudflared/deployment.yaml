@@ -17,6 +17,15 @@ spec:
       annotations:
         config-hash: "v1"
     spec:
+      # Spread by node, soft (ScheduleAnyway): never leaves a replica Pending; the descheduler
+      # (clusters/olympus/descheduler) rebalances skew later (olympus-sdk#707).
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: cloudflared
       containers:
         - name: cloudflared
           image: cloudflare/cloudflared:2026.5.2
@@ -48,9 +57,10 @@ spec:
             periodSeconds: 30
             failureThreshold: 5
           resources:
+            # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
             requests:
               cpu: 10m
-              memory: 64Mi
+              memory: 96Mi
             limits:
               memory: 128Mi
       volumes:

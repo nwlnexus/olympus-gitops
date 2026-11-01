@@ -5,3 +5,4 @@ resources:
   - externalsecret.yaml
   - helmrepository.yaml
   - helmrelease.yaml
+  - proxyclass.yaml

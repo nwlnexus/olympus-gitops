@@ -31,6 +31,11 @@ spec:
       # the v39+ schema). Bump to force a pod restart.
       podAnnotations:
         config-version: "2"
+    resources:
+      # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
+      requests:
+        cpu: 10m
+        memory: 192Mi
     ingressClass:
       enabled: true
       isDefaultClass: true

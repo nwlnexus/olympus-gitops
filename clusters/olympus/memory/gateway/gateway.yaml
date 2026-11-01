@@ -132,6 +132,15 @@ spec:
           operator: Equal
           value: agent-services
           effect: NoSchedule
+      # Spread by node, soft (ScheduleAnyway): the scheduler scores for an even spread and the descheduler
+      # (clusters/olympus/descheduler) rebalances skew later; never leaves a replica Pending (olympus-sdk#707).
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: memory-gateway
       affinity:
         podAntiAffinity:
           # Spread the two replicas across nodes, but never leave a replica unschedulable
@@ -191,8 +200,9 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 3
           resources:
+            # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
             requests:
-              cpu: 100m
+              cpu: 40m
               memory: 192Mi
             limits:
               memory: 512Mi

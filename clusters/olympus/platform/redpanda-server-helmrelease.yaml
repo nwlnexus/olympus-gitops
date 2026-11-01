@@ -24,6 +24,12 @@ spec:
   values:
     statefulset:
       replicas: 1
+      # The `sidecar` container (config watcher). The broker's own resources stay chart-derived below.
+      sideCars:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
     resources:
       cpu:
         cores: 1

@@ -21,5 +21,10 @@ spec:
       retries: 3
   values:
     fullnameOverride: kube-state-metrics
+    resources:
+      # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
+      requests:
+        cpu: 10m
+        memory: 112Mi
     # Chart creates its own ClusterRole/binding (rbac.create=true) to read k8s objects.
     # Service kube-state-metrics:8080 (port name "http").

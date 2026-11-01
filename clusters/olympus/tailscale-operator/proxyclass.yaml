@@ -1,0 +1,31 @@
+# Requests for the operator-managed tailscale proxy pods (ts-*), which otherwise get the operator's
+# 1m / 1Mi default. Sized from 7-day usage (p95 x 1.2, max for the spikier ones):
+# docs/sizing/2026-11-01-requests.md. No limits, as before.
+# `proxy-sized` is the default for every proxy (proxyConfig.defaultProxyClass in helmrelease.yaml);
+# the OTLP ingress proxy carries more traffic and opts into `proxy-sized-otlp` with the
+# tailscale.com/proxy-class label on its Service (otel-collector/otlp-tailscale-service.yaml).
+apiVersion: tailscale.com/v1alpha1
+kind: ProxyClass
+metadata:
+  name: proxy-sized
+spec:
+  statefulSet:
+    pod:
+      tailscaleContainer:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 48Mi
+---
+apiVersion: tailscale.com/v1alpha1
+kind: ProxyClass
+metadata:
+  name: proxy-sized-otlp
+spec:
+  statefulSet:
+    pod:
+      tailscaleContainer:
+        resources:
+          requests:
+            cpu: 20m
+            memory: 112Mi

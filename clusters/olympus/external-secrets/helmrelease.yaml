@@ -15,3 +15,18 @@ spec:
         namespace: external-secrets
   values:
     installCRDs: true
+    resources:
+      # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
+      requests:
+        cpu: 10m
+        memory: 48Mi
+    certController:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 80Mi
+    webhook:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 48Mi

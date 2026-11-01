@@ -19,8 +19,9 @@ spec:
           ports:
             - containerPort: 80
           resources:
+            # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
             requests:
               cpu: 10m
-              memory: 16Mi
+              memory: 32Mi
             limits:
               memory: 32Mi
