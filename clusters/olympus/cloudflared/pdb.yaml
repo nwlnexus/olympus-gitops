@@ -1,0 +1,12 @@
+# Keep one tunnel connector up during node drains (system-upgrade-controller) and descheduler
+# evictions: at most one of the two replicas may be evicted at a time (olympus-sdk#707).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cloudflared
+  namespace: cloudflared
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: cloudflared
