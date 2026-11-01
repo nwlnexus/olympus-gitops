@@ -27,7 +27,7 @@ tests:
               stage: extract
             exp_annotations:
               summary: "Memory queue stage extract has a job pending for more than 4h."
-              description: "The oldest pending `extract` job is 4h 10m 0s old. Workers (olympus-sdk#453) are not keeping up or are down; LiteLLM on data-hub is the usual dependency. `kubectl -n memory exec deploy/memory-gateway -- node dist/admin/cli.js queue stats`."
+              description: "The oldest pending `extract` job is 4h 10m 0s old. Workers (olympus-sdk#453) are not keeping up or are down; the cluster LiteLLM and the A9 llama-server are the usual dependency. `kubectl -n memory exec deploy/memory-gateway -- node dist/admin/cli.js queue stats`."
 
   # --- MemoryQueueBacklogStuck: > 24h on any stage, for 30m -----------------------------------
   - name: backlog older than 24h is critical on any stage

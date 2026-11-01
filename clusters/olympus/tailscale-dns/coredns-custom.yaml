@@ -12,8 +12,8 @@ data:
     }
   data-services.server: |
     # Resolves the 'data-hub' short-name → Tailscale IP so cluster pods can reach
-    # the Mac Studio's host services (Ollama :11434 and LiteLLM :4000, plus
-    # PostgreSQL :5432 until WS9 of olympus-sdk#444). They bind 100.95.232.41.
+    # the Mac Studio's host services (llama-server :8082 and :8083). They bind
+    # 100.95.232.41.
     # This is a static IP entry: it does NOT depend on the Tailscale device name.
     data-hub:53 {
         errors

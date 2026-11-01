@@ -1,7 +1,7 @@
 # memory-workers — deployment (olympus-sdk#453, epic #444)
 
 The queue workers of the memory gateway: they take `extract` and `embed` jobs from the Postgres queue
-(`memory.capture_queue`), call the cluster LiteLLM (`../../inference`: A9, then data-hub) and write facts and embeddings back. Design:
+(`memory.capture_queue`), call the cluster LiteLLM (`../../inference`: the A9 llama-server, no fallback) and write facts and embeddings back. Design:
 [`2026-10-21-memory-gateway-contract-design.md`](https://github.com/nwlnexus/olympus-sdk/blob/main/docs/superpowers/specs/2026-10-21-memory-gateway-contract-design.md)
 sections 3.4, 8 and 9. Code, configuration reference and image: `packages/memory-workers` in olympus-sdk
 (`README.md` there lists every setting), published as `ghcr.io/nwlnexus/memory-workers` by
@@ -104,7 +104,7 @@ Expect `extract` jobs to go `pending -> running -> done` (tens of seconds each, 
 If LiteLLM is unreachable from ns `memory` the jobs go `retry` (`memory_worker_llm_requests_total{outcome="network_error"}`)
 with exponential backoff; they are not lost. The pod-to-LiteLLM check of `../gateway/README.md` ("T-TS") covers it.
 
-## Pausing extraction (model maintenance on data-hub)
+## Pausing extraction (model maintenance on the A9)
 
 Extraction is the only stage that needs the GPU model; the embed workers keep running for jobs already queued.
 
@@ -112,7 +112,7 @@ Extraction is the only stage that needs the GPU model; the embed workers keep ru
 # Flux owns spec.replicas and would put it back to 1 on the next reconcile (every 10m): suspend first.
 flux suspend kustomization memory-workers -n flux-system
 kubectl -n memory scale deploy/memory-worker-extract --replicas=0
-# ... maintenance on data-hub ...
+# ... maintenance on the A9 ...
 kubectl -n memory scale deploy/memory-worker-extract --replicas=1
 flux resume kustomization memory-workers -n flux-system
 ```

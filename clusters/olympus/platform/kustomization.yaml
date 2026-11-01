@@ -12,7 +12,7 @@ resources:
 
   # ch-ui, redisinsight, pgadmin and the platform-credentials ExternalSecret were
   # removed (olympus-sdk#446): the ClickHouse and Redis tiers they pointed at are
-  # retired, and Postgres on data-hub goes away at WS9 of olympus-sdk#444.
+  # retired, and the data-hub Postgres is retired too (olympus-sdk#701).
   #
   # tailscale-services.yaml — intentionally excluded from kustomization.
   # postgres-ts/redis-ts/clickhouse-ts/kafka-ts removed; re-add entries to

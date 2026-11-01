@@ -1,7 +1,7 @@
 # Ingress allow rules for the gateway pods. The namespace is default-deny ingress
 # (../networkpolicy.yaml); NetworkPolicies are additive, so this adds three narrow rules.
 # Egress is unrestricted in this namespace (see ../networkpolicy.yaml), so the gateway can reach
-# Postgres, DNS and LiteLLM on data-hub without a rule.
+# the in-cluster Postgres, DNS and LiteLLM without a rule.
 #
 # Postgres needs no change: ../networkpolicy.yaml `allow-store-ingress` already
 # admits every pod in the namespace (podSelector {}), which includes the gateway pods.

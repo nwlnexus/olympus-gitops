@@ -1,5 +1,5 @@
 # Unit tests for the inference alert group (olympus-sdk#569, HW11): LiteLLMDown, InferenceBackendDown,
-# InferenceAllBackendsDown, LiteLLMFailoverActive, LiteLLMFallbackFailed, LiteLLMHighErrorRate.
+# InferenceBackendDownNoFallback, InferenceAllBackendsDown, LiteLLMFailoverActive, LiteLLMFallbackFailed, LiteLLMHighErrorRate.
 # Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease first).
 rule_files:
   - alerting_rules.yml
@@ -39,11 +39,11 @@ tests:
         alertname: LiteLLMDown
         exp_alerts: []
 
-  # --- InferenceBackendDown: an A9 backend failing its probe for 5m ----------------------------
-  - name: a failing A9 backend probe fires after 5m, the litellm probe does not
+  # --- InferenceBackendDown: the A9 coder-light backend (has a data-hub fallback) ---------------
+  - name: a failing A9 coder-light probe fires after 5m, the litellm probe does not
     interval: 1m
     input_series:
-      - series: 'probe_success{job="blackbox-inference-http",service="llama-qwen36-27b",host="a9",instance="http://100.89.177.55:8081/health"}'
+      - series: 'probe_success{job="blackbox-inference-http",service="llama-qwen35-9b",host="a9",instance="http://100.89.177.55:8082/health"}'
         values: "0x20"
       - series: 'probe_success{job="blackbox-inference-http",service="litellm",host="cluster",instance="http://litellm.inference.svc:4000/health/readiness"}'
         values: "0x20"
@@ -57,30 +57,64 @@ tests:
           - exp_labels:
               severity: warning
               job: blackbox-inference-http
-              service: llama-qwen36-27b
+              service: llama-qwen35-9b
               host: a9
-              instance: "http://100.89.177.55:8081/health"
+              instance: "http://100.89.177.55:8082/health"
             exp_annotations:
-              summary: "A9 backend llama-qwen36-27b is down; LiteLLM is serving its aliases from data-hub."
-              description: "GET http://100.89.177.55:8081/health has failed for 5m. LiteLLM falls back to the data-hub twin of every alias on this backend (slower). Check the inference-server-* systemd unit and its watchdog on a9-mega."
+              summary: "A9 backend llama-qwen35-9b is down; LiteLLM is serving coder-light from data-hub."
+              description: "GET http://100.89.177.55:8082/health has failed for 5m. LiteLLM falls back to the data-hub 7B (coder-light-datahub, slower). Check the inference-server-* systemd unit and its watchdog on a9-mega."
+      - eval_time: 10m
+        alertname: InferenceBackendDownNoFallback
+        exp_alerts: []
 
   - name: a healthy A9 backend is quiet
     interval: 1m
     input_series:
+      - series: 'probe_success{job="blackbox-inference-http",service="llama-qwen35-9b",host="a9",instance="http://100.89.177.55:8082/health"}'
+        values: "1x20"
       - series: 'probe_success{job="blackbox-inference-http",service="llama-qwen36-27b",host="a9",instance="http://100.89.177.55:8081/health"}'
         values: "1x20"
     alert_rule_test:
       - eval_time: 15m
         alertname: InferenceBackendDown
         exp_alerts: []
+      - eval_time: 15m
+        alertname: InferenceBackendDownNoFallback
+        exp_alerts: []
 
-  # --- InferenceAllBackendsDown: A9 and data-hub both down for the same service ----------------
-  - name: both hosts down for a service fires
+  # --- InferenceBackendDownNoFallback: an A9 backend without a data-hub twin --------------------
+  - name: a failing A9 27B probe fires the no-fallback alert, not the fallback one
     interval: 1m
     input_series:
       - series: 'probe_success{job="blackbox-inference-http",service="llama-qwen36-27b",host="a9",instance="http://100.89.177.55:8081/health"}'
         values: "0x20"
-      - series: 'probe_success{job="blackbox-datahub-http",service="llama-qwen36-27b",instance="http://100.95.232.41:8081/health"}'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: InferenceBackendDownNoFallback
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: InferenceBackendDownNoFallback
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: blackbox-inference-http
+              service: llama-qwen36-27b
+              host: a9
+              instance: "http://100.89.177.55:8081/health"
+            exp_annotations:
+              summary: "A9 backend llama-qwen36-27b is down and has no fallback."
+              description: "GET http://100.89.177.55:8081/health has failed for 5m. The aliases it serves (memory-extract, coder-heavy, coder-medium) have no data-hub fallback, so requests to them fail; the memory worker retries extract jobs itself. Check the inference-server-* systemd unit and its watchdog on a9-mega."
+      - eval_time: 10m
+        alertname: InferenceBackendDown
+        exp_alerts: []
+
+  # --- InferenceAllBackendsDown: A9 and data-hub both down for coder-light ----------------------
+  - name: both hosts down for coder-light fires
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-inference-http",service="llama-qwen35-9b",host="a9",instance="http://100.89.177.55:8082/health"}'
+        values: "0x20"
+      - series: 'probe_success{job="blackbox-datahub-http",service="llama-qwen25-7b",instance="http://100.95.232.41:8082/health"}'
         values: "0x20"
     alert_rule_test:
       - eval_time: 3m
@@ -92,19 +126,19 @@ tests:
           - exp_labels:
               severity: critical
               job: blackbox-inference-http
-              service: llama-qwen36-27b
+              service: llama-qwen35-9b
               host: a9
-              instance: "http://100.89.177.55:8081/health"
+              instance: "http://100.89.177.55:8082/health"
             exp_annotations:
-              summary: "llama-qwen36-27b is down on both the A9 and data-hub."
-              description: "Both backends for llama-qwen36-27b have failed their /health probe for 5m. There is no further fallback: requests to the aliases it serves fail."
+              summary: "coder-light is down on both the A9 and data-hub."
+              description: "Both backends for coder-light (A9 llama-qwen35-9b, data-hub llama-qwen25-7b) have failed their /health probe for 5m. There is no further fallback: requests to coder-light fail."
 
   - name: A9 down with data-hub up is quiet
     interval: 1m
     input_series:
-      - series: 'probe_success{job="blackbox-inference-http",service="llama-qwen36-27b",host="a9",instance="http://100.89.177.55:8081/health"}'
+      - series: 'probe_success{job="blackbox-inference-http",service="llama-qwen35-9b",host="a9",instance="http://100.89.177.55:8082/health"}'
         values: "0x20"
-      - series: 'probe_success{job="blackbox-datahub-http",service="llama-qwen36-27b",instance="http://100.95.232.41:8081/health"}'
+      - series: 'probe_success{job="blackbox-datahub-http",service="llama-qwen25-7b",instance="http://100.95.232.41:8082/health"}'
         values: "1x20"
     alert_rule_test:
       - eval_time: 15m
@@ -115,7 +149,7 @@ tests:
   - name: an increasing successful-fallback counter fires
     interval: 1m
     input_series:
-      - series: 'litellm_deployment_successful_fallbacks_total{job="inference-litellm",requested_model="memory-extract",fallback_model="memory-extract-datahub",pod="litellm-a"}'
+      - series: 'litellm_deployment_successful_fallbacks_total{job="inference-litellm",requested_model="coder-light",fallback_model="coder-light-datahub",pod="litellm-a"}'
         values: "0x5 1x5 2x5 3x5"
     alert_rule_test:
       - eval_time: 4m
@@ -126,17 +160,17 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
-              requested_model: memory-extract
+              requested_model: coder-light
             exp_annotations:
-              summary: "LiteLLM fell back from the A9 to data-hub for memory-extract."
-              description: "2 requests for memory-extract were served by the data-hub fallback in the last 15m because the A9 deployment failed. Check InferenceBackendDown and litellm_deployment_failure_responses_total by exception_class."
+              summary: "LiteLLM fell back from the A9 to data-hub for coder-light."
+              description: "2 requests for coder-light were served by the data-hub fallback in the last 15m because the A9 deployment failed. Check InferenceBackendDown and litellm_deployment_failure_responses_total by exception_class."
 
   # A fallback counter is created by the first fallback after a LiteLLM start; increase() does not
   # count a series' first appearance, so the 2026-10-28 drill (counter born at 3) did not fire.
   - name: a successful-fallback counter that first appears at 3 fires
     interval: 1m
     input_series:
-      - series: 'litellm_deployment_successful_fallbacks_total{job="inference-litellm",requested_model="memory-extract",fallback_model="memory-extract-datahub",pod="litellm-a"}'
+      - series: 'litellm_deployment_successful_fallbacks_total{job="inference-litellm",requested_model="coder-light",fallback_model="coder-light-datahub",pod="litellm-a"}'
         values: "_x5 3x10"
     alert_rule_test:
       - eval_time: 3m
@@ -147,15 +181,15 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
-              requested_model: memory-extract
+              requested_model: coder-light
             exp_annotations:
-              summary: "LiteLLM fell back from the A9 to data-hub for memory-extract."
-              description: "3 requests for memory-extract were served by the data-hub fallback in the last 15m because the A9 deployment failed. Check InferenceBackendDown and litellm_deployment_failure_responses_total by exception_class."
+              summary: "LiteLLM fell back from the A9 to data-hub for coder-light."
+              description: "3 requests for coder-light were served by the data-hub fallback in the last 15m because the A9 deployment failed. Check InferenceBackendDown and litellm_deployment_failure_responses_total by exception_class."
 
   - name: a flat successful-fallback counter is quiet
     interval: 1m
     input_series:
-      - series: 'litellm_deployment_successful_fallbacks_total{job="inference-litellm",requested_model="memory-extract",fallback_model="memory-extract-datahub",pod="litellm-a"}'
+      - series: 'litellm_deployment_successful_fallbacks_total{job="inference-litellm",requested_model="coder-light",fallback_model="coder-light-datahub",pod="litellm-a"}'
         values: "7x30"
     alert_rule_test:
       - eval_time: 20m
@@ -166,7 +200,7 @@ tests:
   - name: an increasing failed-fallback counter fires
     interval: 1m
     input_series:
-      - series: 'litellm_deployment_failed_fallbacks_total{job="inference-litellm",requested_model="memory-extract",fallback_model="memory-extract-datahub",pod="litellm-a"}'
+      - series: 'litellm_deployment_failed_fallbacks_total{job="inference-litellm",requested_model="coder-light",fallback_model="coder-light-datahub",pod="litellm-a"}'
         values: "0x5 1x5 2x5 3x5"
     alert_rule_test:
       - eval_time: 4m
@@ -177,15 +211,15 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
-              requested_model: memory-extract
+              requested_model: coder-light
             exp_annotations:
-              summary: "LiteLLM requests for memory-extract failed on the A9 and on the data-hub fallback."
-              description: "2 requests for memory-extract failed on both backends in the last 15m; the client got the error."
+              summary: "LiteLLM requests for coder-light failed on the A9 and on the data-hub fallback."
+              description: "2 requests for coder-light failed on both backends in the last 15m; the client got the error."
 
   - name: a flat failed-fallback counter is quiet
     interval: 1m
     input_series:
-      - series: 'litellm_deployment_failed_fallbacks_total{job="inference-litellm",requested_model="memory-extract",fallback_model="memory-extract-datahub",pod="litellm-a"}'
+      - series: 'litellm_deployment_failed_fallbacks_total{job="inference-litellm",requested_model="coder-light",fallback_model="coder-light-datahub",pod="litellm-a"}'
         values: "7x30"
     alert_rule_test:
       - eval_time: 20m
