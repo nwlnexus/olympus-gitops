@@ -28,8 +28,8 @@ pinned to the agent-services onodes, olympus-sdk#567):
   onode-0636e4/062caa stay usable) and `olympus.io/arch=arm64` (their images are multi-arch
   indexes). Pods reach the tailnet (LiteLLM's backends) through the node's own tailscaled, and every
   node, the Mac VMs included, is `tag:k8s` on the tailnet.
-- **Spread across the amd64 nodes only:** the backup CronJob. Its `memory-backups` PVC is qnap-nfs and
-  the Mac VMs have no NFS client (nfs-common), so it has no arm64 toleration until they do.
+- **The backup CronJob spreads too, the Mac VMs included:** its `memory-backups` PVC is qnap-nfs, and the
+  VMs have had the NFS client (nfs-common, node-prereqs) since olympus-infra#128.
 - **Still pinned** (nodeSelector `olympus.io/role: agent-services` plus the toleration): Postgres
   (stateful, qnap-iscsi RWO; a move is a detach/attach) and the embedder (amd64-only image).
 `Job/memory-migrate` is not pinned: it is a short-lived client, and changing its template would
