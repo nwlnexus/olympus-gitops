@@ -73,16 +73,16 @@ spec:
         requests:
           cpu: 20m
           memory: 640Mi
+      persistence:
+        enabled: true
+        storageClass: qnap-iscsi
+        size: 10Gi
     # The loki-sc-rules sidecar container.
     sidecar:
       resources:
         requests:
           cpu: 10m
           memory: 112Mi
-      persistence:
-        enabled: true
-        storageClass: qnap-iscsi
-        size: 10Gi
     # Disable the SSD/distributed components + caches + test/canary for single-binary.
     backend:
       replicas: 0
