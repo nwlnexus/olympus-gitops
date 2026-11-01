@@ -34,13 +34,13 @@ spec:
         - web.enable-lifecycle
         - web.enable-remote-write-receiver
       resources:
-        # 7-day max working set x 1.2 is 2368Mi, above the 2Gi limit: the request is capped at the limit
-        # (docs/sizing/2026-11-01-requests.md lists this conflict; the limit is unchanged).
+        # Request = 7-day p95 working set 1862Mi x 1.2 = 2240Mi. Limit raised 2Gi -> 3Gi (owner decision
+        # 2026-11-01): the 7-day peak of 1994Mi was 97% of the old limit (docs/sizing/2026-11-01-requests.md).
         requests:
           cpu: 40m
-          memory: 2Gi
+          memory: 2240Mi
         limits:
-          memory: 2Gi
+          memory: 3Gi
     # Alertmanager → Resend email (Phase 7). Server auto-wires to the bundled AM.
     configmapReload:
       prometheus:
