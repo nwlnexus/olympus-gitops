@@ -43,6 +43,8 @@ Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9,
 | 11-01 | pods per node after #186 | 0 | data-hub-vm 14, onode-0314ac 10, onode-030c31 10, onode-0312ce 6, onode-0636e4 5, onode-062caa 5, naraka-01 5, mmini-01-vm 3, mmini-02-vm 1; 18 non-CI pods on arm64; no exec format/CrashLoop | - |
 | 11-01 | loki HelmRelease Stalled (UpgradeFailed: StatefulSet spec Forbidden) | - | cause: #185 moved singleBinary.persistence under sidecar -> storageClassName dropped; fixed by gitops #187 | b9be4a1 |
 | 11-01 | regression sweep #185+#186 renders (all HelmReleases + kustomize dirs) | 0 | only loki unintended; all else excluded/intended; after #187 loki HR True UpgradeSucceeded, loki-0 20m/640Mi | gitops main |
+| 11-01 | gitops #188 merged (memory stack unpinned; owner decision) | - | verifier PASS; embed worker on data-hub-vm, extract worker on mmini-01-vm; gateway/litellm on amd64 non-agent nodes; postgres+embedder still pinned; backup amd64-only (VMs lack nfs-common) | gitops main |
+| 11-01 | pod egress from mmini-01-vm (extract worker) | 0 | litellm readiness 200, A9 /health 200; postgres connections from 10.42.8.9 and 10.42.10.19; queue embed done 3, extract done 1 (20 min) | - |
 | 11-01 | prometheus limit 2Gi->3Gi, request 2240Mi (owner yes) | 0 | helm template: requests 40m/2240Mi, limits memory 3Gi | 0e8b3c7 |
 | 11-01 | steps 2-3 validation: yamllint; kustomize+kubeconform root 53 valid; helm template descheduler 0.37.0; policy decoded by v0.37.0 binary | 0 | 0 invalid; CronJob */30; strict decode OK | 4364791 |
 | 11-01 | claim-verifier olympus-sdk#708 | - | PASS: 3 image jobs build linux/arm64 (gateway pnpm under QEMU 358s; ingress-discovery cross-compile 35s); no push on PR | 8ca6280 |
@@ -55,6 +57,7 @@ Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9,
 - Exceptions to Done-when 1 (not Flux-managed): 1password/onepassword-connect (hand Helm), trident-controller (TridentOrchestrator CR), tailscale/nameserver (DNSConfig has no resources) = 9 containers.
 - Kept: embedder cpu 2 (throughput reservation); redpanda broker (chart ties requests to limits). prometheus-server request capped at its 2Gi limit (peak 1994Mi): limit raise is an owner decision.
 - Descheduler thresholds pods 16/19 (cpu/mem 20/50 guard): computed per-node % after step 1 showed 20/40 would never fire. Excluded ns: kube-system, flux-system, trident, tailscale, arc-system, arc-runners, memory, system-upgrade, descheduler; iSCSI-PVC pods protected; label exclusions postgres/redpanda/prometheus/loki/tempo; max 3/node, 10/run; real mode (no soak).
+- Owner 2026-11-01: memory stack may spread (drops the #567 pin); embedder (amd64 image) and postgres (iSCSI) stay pinned; postgres-backup amd64-only until nfs-common on the Mac VMs (olympus-infra follow-up).
 - Order: requests -> spread -> descheduler -> arm64 opt-in (descheduler needs requests to judge utilisation).
 
 ## Blocked-on
