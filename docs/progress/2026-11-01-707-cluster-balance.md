@@ -13,9 +13,9 @@
 
 | # | Check | Expected | Status |
 |---|---|---|---|
-| 1 | jq: running non-DS containers without requests (excl. kube-system, flux-system) | 0 (+ listed exceptions) | todo |
+| 1 | jq: running non-DS containers without requests (excl. kube-system, flux-system) | 0 (+ listed exceptions) | PASS 11-01 18:10 after #187 (only the 9 listed exceptions) — recheck in final verify |
 | 2 | descheduler logs + PDB + k3s-health-gate.sh | >=1 eviction, gate PASS | todo |
-| 3 | pods per node | max <=35%, naraka-01 >3, >=5 on arm64 | todo |
+| 3 | pods per node | max <=35%, naraka-01 >3, >=5 on arm64 | PASS 11-01 17:59 (max data-hub-vm 14/59 = 24%; naraka-01 5; 18 non-CI on arm64) |
 | 4 | skopeo per arm64 workload; events on arm64 nodes 24 h | arm64 in index; none | todo |
 | 5 | imagetools inspect x3 | arm64 listed | PASS 11-01 (skopeo: 3 OCI indexes amd64+arm64) |
 
@@ -28,7 +28,7 @@ Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9,
 | 1 | Requests from Prometheus p95 7 d usage, all workloads without requests | opus survey, sonnet edits | done 9fdc161 (docs/sizing/2026-11-01-requests.md) |
 | 2 | topologySpread (hostname, ScheduleAnyway) on multi-replica; PDBs | opus subagent | done 01e11c0 (spread on 5 multi-replica Deployments; cloudflared PDB) |
 | 3 | descheduler via Flux (CronJob 30 min; exclusions; PDB-aware) | opus subagent | done 4364791 (docs/sizing/2026-11-01-descheduler.md) |
-| 4 | arm64 opt-in: toleration for multi-arch stateless; amd64 pin for the rest; pin new index digests | opus subagent | doing |
+| 4 | arm64 opt-in: toleration for multi-arch stateless; amd64 pin for the rest; pin new index digests | opus subagent | merged #186 2a46669 |
 | 5 | olympus-sdk: multi-arch builds for our 3 images | sonnet subagent | merged 6d4faef; indexes published |
 
 ## Evidence log
@@ -39,6 +39,10 @@ Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9,
 | 11-01 | pods per node after #185 (non-DS) | 0 | onode-030c31 15, onode-0314ac 12, naraka-01 12, onode-0312ce 10, onode-0636e4 5, onode-062caa 5 | - |
 | 11-01 | descheduler run 17:30Z | 0 | 030c31 overutilized; 4 underutilized; evicted 0 (all pods < minPodAge 1h after the 17:17 rollout) | - |
 | 11-01 | skopeo --raw sha-6d4faef / 6d4faef | 0 | memory-gateway index 161d7856 = recorded DIGEST; memory-workers b2e00a4a = DIGEST; ingress-discovery dcf85070; all linux/amd64,linux/arm64 | sdk 6d4faef |
+| 11-01 | gitops #186 merged (arm64 opt-in, digest pins) | - | verifier PASS (Hermes 1.45.0 accepts iconUrl; pods IPv4-only) | 2a46669 |
+| 11-01 | pods per node after #186 | 0 | data-hub-vm 14, onode-0314ac 10, onode-030c31 10, onode-0312ce 6, onode-0636e4 5, onode-062caa 5, naraka-01 5, mmini-01-vm 3, mmini-02-vm 1; 18 non-CI pods on arm64; no exec format/CrashLoop | - |
+| 11-01 | loki HelmRelease Stalled (UpgradeFailed: StatefulSet spec Forbidden) | - | cause: #185 moved singleBinary.persistence under sidecar -> storageClassName dropped; fixed by gitops #187 | b9be4a1 |
+| 11-01 | regression sweep #185+#186 renders (all HelmReleases + kustomize dirs) | 0 | only loki unintended; all else excluded/intended; after #187 loki HR True UpgradeSucceeded, loki-0 20m/640Mi | gitops main |
 | 11-01 | prometheus limit 2Gi->3Gi, request 2240Mi (owner yes) | 0 | helm template: requests 40m/2240Mi, limits memory 3Gi | 0e8b3c7 |
 | 11-01 | steps 2-3 validation: yamllint; kustomize+kubeconform root 53 valid; helm template descheduler 0.37.0; policy decoded by v0.37.0 binary | 0 | 0 invalid; CronJob */30; strict decode OK | 4364791 |
 | 11-01 | claim-verifier olympus-sdk#708 | - | PASS: 3 image jobs build linux/arm64 (gateway pnpm under QEMU 358s; ingress-discovery cross-compile 35s); no push on PR | 8ca6280 |
@@ -59,4 +63,6 @@ Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9,
 
 ## Next
 
-Steps 1 (survey) and 5 in parallel.
+Done-when 2: descheduler run with >=1 eviction (pods eligible after minPodAge 1h from the ~17:54/18:05 rollouts, so from ~19:00Z) + health gate. Done-when 4: 24 h no exec format/CrashLoop on arm64 (from 17:55Z 11-01 -> 17:55Z 11-02). Then final verifier, finish branch, close #707.
+
+OLD: Steps 1 (survey) and 5 in parallel.
