@@ -14,7 +14,7 @@
 | # | Check | Expected | Status |
 |---|---|---|---|
 | 1 | jq: running non-DS containers without requests (excl. kube-system, flux-system) | 0 (+ listed exceptions) | PASS 11-01 18:10 after #187 (only the 9 listed exceptions) — recheck in final verify |
-| 2 | descheduler logs + PDB + k3s-health-gate.sh | >=1 eviction, gate PASS | todo |
+| 2 | descheduler logs + PDB + k3s-health-gate.sh | >=1 eviction, gate PASS | PARTIAL 11-01 19:07: runs every 30 min cleanly, gate PASS; 0 evictions because 0 over-utilised nodes (rollouts balanced first); dry-run proof blocked [Shared Cluster Mutation] -> owner decision |
 | 3 | pods per node | max <=35%, naraka-01 >3, >=5 on arm64 | PASS 11-01 17:59 (max data-hub-vm 14/59 = 24%; naraka-01 5; 18 non-CI on arm64) |
 | 4 | skopeo per arm64 workload; events on arm64 nodes 24 h | arm64 in index; none | todo |
 | 5 | imagetools inspect x3 | arm64 listed | PASS 11-01 (skopeo: 3 OCI indexes amd64+arm64) |
@@ -45,6 +45,11 @@ Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9,
 | 11-01 | regression sweep #185+#186 renders (all HelmReleases + kustomize dirs) | 0 | only loki unintended; all else excluded/intended; after #187 loki HR True UpgradeSucceeded, loki-0 20m/640Mi | gitops main |
 | 11-01 | gitops #188 merged (memory stack unpinned; owner decision) | - | verifier PASS; embed worker on data-hub-vm, extract worker on mmini-01-vm; gateway/litellm on amd64 non-agent nodes; postgres+embedder still pinned; backup amd64-only (VMs lack nfs-common) | gitops main |
 | 11-01 | pod egress from mmini-01-vm (extract worker) | 0 | litellm readiness 200, A9 /health 200; postgres connections from 10.42.8.9 and 10.42.10.19; queue embed done 3, extract done 1 (20 min) | - |
+| 11-01 | descheduler runs 18:00/18:30/19:00 | 0 | totalEvicted=0; 19:00: 7 underutilized, 0 overutilized (pods 5-15%, cpu 1-13%); topology spread "already balanced" | - |
+| 11-01 | one-off --dry-run Job with tightened thresholds | denied | auto-mode [Shared Cluster Mutation]; temp file removed | - |
+| 11-01 | k3s-health-gate.sh (infra main) | 0 | RESULT: PASS (22 checks); 9/9 Ready; flux 31/31 + 25/25; 107 pods no problems | - |
+| 11-01 | pods per node 19:08 | 0 | data-hub-vm 15, onode-0314ac 12, onode-030c31 11, naraka-01 7, onode-0312ce 6, mmini-01-vm 4, onode-0636e4 2, onode-062caa 1, mmini-02-vm 1 (max 15/59 = 25%) | - |
+| 11-01 | mini VMs 5f01 | 0 | 0 on both (owner cleanup) | - |
 | 11-01 | prometheus limit 2Gi->3Gi, request 2240Mi (owner yes) | 0 | helm template: requests 40m/2240Mi, limits memory 3Gi | 0e8b3c7 |
 | 11-01 | steps 2-3 validation: yamllint; kustomize+kubeconform root 53 valid; helm template descheduler 0.37.0; policy decoded by v0.37.0 binary | 0 | 0 invalid; CronJob */30; strict decode OK | 4364791 |
 | 11-01 | claim-verifier olympus-sdk#708 | - | PASS: 3 image jobs build linux/arm64 (gateway pnpm under QEMU 358s; ingress-discovery cross-compile 35s); no push on PR | 8ca6280 |
@@ -62,7 +67,7 @@ Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9,
 
 ## Blocked-on
 
-- none
+- Done-when 2 wording: owner to choose (amend to "runs cleanly, evicts when a node is over target" | owner runs the dry-run Job | wait for organic imbalance).
 
 ## Next
 
