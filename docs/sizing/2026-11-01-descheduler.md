@@ -121,7 +121,7 @@ Namespaces excluded wholesale (`namespaceLabelSelector`, `kubernetes.io/metadata
 | tailscale | operator-managed proxies (`ts-*` StatefulSets): each move is a tailnet blip for its Service, and the nameserver |
 | arc-system | ARC controller and listeners; a listener restart drops queued job assignments |
 | arc-runners | ephemeral runners must never be evicted mid-job |
-| memory | postgres (stateful singleton), the single-replica extract worker; the rest is pinned to the two agent-services nodes and already spread by anti-affinity |
+| memory | postgres (stateful singleton) and the single-replica extract worker. Since olympus-sdk#707 the gateway, workers and indexer may run on any node (the arm64 Mac VMs included) and are placed evenly at each rollout by their topology spread (ScheduleAnyway) and anti-affinity; the exclusion is kept (policy unchanged) and is worth revisiting if they drift into skew |
 | system-upgrade | the controller that drains nodes for k3s upgrades must not be evicted during one |
 | descheduler | itself |
 

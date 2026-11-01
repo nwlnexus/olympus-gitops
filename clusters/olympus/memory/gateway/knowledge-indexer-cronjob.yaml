@@ -114,13 +114,18 @@ spec:
                 - name: known-hosts
                   mountPath: /etc/knowledge
                   readOnly: true
-          # olympus-sdk#567: the memory stack runs on the agent-services onodes (onode-0636e4/062caa).
-          nodeSelector:
-            olympus.io/role: agent-services
+          # Spreads across the cluster, the arm64 Mac VMs included (owner decision 2026-11-01,
+          # olympus-sdk#707; pinned to the agent-services onodes before, #567). No nodeSelector: the
+          # agent-services toleration keeps onode-0636e4/062caa usable, the arm64 one opts in to the
+          # Mac VMs (the memory-gateway image, and alpine/git for the clone is a multi-arch index: linux/amd64 + linux/arm64).
           tolerations:
             - key: olympus.io/role
               operator: Equal
               value: agent-services
+              effect: NoSchedule
+            - key: olympus.io/arch
+              operator: Equal
+              value: arm64
               effect: NoSchedule
           containers:
             - name: index

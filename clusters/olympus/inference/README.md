@@ -17,7 +17,7 @@ Not here: `memory-embed` (the gateway and workers embed through `memory/embedder
 |---|---|
 | `litellm-config.yaml` | model list, fallbacks, retries, timeouts, Prometheus callback (ConfigMap `litellm-config-<hash>`) |
 | `custom_auth.py` | per-client keys without a database (absorbs olympus-sdk#490) |
-| `litellm.yaml` | `Service/litellm` (:4000), `PodDisruptionBudget/litellm`, `Deployment/litellm` (2 replicas, agent-services onodes) |
+| `litellm.yaml` | `Service/litellm` (:4000), `PodDisruptionBudget/litellm`, `Deployment/litellm` (2 replicas, spread across nodes incl. the arm64 Mac VMs, olympus-sdk#707) |
 | `externalsecret.yaml` | `Secret/litellm` (master key) and `Secret/litellm-client-keys` (one file per client) |
 | `networkpolicy.yaml` | default deny; in: memory-worker-extract, Prometheus, blackbox; out: CoreDNS, the A9 on 8081-8082 and 8084-8085, data-hub on 8082 only |
 
@@ -71,7 +71,7 @@ Failover is visible as `litellm_deployment_successful_fallbacks_total{requested_
 ## Verify
 
 ```sh
-kubectl -n inference get pods -o wide            # 2/2 Running on onode-0636e4 / onode-062caa
+kubectl -n inference get pods -o wide            # 2/2 Running, on two different nodes
 kubectl -n inference logs deploy/litellm | grep -m1 "Uvicorn running"
 # from a memory worker pod (the only client the NetworkPolicy admits):
 kubectl -n memory exec deploy/memory-worker-extract -- python -c \
