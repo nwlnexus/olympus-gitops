@@ -7,6 +7,9 @@ kind: Service
 metadata:
   name: otlp-ts
   namespace: otel
+  labels:
+    # Proxy requests sized for this proxy's traffic (tailscale-operator/proxyclass.yaml).
+    tailscale.com/proxy-class: proxy-sized-otlp
   annotations:
     tailscale.com/hostname: "obs-otlp"
 spec:

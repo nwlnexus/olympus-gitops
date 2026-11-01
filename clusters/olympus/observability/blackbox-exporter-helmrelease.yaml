@@ -32,9 +32,10 @@ spec:
     fullnameOverride: blackbox-exporter
     replicas: 1
     resources:
+      # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
       requests:
         cpu: 10m
-        memory: 32Mi
+        memory: 64Mi
       limits:
         memory: 64Mi
     config:

@@ -260,9 +260,11 @@ spec:
             # Measured (README: "Sizing"): throughput is linear in CPUs, about 7 embeddings/s per CPU
             # for 80-character facts and 3.4/s per CPU for 200-character ones. Memory: 1.5 GB idle,
             # 2.1 GB peak under the worst test load (8 x 8,000-character batches).
+            # Memory: 7-day max working set x 1.2 (ML workload), docs/sizing/2026-11-01-requests.md.
+            # CPU stays at 2: the measured p95 (14m) is idle time; the request is the throughput reservation above.
             requests:
               cpu: "2"
-              memory: 2Gi
+              memory: 2496Mi
             limits:
               # Not unlimited: the onodes are also the k3s control plane and etcd members.
               cpu: "6"

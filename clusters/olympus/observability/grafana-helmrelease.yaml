@@ -33,6 +33,11 @@ spec:
     # one releases the volume, so it can never attach (2026-10-27: Init stuck 6h, Flux upgrade stalled).
     deploymentStrategy:
       type: Recreate
+    resources:
+      # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
+      requests:
+        cpu: 10m
+        memory: 384Mi
     persistence:
       enabled: true
       storageClassName: qnap-iscsi

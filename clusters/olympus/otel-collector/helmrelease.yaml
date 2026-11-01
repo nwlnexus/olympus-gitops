@@ -27,6 +27,11 @@ spec:
       reloader.stakater.com/auto: "true"
     image:
       repository: otel/opentelemetry-collector-contrib
+    resources:
+      # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
+      requests:
+        cpu: 10m
+        memory: 288Mi
     # Prometheus receiver k8s service discovery needs cluster read access.
     clusterRole:
       create: true

@@ -38,9 +38,10 @@ spec:
     # nwlnexus/olympus-sdk#392 (set `metrics:` here and add a scrape + a
     # NetworkPolicy ingress rule from the scraper's namespace then).
     resources:
+      # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
       requests:
-        cpu: 100m
-        memory: 128Mi
+        cpu: 10m
+        memory: 80Mi
       limits:
         cpu: 500m
         memory: 256Mi

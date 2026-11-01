@@ -34,14 +34,27 @@ spec:
         - web.enable-lifecycle
         - web.enable-remote-write-receiver
       resources:
+        # 7-day max working set x 1.2 is 2368Mi, above the 2Gi limit: the request is capped at the limit
+        # (docs/sizing/2026-11-01-requests.md lists this conflict; the limit is unchanged).
         requests:
-          cpu: 100m
-          memory: 512Mi
+          cpu: 40m
+          memory: 2Gi
         limits:
           memory: 2Gi
     # Alertmanager → Resend email (Phase 7). Server auto-wires to the bundled AM.
+    configmapReload:
+      prometheus:
+        resources:
+          # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
+          requests:
+            cpu: 10m
+            memory: 48Mi
     alertmanager:
       enabled: true
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
       # Alertmanager itself is ClusterIP-only; the "View in Alertmanager" button in the e-mails
       # opens Grafana's alert list instead (Alertmanager datasource in grafana-helmrelease.yaml).
       baseURL: https://grafana.nwlnexus.net/alerting/list
@@ -665,6 +678,10 @@ spec:
       enabled: false
     kube-state-metrics:
       enabled: true
+      resources:
+        requests:
+          cpu: 10m
+          memory: 112Mi
       # Surface `cluster` on mgmt's kube_* series via the service-endpoints labelmap
       # (uniform with the remote clusters, whose otel relabel sets cluster).
       customLabels:
