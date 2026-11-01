@@ -35,14 +35,17 @@ spec:
             runAsGroup: 999
             seccompProfile:
               type: RuntimeDefault
-          # Spreads across the amd64 nodes (owner decision 2026-11-01, olympus-sdk#707; pinned to the
-          # agent-services onodes before, #567). Deliberately NO arm64 toleration: the memory-backups
-          # PVC is qnap-nfs and the Mac VMs have no NFS client (nfs-common not installed, checked
-          # 2026-11-01), so the kubelet could not mount it there. Add the toleration once they do.
+          # Spreads across the cluster, the arm64 Mac VMs included (owner decision 2026-11-01, olympus-sdk#707;
+          # pinned to the agent-services onodes before, #567). The memory-backups PVC is qnap-nfs: the Mac VMs
+          # got nfs-common with node-prereqs (olympus-infra#128), and pgvector pg16 is a multi-arch image.
           tolerations:
             - key: olympus.io/role
               operator: Equal
               value: agent-services
+              effect: NoSchedule
+            - key: olympus.io/arch
+              operator: Equal
+              value: arm64
               effect: NoSchedule
           containers:
             - name: pg-dump
