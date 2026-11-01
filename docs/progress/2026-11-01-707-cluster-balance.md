@@ -26,15 +26,18 @@ Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9,
 | Step | What | Model | Status |
 |---|---|---|---|
 | 1 | Requests from Prometheus p95 7 d usage, all workloads without requests | opus survey, sonnet edits | done 9fdc161 (docs/sizing/2026-11-01-requests.md) |
-| 2 | topologySpread (hostname, ScheduleAnyway) on multi-replica; PDBs | opus subagent | doing |
-| 3 | descheduler via Flux (CronJob 30 min; exclusions; PDB-aware) | opus subagent | doing |
+| 2 | topologySpread (hostname, ScheduleAnyway) on multi-replica; PDBs | opus subagent | done 01e11c0 (spread on 5 multi-replica Deployments; cloudflared PDB) |
+| 3 | descheduler via Flux (CronJob 30 min; exclusions; PDB-aware) | opus subagent | done 4364791 (docs/sizing/2026-11-01-descheduler.md) |
 | 4 | arm64 opt-in: toleration + soft affinity for multi-arch workloads; amd64 pin for the rest | sonnet survey, opus review | todo |
-| 5 | olympus-sdk: multi-arch builds for our 3 images | sonnet subagent | doing |
+| 5 | olympus-sdk: multi-arch builds for our 3 images | sonnet subagent | olympus-sdk#708 verifier PASS (build), automerge; publish check after merge |
 
 ## Evidence log
 
 | When | Command | Exit | Key output | Commit |
 |---|---|---|---|---|
+| 11-01 | prometheus limit 2Gi->3Gi, request 2240Mi (owner yes) | 0 | helm template: requests 40m/2240Mi, limits memory 3Gi | 0e8b3c7 |
+| 11-01 | steps 2-3 validation: yamllint; kustomize+kubeconform root 53 valid; helm template descheduler 0.37.0; policy decoded by v0.37.0 binary | 0 | 0 invalid; CronJob */30; strict decode OK | 4364791 |
+| 11-01 | claim-verifier olympus-sdk#708 | - | PASS: 3 image jobs build linux/arm64 (gateway pnpm under QEMU 358s; ingress-discovery cross-compile 35s); no push on PR | 8ca6280 |
 | 11-01 | yamllint; kustomize+kubeconform 31 dirs; promtool; helm template 22 HelmReleases | 0 | failed=0; all requests on intended containers | 9fdc161 |
 
 ## Decisions
@@ -43,6 +46,7 @@ Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9,
 - Requests from measured usage (p95), not guesses; no new limits.
 - Exceptions to Done-when 1 (not Flux-managed): 1password/onepassword-connect (hand Helm), trident-controller (TridentOrchestrator CR), tailscale/nameserver (DNSConfig has no resources) = 9 containers.
 - Kept: embedder cpu 2 (throughput reservation); redpanda broker (chart ties requests to limits). prometheus-server request capped at its 2Gi limit (peak 1994Mi): limit raise is an owner decision.
+- Descheduler thresholds pods 16/19 (cpu/mem 20/50 guard): computed per-node % after step 1 showed 20/40 would never fire. Excluded ns: kube-system, flux-system, trident, tailscale, arc-system, arc-runners, memory, system-upgrade, descheduler; iSCSI-PVC pods protected; label exclusions postgres/redpanda/prometheus/loki/tempo; max 3/node, 10/run; real mode (no soak).
 - Order: requests -> spread -> descheduler -> arm64 opt-in (descheduler needs requests to judge utilisation).
 
 ## Blocked-on
