@@ -83,8 +83,7 @@ spec:
     # data-hub host probes via blackbox-exporter (observability/blackbox-exporter).
     # data-hub is a Mac Studio host, not a cluster; addresses are its tailnet IP
     # (100.95.232.41) on purpose: the probes must fail if a service is not bound to
-    # the tailnet address (Postgres has been bound to 127.0.0.1 only since July after
-    # a boot-time bind race with tailscaled; see DataHubPostgresNotOnTailnet).
+    # the tailnet address.
     # TODO(olympus-sdk#447): add an authenticated LiteLLM /v1/models check (needs a
     # bearer key) and alert on an empty model list. Needs a Secret and a mechanism
     # beyond a plain http_2xx probe, so it is deferred until the key exists.
@@ -100,9 +99,6 @@ spec:
         scrape_interval: 30s
         scrape_timeout: 10s
         static_configs:
-          - targets: ["http://100.95.232.41:8081/health"]
-            labels:
-              service: llama-qwen36-27b
           - targets: ["http://100.95.232.41:8082/health"]
             labels:
               service: llama-qwen25-7b
@@ -116,32 +112,11 @@ spec:
             target_label: instance
           - target_label: __address__
             replacement: blackbox-exporter.observability.svc:9115
-      - job_name: blackbox-datahub-tcp
-        metrics_path: /probe
-        params:
-          module: [tcp_connect]
-        scrape_interval: 30s
-        scrape_timeout: 10s
-        static_configs:
-          - targets: ["100.95.232.41:5432"]
-            labels:
-              service: postgres
-        relabel_configs:
-          - source_labels: [__address__]
-            target_label: __param_target
-          - source_labels: [__param_target]
-            target_label: instance
-          - target_label: __address__
-            replacement: blackbox-exporter.observability.svc:9115
       # llama-server on data-hub (olympus-sdk#588): one instance per model, native /metrics.
       - job_name: datahub-llama-server
         metrics_path: /metrics
         scrape_interval: 30s
         static_configs:
-          - targets: ["100.95.232.41:8081"]
-            labels:
-              instance_name: llama-qwen36-27b
-              host: datahub
           - targets: ["100.95.232.41:8082"]
             labels:
               instance_name: llama-qwen25-7b
@@ -272,12 +247,13 @@ spec:
           - regex: hashed_api_key|client_ip|user_agent
             action: labeldrop
       # LiteLLM readiness through its Service, and the A9 llama-server backends it routes to (the
-      # data-hub backends are already probed by blackbox-datahub-http, same `service` names, so the
-      # alerts can join the two hosts on `service`). llama-server /health is a status read that does
-      # not take the inference slot; the A9's own watchdog polls it too. Allowed by
+      # data-hub 7B behind the coder-light fallback is probed by blackbox-datahub-http, under a
+      # different `service` name, so InferenceAllBackendsDown selects both sides by name). llama-server
+      # /health is a status read that does not take the inference slot; the A9's own watchdog polls it
+      # too. Allowed by
       # inference/networkpolicy.yaml (blackbox-exporter -> 4000) and the tailnet ACL
-      # (tag:k8s -> tag:inference tcp:8081-8085). The new A9 services have no data-hub twin by name, so
-      # InferenceAllBackendsDown does not cover them; InferenceBackendDown does.
+      # (tag:k8s -> tag:inference tcp:8081-8085). Only llama-qwen35-9b (coder-light) has a data-hub
+      # fallback (olympus-sdk#701); the other A9 backends have none.
       - job_name: blackbox-inference-http
         metrics_path: /probe
         params:
@@ -375,27 +351,16 @@ spec:
                   summary: "Target {{ $labels.job }} ({{ $labels.instance }}) on {{ $labels.cluster }} down >10m."
           - name: data-hub
             rules:
-              # Fires per probed data-hub service (llama-*). Postgres has its own alert below,
-              # so it is excluded here to avoid a duplicate page. The data-hub LiteLLM is retired
+              # Fires per probed data-hub service (llama-*). The data-hub LiteLLM is retired
               # (olympus-sdk#569); the cluster LiteLLM has its own alerts (group inference).
               - alert: DataHubServiceDown
-                expr: probe_success{job=~"blackbox-datahub-.*", service!="postgres"} == 0
+                expr: probe_success{job="blackbox-datahub-http"} == 0
                 for: 10m
                 labels:
                   severity: warning
                 annotations:
                   summary: "data-hub service {{ $labels.service }} is failing its probe for >10m."
                   description: "Probe of {{ $labels.instance }} (job {{ $labels.job }}) from the cluster has failed for 10m. Check the service on data-hub and that it is bound to the tailnet IP."
-              # The failure that went unnoticed from July: Postgres bound to 127.0.0.1
-              # only. The probe targets the tailnet address, so this fires in that case.
-              - alert: DataHubPostgresNotOnTailnet
-                expr: probe_success{job="blackbox-datahub-tcp", service="postgres"} == 0
-                for: 10m
-                labels:
-                  severity: warning
-                annotations:
-                  summary: "Postgres on data-hub is not accepting connections on its tailnet address."
-                  description: "TCP connect to {{ $labels.instance }} has failed for 10m. Known cause: the boot-time bind race, where postgres starts before tailscaled is up, fails to bind the tailnet IP and falls back to 127.0.0.1 only. Check `lsof -iTCP:5432 -sTCP:LISTEN` on data-hub and restart the Postgres LaunchDaemon once tailscaled is up."
               # llama-server (olympus-sdk#588). Wedged: a request holds a slot but no token has been
               # decoded for 10m (the watchdog on data-hub restarts it; this alerts if that fails).
               - alert: DataHubLlamaServerWedged
@@ -430,7 +395,7 @@ spec:
                   severity: warning
                 annotations:
                   summary: "The memory-extract LLM alias is failing and nothing is succeeding."
-                  description: "At least 3 memory-extract requests failed (timeout, http_5xx or network_error) in 30m with no successes. Check LiteLLM and llama-server (qwen25-7b, :8082) on data-hub."
+                  description: "At least 3 memory-extract requests failed (timeout, http_5xx or network_error) in 30m with no successes. Check the cluster LiteLLM and the A9 llama-server on :8081 (qwen3.6-27b)."
               - alert: BlackboxExporterDown
                 expr: absent(up{job="blackbox-exporter"} == 1)
                 for: 10m
@@ -523,7 +488,7 @@ spec:
                 labels: { severity: warning }
                 annotations:
                   summary: "Memory queue stage {{ $labels.stage }} has a job pending for more than 4h."
-                  description: "The oldest pending `{{ $labels.stage }}` job is {{ $value | humanizeDuration }} old. Workers (olympus-sdk#453) are not keeping up or are down; LiteLLM on data-hub is the usual dependency. `kubectl -n memory exec deploy/memory-gateway -- node dist/admin/cli.js queue stats`."
+                  description: "The oldest pending `{{ $labels.stage }}` job is {{ $value | humanizeDuration }} old. Workers (olympus-sdk#453) are not keeping up or are down; the cluster LiteLLM and the A9 llama-server are the usual dependency. `kubectl -n memory exec deploy/memory-gateway -- node dist/admin/cli.js queue stats`."
               - alert: MemoryQueueBacklogStuck
                 expr: max by (stage) (memory_queue_oldest_pending_age_seconds) > 86400
                 for: 30m
@@ -612,7 +577,8 @@ spec:
           - name: inference
             rules:
               # Cluster LiteLLM (olympus-sdk#569, HW11). Probes: job blackbox-inference-http above;
-              # LiteLLM metrics: job inference-litellm. Backends: A9 first, data-hub second, no third tier.
+              # LiteLLM metrics: job inference-litellm. Backends: A9 first;
+              # only coder-light has a data-hub fallback (olympus-sdk#701).
               - alert: LiteLLMDown
                 expr: probe_success{job="blackbox-inference-http", service="litellm"} == 0
                 for: 5m
@@ -621,22 +587,32 @@ spec:
                 annotations:
                   summary: "The cluster LiteLLM (inference/litellm) has no ready endpoint."
                   description: "GET {{ $labels.instance }} has failed for 5m: no LiteLLM pod is ready, so memory extraction stops. Check `kubectl -n inference get pods,events` and the Flux Kustomization `inference`."
+              # Only coder-light (llama-qwen35-9b) has a data-hub fallback (llama-qwen25-7b, :8082).
               - alert: InferenceBackendDown
-                expr: probe_success{job="blackbox-inference-http", host="a9"} == 0
+                expr: probe_success{job="blackbox-inference-http", host="a9", service="llama-qwen35-9b"} == 0
                 for: 5m
                 labels:
                   severity: warning
                 annotations:
-                  summary: "A9 backend {{ $labels.service }} is down; LiteLLM is serving its aliases from data-hub."
-                  description: "GET {{ $labels.instance }} has failed for 5m. LiteLLM falls back to the data-hub twin of every alias on this backend (slower). Check the inference-server-* systemd unit and its watchdog on a9-mega."
-              - alert: InferenceAllBackendsDown
-                expr: (probe_success{job="blackbox-inference-http", host="a9"} == 0) and on(service) (probe_success{job="blackbox-datahub-http"} == 0)
+                  summary: "A9 backend {{ $labels.service }} is down; LiteLLM is serving coder-light from data-hub."
+                  description: "GET {{ $labels.instance }} has failed for 5m. LiteLLM falls back to the data-hub 7B (coder-light-datahub, slower). Check the inference-server-* systemd unit and its watchdog on a9-mega."
+              # Every other A9 backend has no fallback: the aliases it serves fail straight to the client.
+              - alert: InferenceBackendDownNoFallback
+                expr: probe_success{job="blackbox-inference-http", host="a9", service!="llama-qwen35-9b"} == 0
                 for: 5m
                 labels:
                   severity: critical
                 annotations:
-                  summary: "{{ $labels.service }} is down on both the A9 and data-hub."
-                  description: "Both backends for {{ $labels.service }} have failed their /health probe for 5m. There is no further fallback: requests to the aliases it serves fail."
+                  summary: "A9 backend {{ $labels.service }} is down and has no fallback."
+                  description: "GET {{ $labels.instance }} has failed for 5m. The aliases it serves (memory-extract, coder-heavy, coder-medium) have no data-hub fallback, so requests to them fail; the memory worker retries extract jobs itself. Check the inference-server-* systemd unit and its watchdog on a9-mega."
+              - alert: InferenceAllBackendsDown
+                expr: (probe_success{job="blackbox-inference-http", host="a9", service="llama-qwen35-9b"} == 0) and on() (probe_success{job="blackbox-datahub-http", service="llama-qwen25-7b"} == 0)
+                for: 5m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: "coder-light is down on both the A9 and data-hub."
+                  description: "Both backends for coder-light (A9 llama-qwen35-9b, data-hub llama-qwen25-7b) have failed their /health probe for 5m. There is no further fallback: requests to coder-light fail."
               - alert: LiteLLMFailoverActive
                 expr: sum by (requested_model) ((increase(litellm_deployment_successful_fallbacks_total{job="inference-litellm"}[15m]) > 0) or (litellm_deployment_successful_fallbacks_total{job="inference-litellm"} unless litellm_deployment_successful_fallbacks_total{job="inference-litellm"} offset 15m)) > 0
                 labels:

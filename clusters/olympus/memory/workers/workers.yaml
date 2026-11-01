@@ -37,7 +37,7 @@ metadata:
     # stakater reloader (../../reloader): roll the pods when the ConfigMap or Secret changes.
     reloader.stakater.com/auto: "true"
 spec:
-  # ONE replica, and it must stay one: the extraction model on data-hub is a single GPU slot.
+  # ONE replica, and it must stay one: the extraction model on the A9 is a single GPU slot.
   # Scale to 0 to pause extraction (README.md, "Pausing extraction").
   replicas: 1
   strategy:

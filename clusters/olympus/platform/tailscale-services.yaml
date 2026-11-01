@@ -1,9 +1,9 @@
 # Tailscale LoadBalancer services for in-cluster workloads.
 #
 # NOTE: postgres-ts, redis-ts, clickhouse-ts, and kafka-ts were removed in
-# the cluster-collapse-p2b cleanup (2026-06-07). PostgreSQL, Redis, ClickHouse,
-# and standalone Kafka now run as macOS LaunchDaemons on data-hub and are
-# reachable directly over the tailnet (short name `data-hub` via CoreDNS).
+# the cluster-collapse-p2b cleanup (2026-06-07). Those tiers are retired or in-cluster
+# now; data-hub keeps only its llama-server instances, reachable directly over the
+# tailnet (short name `data-hub` via CoreDNS).
 #
 # Only in-cluster services that need tailnet exposure are listed here.
 # Redpanda broker is in-cluster; its Tailscale exposure is handled by the
