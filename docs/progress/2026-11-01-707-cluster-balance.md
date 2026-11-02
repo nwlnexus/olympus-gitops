@@ -54,13 +54,13 @@ Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9,
 | 11-01 | steps 2-3 validation: yamllint; kustomize+kubeconform root 53 valid; helm template descheduler 0.37.0; policy decoded by v0.37.0 binary | 0 | 0 invalid; CronJob */30; strict decode OK | 4364791 |
 | 11-01 | claim-verifier olympus-sdk#708 | - | PASS: 3 image jobs build linux/arm64 (gateway pnpm under QEMU 358s; ingress-discovery cross-compile 35s); no push on PR | 8ca6280 |
 | 11-01 | yamllint; kustomize+kubeconform 31 dirs; promtool; helm template 22 HelmReleases | 0 | failed=0; all requests on intended containers | 9fdc161 |
-
 | 11-02 18:20 | pods on the 3 arm64 VMs (restartCount, waiting reason, lastState) | 0 | all Running/Succeeded, restarts 0 except Job postgres-backup-29893140 pg-dump restartCount 1 (Job Complete 1/1 at 03:00Z, lastState empty, previous logs gone; same image then ran OK in the same pod, so not exec format) | - |
 | 11-02 18:20 | events: Warning on arm64 nodes/pods; any event matching exec format/CrashLoopBackOff/Back-off; pod logs --since=24h grep exec format | 0 | all empty | - |
 | 11-02 18:20 | skopeo inspect --raw, 19 images on arm64 nodes (ghcr with auth) | 0 | 17 public: arm64 present; memory-gateway 67469044 and memory-workers b2e00a4a: OCI index linux/amd64,linux/arm64 | - |
 | 11-02 18:20 | check 1 jq | 0 | 9: onepassword-connect x2, tailscale nameserver, trident-controller x6 (listed exceptions) | - |
 | 11-02 18:20 | check 3 non-DS per node | 0 | data-hub-vm 15, onode-0314ac 12, onode-030c31 11, onode-0312ce 7, naraka-01 7, mmini-01-vm 4, onode-0636e4 2, mmini-02-vm 2, onode-062caa 1 (61 total) | - |
 | 11-02 18:20 | k3s-health-gate.sh; descheduler jobs 17:00/17:30/18:00 | 0 | RESULT: PASS (22 checks); 3 Complete; 18:00 totalEvicted=0, no errors | - |
+
 ## Decisions
 
 - Taint stays on the Mac VMs; workloads opt in (toleration + preferred affinity), amd64-only ones get a hard amd64 selector.
