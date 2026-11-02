@@ -68,7 +68,7 @@ Baseline (2026-11-01 ~16:40Z): onode-0312ce 20, onode-0314ac 17, onode-030c31 9,
 - Exceptions to Done-when 1 (not Flux-managed): 1password/onepassword-connect (hand Helm), trident-controller (TridentOrchestrator CR), tailscale/nameserver (DNSConfig has no resources) = 9 containers.
 - Kept: embedder cpu 2 (throughput reservation); redpanda broker (chart ties requests to limits). prometheus-server request capped at its 2Gi limit (peak 1994Mi): limit raise is an owner decision.
 - Descheduler thresholds pods 16/19 (cpu/mem 20/50 guard): computed per-node % after step 1 showed 20/40 would never fire. Excluded ns: kube-system, flux-system, trident, tailscale, arc-system, arc-runners, memory, system-upgrade, descheduler; iSCSI-PVC pods protected; label exclusions postgres/redpanda/prometheus/loki/tempo; max 3/node, 10/run; real mode (no soak).
-- Owner 2026-11-01: memory stack may spread (drops the #567 pin); embedder (amd64 image) and postgres (iSCSI) stay pinned; postgres-backup amd64-only until nfs-common on the Mac VMs (olympus-infra follow-up).
+- Owner 2026-11-01: memory stack may spread (drops the #567 pin); embedder (amd64 image) and postgres (iSCSI) stay pinned; postgres-backup amd64-only until nfs-common on the Mac VMs; lifted by gitops #189 after olympus-infra set node_prereqs_state present (backup ran on data-hub-vm 11-02 03:00Z).
 - Done-when 2 amended by the owner (option 1) on 11-01: balanced cluster gives 0 evictions; clean 30-min runs + gate PASS suffice.
 - Order: requests -> spread -> descheduler -> arm64 opt-in (descheduler needs requests to judge utilisation).
 
