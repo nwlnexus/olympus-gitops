@@ -38,9 +38,9 @@
 | 23:25 | pod jsonpath startTime / retry startedAt | 0 | `podStart=2026-11-03T03:00:00Z ... run2=2026-11-03T03:00:12Z` (other runs: +1 s, +11 s) | |
 | 23:27 | `iptables-save` on onode-0636e4 (postgres node), KUBE-NWPLCY/KUBE-POD-FW targets | 0 | `3 -j REJECT --reject-with icmp-port-unreachable` | |
 | 23:31 | `sh -n` on the CronJob script + stub `pg_isready` (ready on 3rd / never / 1st) | 0 | `postgres reachable after 2 retries` / `postgres not reachable after 120s` exit=1 / silent | |
-
 | 23:36 | `gh issue comment 724 -F cause.md` | 0 | `https://github.com/nwlnexus/olympus-sdk/issues/724#issuecomment-6618029544` | ad58c0c |
 | 23:39 | `gh pr checks 194` | 0 | `validate	pass	38s` | ad58c0c |
+
 ## Decisions
 
 - 2026-11-03: Fix in the Job (wait for the path with `pg_isready`, 60 x 2 s), not by loosening the netpol or sleeping a fixed time. Why: the race is in k3s's embedded kube-router controller (new pod IP enters the allow ipset only on its next sync); a bounded readiness wait covers any sync delay and still fails the Job if postgres is really down.
