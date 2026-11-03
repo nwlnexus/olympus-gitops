@@ -1,7 +1,7 @@
 # memory — data stores for the memory platform
 
 Namespace `memory`. Implements nwlnexus/olympus-sdk#449 (epic #444, spec sections D3, D4
-and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0004 and 0007, see below); the
+and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0004, 0007 and 0008, see below); the
 gateway (#450, see `gateway/README.md`; deployed by its own Flux Kustomization), workers (#453, see
 `workers/README.md`) and the CPU embedding service (olympus-sdk#529, see `embedder/README.md`) have their
 own manifests and Flux Kustomizations.
@@ -59,7 +59,7 @@ the Postgres password later: change the 1Password field, then
 Migrations are plain SQL files in `migrations/`, named `NNNN_short_description.sql`
 (zero-padded, next free number), applied in filename order by `Job/memory-migrate`.
 
-1. Create `migrations/<next number>_<what>.sql` (the next free number is `0008`; `0005` and `0006` are reserved for the Postgres graph of the gateway design §3.6, and `0007_knowledge` is the wiki index of olympus-sdk#563). It must be **idempotent** (`CREATE ... IF NOT EXISTS`,
+1. Create `migrations/<next number>_<what>.sql` (the next free number is `0009`; `0005` and `0006` are reserved for the Postgres graph of the gateway design §3.6, and `0007_knowledge` is the wiki index of olympus-sdk#563). It must be **idempotent** (`CREATE ... IF NOT EXISTS`,
    `ADD COLUMN IF NOT EXISTS`, `DO $$ ... $$` guards), because it is run once per database but
    may be replayed by hand or after a restore. Do not put `BEGIN`/`COMMIT` in it: the runner
    wraps each file and its ledger row in one transaction, so a failing file leaves nothing behind.
@@ -93,6 +93,13 @@ section 3 in olympus-sdk (epic #444, issue #450). That document is the authority
 tables, the roles' privileges and the queue semantics; do not edit these files, add a new
 migration instead. The gateway and the workers connect as `memory_gateway` / `memory_worker`,
 never as `postgres`.
+
+### Migrations 0007 and 0008
+
+| File | What |
+|---|---|
+| `0007_knowledge.sql` | `knowledge_page`, the curated wiki index (olympus-sdk#563) |
+| `0008_capture_key_per_client.sql` | transcript-capture idempotency key `(session_id, seq)` becomes `(client_id, session_id, seq)`: new unique index `episode_client_session_seq_uq`, drops `episode_session_seq_uq` (olympus-sdk#503) |
 
 ### Role passwords
 
