@@ -4,7 +4,7 @@
 - **Branch / worktree:** `fix/724-backup-wait-for-postgres` in `/home/nwilliams-lucas/projects/personal/.worktrees/gitops-724`
 - **Session:** `personal-olympus-sdk-724` on `ai-agent-host`; registry id `ff1358ce-24b2-4b94-b72c-57e43e406b08`
 - **Started:** 2026-11-03 23:30 UTC · **Turn cap:** 40
-- **Draft PR:** not yet
+- **Draft PR:** https://github.com/nwlnexus/olympus-gitops/pull/194
 
 ## Goal
 
@@ -25,7 +25,7 @@
 | --- | --- | --- | --- | --- |
 | 1 | Find the cause on the cluster (netpol, iptables on postgres node, pod timings) | opus | main | done |
 | 2 | Add bounded `pg_isready` wait before `pg_dump`; stub-test the loop | opus | main | done |
-| 3 | Record cause on #724; draft PR; CI green; merge (progress file removed first) | opus | main | todo |
+| 3 | Record cause on #724; draft PR; CI green; merge (progress file removed first) | opus | main | doing |
 | 4 | Confirm Flux applied the new CronJob spec | opus | main | todo |
 | 5 | Check 3 nightly runs (2026-11-04/05/06 03:00Z) for RESTARTS 0 and the "reachable after" log line; close #724 | haiku | scheduled check-in | todo |
 
@@ -39,6 +39,8 @@
 | 23:27 | `iptables-save` on onode-0636e4 (postgres node), KUBE-NWPLCY/KUBE-POD-FW targets | 0 | `3 -j REJECT --reject-with icmp-port-unreachable` | |
 | 23:31 | `sh -n` on the CronJob script + stub `pg_isready` (ready on 3rd / never / 1st) | 0 | `postgres reachable after 2 retries` / `postgres not reachable after 120s` exit=1 / silent | |
 
+| 23:36 | `gh issue comment 724 -F cause.md` | 0 | `https://github.com/nwlnexus/olympus-sdk/issues/724#issuecomment-6618029544` | ad58c0c |
+| 23:39 | `gh pr checks 194` | 0 | `validate	pass	38s` | ad58c0c |
 ## Decisions
 
 - 2026-11-03: Fix in the Job (wait for the path with `pg_isready`, 60 x 2 s), not by loosening the netpol or sleeping a fixed time. Why: the race is in k3s's embedded kube-router controller (new pod IP enters the allow ipset only on its next sync); a bounded readiness wait covers any sync delay and still fails the Job if postgres is really down.
@@ -50,4 +52,5 @@
 
 ## Next
 
-1. Commit the fix, post the Cause comment on #724, open the draft PR.
+1. Verifier on the merge claim, remove this file, `gh pr ready 194`, merge, confirm Flux applied the CronJob.
+2. After 2026-11-04/05/06 03:00Z runs: check RESTARTS 0 and close #724.
