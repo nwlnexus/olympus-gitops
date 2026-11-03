@@ -64,6 +64,20 @@ spec:
                   tmp="$dir/.memory-${ts}.dump.tmp"
                   out="$dir/memory-${ts}.dump"
                   trap 'rm -f "$tmp"' EXIT
+                  # A new pod's IP joins the postgres allow-list only when the k3s (kube-router)
+                  # network-policy controller next syncs, 1-12 s after start; until then the
+                  # default-deny REJECTs it and libpq reports "Connection refused" (olympus-sdk#724).
+                  # Wait up to 120 s for the path; a postgres that stays down still fails the Job.
+                  i=0
+                  until pg_isready --quiet; do
+                    i=$((i + 1))
+                    if [ "$i" -ge 60 ]; then
+                      echo "postgres not reachable after 120s" >&2
+                      exit 1
+                    fi
+                    sleep 2
+                  done
+                  [ "$i" -eq 0 ] || echo "postgres reachable after ${i} retries"
                   pg_dump --format=custom --compress=6 --file="$tmp"
                   # Fails (and so fails the Job) if the archive is unreadable/truncated.
                   pg_restore --list "$tmp" > /dev/null
