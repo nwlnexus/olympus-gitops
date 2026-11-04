@@ -218,3 +218,10 @@ The knowledge indexer (olympus-sdk#563, `gateway/knowledge-indexer-cronjob.yaml`
 ServiceMonitor: `MemoryKnowledgeIndexerFailing` (kube-state-metrics: the latest scheduled run has not succeeded for
 2h) and `MemoryKnowledgeIndexStale` (the gateway's `memory_knowledge_last_indexed_timestamp_seconds`, older than
 36h or never). `MemoryBackupStale` covers the two backup CronJobs only.
+
+The forget purge (olympus-sdk#734, `gateway/purge-cronjob.yaml`, daily 04:17 UTC, role `memory_worker` through
+Secret `memory-purge`) erases what `forget` only hides: after the 7-day retention window it blanks the fact or
+episode text, deletes the fact's revisions, embedding and links, and prunes done queue rows. Watched by
+`MemoryPurgeStale` (no successful run for 48h, from the kube-state-metrics CronJob series). The real bound for a
+forgotten memory: hidden at once, erased from the database after 7 days, gone from the 14 nightly backups 14 days
+after that.

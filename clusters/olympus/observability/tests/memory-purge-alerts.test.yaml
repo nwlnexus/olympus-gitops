@@ -1,0 +1,70 @@
+# Unit tests for MemoryPurgeStale (olympus-sdk#734): no successful forget purge for 48h.
+# Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease).
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  - name: a purge that succeeded a day ago does not fire
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="memory", cronjob="memory-purge"}'
+        values: "0x3000"
+      - series: 'kube_cronjob_created{namespace="memory", cronjob="memory-purge"}'
+        values: "-864000x3000"
+    alert_rule_test:
+      - eval_time: 24h
+        alertname: MemoryPurgeStale
+        exp_alerts: []
+
+  - name: no success for more than 48h fires
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="memory", cronjob="memory-purge"}'
+        values: "0x3600"
+      - series: 'kube_cronjob_created{namespace="memory", cronjob="memory-purge"}'
+        values: "-864000x3600"
+    alert_rule_test:
+      - eval_time: 47h
+        alertname: MemoryPurgeStale
+        exp_alerts: []
+      - eval_time: 49h
+        alertname: MemoryPurgeStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: memory
+              cronjob: memory-purge
+            exp_annotations:
+              summary: "The forget purge has not succeeded for 48h."
+              description: "CronJob memory-purge has had no successful run for more than 48h, so memories users forgot are hidden but their text is still in the database (olympus-sdk#734). `kubectl -n memory get cronjob,jobs,pods -l app.kubernetes.io/name=memory-purge` and the Job logs: a permission error means role memory_worker lost DELETE on fact_revision/capture_queue (migration 0004), 'unknown command' means the image digest predates `memory-admin purge`."
+
+  - name: a CronJob that never succeeded fires once it is older than 48h
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_created{namespace="memory", cronjob="memory-purge"}'
+        values: "0x3600"
+    alert_rule_test:
+      - eval_time: 47h
+        alertname: MemoryPurgeStale
+        exp_alerts: []
+      - eval_time: 49h
+        alertname: MemoryPurgeStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: memory
+              cronjob: memory-purge
+            exp_annotations:
+              summary: "The forget purge has not succeeded for 48h."
+              description: "CronJob memory-purge has had no successful run for more than 48h, so memories users forgot are hidden but their text is still in the database (olympus-sdk#734). `kubectl -n memory get cronjob,jobs,pods -l app.kubernetes.io/name=memory-purge` and the Job logs: a permission error means role memory_worker lost DELETE on fact_revision/capture_queue (migration 0004), 'unknown command' means the image digest predates `memory-admin purge`."
+
+  - name: the backup alert and the indexer rules ignore the purge CronJob
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="memory", cronjob="memory-purge"}'
+        values: "0x2600"
+    alert_rule_test:
+      - eval_time: 40h
+        alertname: MemoryBackupStale
+        exp_alerts: []

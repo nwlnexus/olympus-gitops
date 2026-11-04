@@ -12,3 +12,6 @@ resources:
   # Knowledge indexer (olympus-sdk#563): nightly wiki index, runs the gateway image.
   - knowledge-indexer-externalsecret.yaml
   - knowledge-indexer-cronjob.yaml
+  # Forget purge (olympus-sdk#734): daily `memory-admin purge`, runs the gateway image as memory_worker.
+  - purge-externalsecret.yaml
+  - purge-cronjob.yaml
