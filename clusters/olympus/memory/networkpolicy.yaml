@@ -4,10 +4,12 @@
 # these policies become inert. The IPv6 link-local caveat documented in
 # ../arc/networkpolicy.yaml applies here too (closed at node level, olympus-infra).
 #
-# Egress is deliberately NOT restricted: the stores only answer connections, the
-# backup/migration Jobs only talk to the stores in this namespace, and the repo's
-# only egress policies (arc) exist to contain untrusted CI code, which this is not.
-# Revisit when the gateway and workers (#450, #451) arrive and need LiteLLM egress.
+# Egress is restricted per workload, not namespace-wide (olympus-sdk#736, F5 of #458): the gateway
+# (gateway/networkpolicy.yaml `allow-gateway-egress`) and the workers (workers/networkpolicy.yaml
+# `allow-worker-egress`, `allow-worker-extract-litellm`) have egress allow-lists, each destination
+# documented there. The stores, the backup/migration Jobs, the embedder (its init step downloads the
+# model from huggingface.co) and the knowledge indexer / purge CronJobs (GitHub over SSH) stay
+# unrestricted.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

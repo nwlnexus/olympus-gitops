@@ -8,7 +8,8 @@
 # Two replicas of the TypeScript gateway (MCP + REST on :8080, metrics on :9090, never routed).
 # Reachability: ClusterIP Service `memory-gateway` (80 -> 8080, in-cluster and blackbox probe) and
 # the Tailscale LoadBalancer Service `memory-ts` (tailscale-service.yaml, tailnet host `memory`).
-# There is deliberately no cloudflared/public exposure here: that is olympus-sdk#451.
+# Public path (olympus-sdk#736): the cloudflared tunnel rule for memory.nwlnexus.io points at Service
+# `memory-gateway` (olympus-infra roles/cloudflare-access); networkpolicy.yaml admits the cloudflared pods.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -33,15 +34,16 @@ data:
   MEMORY_EMBED_BASE_URL: "http://memory-embedder.memory.svc/v1"
   MEMORY_EMBED_MODEL: "nomic-embed-text-v1.5"
   # --- Cloudflare Access (design 5.2, 5.6) -------------------------------------------------
-  # OWNER-SUPPLIED PLACEHOLDERS (issue olympus-sdk#451 creates the Access application and
-  # gives both values). Leave BOTH unset until then. The gateway requires both or neither
-  # (src/config.ts): with neither it starts, the Access-JWT path is disabled, and a request
+  # TODO(olympus-sdk#736): OWNER-SUPPLIED. olympus-infra `playbooks/push/cloudflare-access.yml` creates the
+  # Access application and its last task prints both values; paste them here, uncommented, in the same
+  # PR as nothing else (README.md, "Public path"). Leave BOTH unset until then. The gateway requires both
+  # or neither (src/config.ts): with neither it starts, the Access-JWT path is disabled, and a request
   # that carries only an Access JWT is refused with 401 (fail closed). Gateway keys
   # (Authorization: Bearer mgw_...) work either way, which is all tailnet mode needs.
   # Do NOT put a dummy value here: with Access configured /readyz waits for the JWKS to be
-  # fetched from the team domain, so a wrong value keeps both pods NotReady.
-  #   MEMORY_ACCESS_TEAM_DOMAIN: "https://<team>.cloudflareaccess.com"   # no trailing slash
-  #   MEMORY_ACCESS_AUD: "<application AUD tag>"                          # comma-separated if several
+  # fetched from the team domain, so a wrong value keeps both pods NotReady (tailnet path included).
+  #   MEMORY_ACCESS_TEAM_DOMAIN: "https://TODO-TEAM.cloudflareaccess.com"   # no trailing slash
+  #   MEMORY_ACCESS_AUD: "TODO-AUD-TAG"                                     # comma-separated if several
 ---
 apiVersion: v1
 kind: Service
