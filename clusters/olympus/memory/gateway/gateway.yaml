@@ -34,16 +34,14 @@ data:
   MEMORY_EMBED_BASE_URL: "http://memory-embedder.memory.svc/v1"
   MEMORY_EMBED_MODEL: "nomic-embed-text-v1.5"
   # --- Cloudflare Access (design 5.2, 5.6) -------------------------------------------------
-  # TODO(olympus-sdk#736): OWNER-SUPPLIED. olympus-infra `playbooks/push/cloudflare-access.yml` creates the
-  # Access application and its last task prints both values; paste them here, uncommented, in the same
-  # PR as nothing else (README.md, "Public path"). Leave BOTH unset until then. The gateway requires both
-  # or neither (src/config.ts): with neither it starts, the Access-JWT path is disabled, and a request
-  # that carries only an Access JWT is refused with 401 (fail closed). Gateway keys
-  # (Authorization: Bearer mgw_...) work either way, which is all tailnet mode needs.
-  # Do NOT put a dummy value here: with Access configured /readyz waits for the JWKS to be
-  # fetched from the team domain, so a wrong value keeps both pods NotReady (tailnet path included).
-  #   MEMORY_ACCESS_TEAM_DOMAIN: "https://TODO-TEAM.cloudflareaccess.com"   # no trailing slash
-  #   MEMORY_ACCESS_AUD: "TODO-AUD-TAG"                                     # comma-separated if several
+  # Printed by olympus-infra `playbooks/push/cloudflare-access.yml` (olympus-sdk#736), Access application
+  # `memory` on memory.nwlnexus.io, created 2026-11-04. The gateway requires both or neither
+  # (src/config.ts). With both set, /readyz waits for the JWKS fetched from the team domain over 443
+  # (allowed by `allow-gateway-egress`, Cloudflare ranges), so a wrong value keeps both pods NotReady,
+  # tailnet path included. Gateway keys (Authorization: Bearer mgw_...) keep working on the tailnet;
+  # the public Host requires a verified Access JWT (olympus-sdk#735).
+  MEMORY_ACCESS_TEAM_DOMAIN: "https://nwlnexus.cloudflareaccess.com"
+  MEMORY_ACCESS_AUD: "3304a440d0d40f598b35935bede6ff9d03ba514107fc739a4542b165e92e36b7"
 ---
 apiVersion: v1
 kind: Service

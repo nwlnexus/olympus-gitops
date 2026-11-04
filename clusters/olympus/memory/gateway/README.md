@@ -47,7 +47,7 @@ To disable again: remove the line from `../../kustomization.yaml` (`prune: true`
 | Value | Where | Status |
 |---|---|---|
 | Image digest | `gateway.yaml` (`image:`) | placeholder (64 zeros), see above |
-| `MEMORY_ACCESS_TEAM_DOMAIN` (`https://<team>.cloudflareaccess.com`) and `MEMORY_ACCESS_AUD` | `TODO(olympus-sdk#736)`, commented out in the ConfigMap in `gateway.yaml` | printed by olympus-infra `playbooks/push/cloudflare-access.yml`; uncomment **both** (or neither), see "Public path" |
+| `MEMORY_ACCESS_TEAM_DOMAIN` (`https://<team>.cloudflareaccess.com`) and `MEMORY_ACCESS_AUD` | set in the ConfigMap in `gateway.yaml` (team `nwlnexus`, application `memory`, 2026-11-04) | printed by olympus-infra `playbooks/push/cloudflare-access.yml`; set **both** (or neither), see "Public path" |
 
 With the two Access values unset the gateway starts, the Access-JWT path is disabled (a request carrying only
 an Access JWT is refused with 401) and gateway keys (`Authorization: Bearer mgw_...`) work, which is all
