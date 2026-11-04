@@ -24,3 +24,4 @@ configMapGenerator:
       - migrations/0004_roles.sql
       - migrations/0007_knowledge.sql
       - migrations/0008_capture_key_per_client.sql
+      - migrations/0009_closure_suggestion.sql
