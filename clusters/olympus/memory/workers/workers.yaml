@@ -97,7 +97,7 @@ spec:
           # Pinned by digest, never by tag: the multi-arch INDEX digest (linux/amd64 + linux/arm64) of
           # tag sha-6d4faef, built from olympus-sdk main by .github/workflows/memory-workers.yml
           # (olympus-sdk#707). The embed Deployment below pins the same digest; bump both together.
-          image: ghcr.io/nwlnexus/memory-workers@sha256:396c016dd0daf6308a6ea4c4f2174b69e10ede18413795c3962b8ecd9ad9f9c8
+          image: ghcr.io/nwlnexus/memory-workers@sha256:32254ba0c6e8bd8596cb53a88ba9f34e2cdf29d0ed1cfef1378dd1d4528515fe
           imagePullPolicy: IfNotPresent
           # The image ENTRYPOINT is `python -m memory_workers`; the stage is the argument.
           args: ["--stage", "extract"]
@@ -262,7 +262,7 @@ spec:
                     app.kubernetes.io/name: memory-worker-embed
       containers:
         - name: memory-worker
-          image: ghcr.io/nwlnexus/memory-workers@sha256:396c016dd0daf6308a6ea4c4f2174b69e10ede18413795c3962b8ecd9ad9f9c8
+          image: ghcr.io/nwlnexus/memory-workers@sha256:32254ba0c6e8bd8596cb53a88ba9f34e2cdf29d0ed1cfef1378dd1d4528515fe
           imagePullPolicy: IfNotPresent
           args: ["--stage", "embed"]
           ports:
