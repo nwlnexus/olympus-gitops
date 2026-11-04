@@ -1,0 +1,120 @@
+# Forget purge (olympus-sdk#734, finding F2 of the #458 review; contract:
+# docs/superpowers/specs/2026-10-21-memory-gateway-contract-design.md section 10.3).
+#
+# Daily: `memory-admin purge --apply` erases what `forget` only hid. Facts and episodes forgotten more than
+# 7 days ago (MEMORY_PURGE_RETENTION_DAYS) get their text replaced by "[forgotten]"; the fact's fact_revision
+# history (the previous texts), embedding, entity links and graph episode links are deleted; `done` queue rows
+# older than 14 days are pruned. One transaction, so a failed run changes nothing and exits non-zero (the Job
+# fails, backoffLimit 2). Logs carry counts only, never content. One `purge` audit row per fact and episode.
+# The text stays in the nightly pg_dump files (postgres-backup-cronjob.yaml, 14 kept) until they rotate out,
+# so "gone from backups" is 14 days after the purge.
+#
+# Role: memory_worker (Secret memory-purge, purge-externalsecret.yaml), the role with DELETE on fact_revision
+# and capture_queue (migration 0004). No migration is needed. Same image as the gateway (the admin CLI is part of
+# it), like the knowledge indexer.
+#
+# IMAGE DIGEST: must be an image that contains `dist/admin/purge.js` (olympus-sdk PR "fix(memory): run the
+# forget purge on a schedule (#734)", merged and built). Bump it together with gateway.yaml and
+# knowledge-indexer-cronjob.yaml before this merges, or the first run fails with "unknown command".
+#
+# Monitoring (no Prometheus operator, no pushgateway; see ../README.md "Monitoring"): kube-state-metrics'
+# kube_cronjob_* series feed MemoryPurgeStale (../../observability/prometheus-helmrelease.yaml, group
+# `memory`): no successful run for 48h. NetworkPolicy: none needed (postgres admits every pod in the namespace,
+# ../networkpolicy.yaml). Run once by hand (applies, as the schedule does):
+#   kubectl -n memory create job --from=cronjob/memory-purge purge-manual
+# Dry run (counts only): kubectl -n memory exec deploy/memory-gateway -- node dist/admin/cli.js purge
+# works only as role memory_gateway for the count queries, which is allowed; --apply needs memory_worker.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: memory-purge
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-purge
+    app.kubernetes.io/part-of: memory
+spec:
+  # 04:17 UTC: after the 02:40 indexer and the 03:00 backups, off the hour.
+  schedule: "17 4 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: memory-purge
+            app.kubernetes.io/part-of: memory
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            # The gateway image is private (same pull secret as gateway.yaml).
+            - name: ghcr-pull
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          # Spreads across the cluster like the other memory workloads (owner decision 2026-11-01,
+          # olympus-sdk#707): the agent-services toleration and the arm64 one (the image is a multi-arch index).
+          tolerations:
+            - key: olympus.io/role
+              operator: Equal
+              value: agent-services
+              effect: NoSchedule
+            - key: olympus.io/arch
+              operator: Equal
+              value: arm64
+              effect: NoSchedule
+          containers:
+            - name: purge
+              # Same digest as the memory-gateway Deployment (gateway.yaml). Bump all three together.
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:58c1deb212eec4d496df7480fa1f218877b81036ff0b369298ab35e72f06eb7c
+              imagePullPolicy: IfNotPresent
+              command:
+                - node
+                - dist/admin/cli.js
+                - purge
+                - --apply
+                - --actor
+                - memory-purge-cronjob
+              env:
+                - name: DATABASE_URL_FILE
+                  value: /run/secrets/purge/DATABASE_URL
+                - name: MEMORY_PURGE_RETENTION_DAYS
+                  value: "7"
+                - name: LOG_LEVEL
+                  value: info
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 96Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                - name: secrets
+                  mountPath: /run/secrets/purge
+                  readOnly: true
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 32Mi
+            - name: secrets
+              secret:
+                secretName: memory-purge
+                defaultMode: 0440

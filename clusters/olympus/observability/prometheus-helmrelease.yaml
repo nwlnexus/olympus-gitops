@@ -491,6 +491,28 @@ spec:
                 annotations:
                   summary: "The wiki knowledge index has not been refreshed for more than 36h."
                   description: "The newest row of memory.knowledge_page is {{ $value | humanizeDuration }} old (or the table is empty). The `knowledge` tool and the session-start wiki hits serve stale or no pages. Check CronJob memory-knowledge-indexer (`kubectl -n memory get cronjob,jobs`) and see MemoryKnowledgeIndexerFailing."
+              # Forget purge (olympus-sdk#734, contract section 10.3): CronJob memory/memory-purge, daily at
+              # 04:17 UTC. No successful run for 48h (two missed runs), or no success ever and the CronJob is
+              # already older than 48h (kube_cronjob_status_last_successful_time is absent until the first
+              # success).
+              # (the first arm then stays silent only while the series exists and is fresh).
+              # Resolves with the next successful run (manual: kubectl -n memory create job
+              # --from=cronjob/memory-purge purge-manual).
+              - alert: MemoryPurgeStale
+                expr: >-
+                  (time() - kube_cronjob_status_last_successful_time{namespace="memory", cronjob="memory-purge"} > 172800)
+                  or
+                  (
+                    time() - kube_cronjob_created{namespace="memory", cronjob="memory-purge"} > 172800
+                    unless on (namespace, cronjob)
+                    kube_cronjob_status_last_successful_time{namespace="memory", cronjob="memory-purge"}
+                  )
+                for: 15m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "The forget purge has not succeeded for 48h."
+                  description: "CronJob memory-purge has had no successful run for more than 48h, so memories users forgot are hidden but their text is still in the database (olympus-sdk#734). `kubectl -n memory get cronjob,jobs,pods -l app.kubernetes.io/name=memory-purge` and the Job logs: a permission error means role memory_worker lost DELETE on fact_revision/capture_queue (migration 0004), 'unknown command' means the image digest predates `memory-admin purge`."
               # Memory gateway and queue (olympus-sdk#450 task G10, design section 9). The queue
               # gauges are exported by the gateway (Q-QUEUE-METRICS, every 30 s, both replicas, hence
               # max by); scraped through the kubernetes-pods job. The expr/for/severity are the
