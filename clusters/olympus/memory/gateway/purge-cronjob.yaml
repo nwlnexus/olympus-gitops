@@ -77,7 +77,7 @@ spec:
           containers:
             - name: purge
               # Same digest as the memory-gateway Deployment (gateway.yaml). Bump all three together.
-              image: ghcr.io/nwlnexus/memory-gateway@sha256:58c1deb212eec4d496df7480fa1f218877b81036ff0b369298ab35e72f06eb7c
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:ec39b724f0f360b0dad93ba6f3fe403b22baed41b0581f36ed77774743dcc6d9
               imagePullPolicy: IfNotPresent
               command:
                 - node
