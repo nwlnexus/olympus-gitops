@@ -58,6 +58,12 @@ spec:
       # Alertmanager itself is ClusterIP-only; the "View in Alertmanager" button in the e-mails
       # opens Grafana's alert list instead (Alertmanager datasource in grafana-helmrelease.yaml).
       baseURL: https://grafana.nwlnexus.net/alerting/list
+      # baseURL sets --web.external-url, and Alertmanager takes its PATH as the route prefix: the API moved
+      # to /alerting/list/api/v2/alerts, Prometheus kept posting to /api/v2/alerts and got 404, and no alert
+      # e-mail went out from 2026-10-29 to 2026-11-06 (4860 notifier errors). Keep the e-mail link, serve
+      # the API at the root for Prometheus and the Grafana datasource.
+      extraArgs:
+        web.route-prefix: /
       persistence:
         enabled: true
         storageClass: qnap-iscsi
