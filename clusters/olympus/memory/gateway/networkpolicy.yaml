@@ -1,7 +1,6 @@
 # Ingress allow rules for the gateway pods. The namespace is default-deny ingress
-# (../networkpolicy.yaml); NetworkPolicies are additive, so this adds three narrow rules.
-# Egress is unrestricted in this namespace (see ../networkpolicy.yaml), so the gateway can reach
-# the in-cluster Postgres, DNS and LiteLLM without a rule.
+# (../networkpolicy.yaml); NetworkPolicies are additive, so this adds four narrow rules.
+# Egress is restricted by `allow-gateway-egress` below (olympus-sdk#736, finding F5 of #458).
 #
 # Postgres needs no change: ../networkpolicy.yaml `allow-store-ingress` already
 # admits every pod in the namespace (podSelector {}), which includes the gateway pods.
@@ -19,7 +18,7 @@ spec:
   ingress:
     # App port from the Tailscale operator's proxy pod that fronts Service `memory-ts`
     # (StatefulSet `ts-memory-ts-*` in ns tailscale, labelled by the operator with the parent
-    # Service). Future public path (#451): add the cloudflared rule there, not here.
+    # Service).
     - from:
         - namespaceSelector:
             matchLabels:
@@ -29,6 +28,21 @@ spec:
               tailscale.com/managed: "true"
               tailscale.com/parent-resource: memory-ts
               tailscale.com/parent-resource-ns: memory
+      ports:
+        - protocol: TCP
+          port: 8080
+    # App port from the cloudflared pods (ns cloudflared, ../../cloudflared/deployment.yaml): the public
+    # path https://memory.nwlnexus.io behind Cloudflare Access (olympus-sdk#736). The tunnel's hostname
+    # rule points straight at Service memory-gateway (olympus-infra roles/cloudflare-access), not through
+    # Traefik, so Traefik (a LAN LoadBalancer) gets no rule here and the gateway stays off the LAN.
+    # Inert until that rule exists: nothing else routes to the gateway from this namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cloudflared
+          podSelector:
+            matchLabels:
+              app: cloudflared
       ports:
         - protocol: TCP
           port: 8080
@@ -56,3 +70,85 @@ spec:
       ports:
         - protocol: TCP
           port: 9090
+---
+# Egress for the gateway pods (olympus-sdk#736, F5). Only the gateway Deployment's pods: the knowledge
+# indexer and the purge CronJob run the same image under their own app.kubernetes.io/name and are not
+# selected. kube-proxy DNATs a Service IP to the pod before kube-router evaluates the policy, so every
+# rule names the destination PODS and their container port, not the Service port.
+#
+# Every destination, with the setting that makes the gateway call it (gateway.yaml, externalsecret.yaml
+# and olympus-sdk packages/memory-gateway/src):
+#   DNS        CoreDNS (kube-system, k8s-app=kube-dns) 53 UDP/TCP: every name below is resolved.
+#   Postgres   pods app.kubernetes.io/name=postgres, 5432: DATABASE_URL ...@postgres.memory.svc:5432
+#              (Secret memory-gateway); /readyz runs SELECT 1, so without this rule both pods go NotReady.
+#   Embedder   pods app.kubernetes.io/name=memory-embedder, 8080: MEMORY_EMBED_BASE_URL
+#              http://memory-embedder.memory.svc/v1 (Service 80 -> targetPort 8080), query embeddings
+#              for recall (src/recall/embed.ts); without it recall degrades to text-only.
+#   Access     TCP 443 to Cloudflare's published IPv4 ranges: the JWKS at
+#              ${MEMORY_ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs (src/auth/access-jwt.ts). Used only once
+#              MEMORY_ACCESS_TEAM_DOMAIN/AUD are set; then /readyz also waits for the first JWKS fetch.
+#              NetworkPolicy cannot match a host name (k3s' kube-router has no FQDN policy), so the rule
+#              is the ranges <team>.cloudflareaccess.com is served from, not 0.0.0.0/0: list from
+#              https://api.cloudflare.com/client/v4/ips (etag 38f79d050aa027e3be3865e495dcc9bc, 2026-11-04;
+#              Cloudflare announces changes there). If a range is ever added and the JWKS moves into it,
+#              JWT requests answer 503 (fail closed) until this list is updated. The cluster is IPv4-only,
+#              so there is no IPv6 rule.
+# Not reached, so no rule: LiteLLM (LITELLM_BASE_URL is unset, gateway.yaml), the Kubernetes API
+# (automountServiceAccountToken: false), anything on the tailnet or the LAN.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-egress
+  namespace: memory
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: memory-gateway
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: memory-embedder
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - ipBlock: {cidr: 173.245.48.0/20}
+        - ipBlock: {cidr: 103.21.244.0/22}
+        - ipBlock: {cidr: 103.22.200.0/22}
+        - ipBlock: {cidr: 103.31.4.0/22}
+        - ipBlock: {cidr: 141.101.64.0/18}
+        - ipBlock: {cidr: 108.162.192.0/18}
+        - ipBlock: {cidr: 190.93.240.0/20}
+        - ipBlock: {cidr: 188.114.96.0/20}
+        - ipBlock: {cidr: 197.234.240.0/22}
+        - ipBlock: {cidr: 198.41.128.0/17}
+        - ipBlock: {cidr: 162.158.0.0/15}
+        - ipBlock: {cidr: 104.16.0.0/13}
+        - ipBlock: {cidr: 104.24.0.0/14}
+        - ipBlock: {cidr: 172.64.0.0/13}
+        - ipBlock: {cidr: 131.0.72.0/22}
+      ports:
+        - protocol: TCP
+          port: 443

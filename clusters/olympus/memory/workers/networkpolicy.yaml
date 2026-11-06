@@ -3,12 +3,11 @@
 # only (9090: /metrics, /healthz, /readyz) and only from Prometheus (job kubernetes-pods). The
 # kubelet's probes come from the node and are not subject to NetworkPolicy under k3s' kube-router
 # policy controller, same as for the gateway pods.
-# Egress is unrestricted in this namespace (see ../networkpolicy.yaml), so the workers reach
-# Postgres, DNS and the cluster LiteLLM (litellm.inference.svc:4000) without a rule; the inference
-# namespace's own policy admits memory-worker-extract.
+# Egress is restricted by `allow-worker-egress` and `allow-worker-extract-litellm` below
+# (olympus-sdk#736, finding F5 of #458).
 #
 # Postgres needs no change: ../networkpolicy.yaml `allow-store-ingress` admits every pod in the
-# namespace (`from: podSelector: {}`) on 5432 and 6379, which includes the worker pods.
+# namespace (`from: podSelector: {}`) on 5432, which includes the worker pods.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -33,3 +32,81 @@ spec:
       ports:
         - protocol: TCP
           port: 9090
+---
+# Egress for both worker Deployments (olympus-sdk#736, F5); same selector as the ingress rule above.
+# kube-proxy DNATs a Service IP to the pod before kube-router evaluates the policy, so the rules name
+# the destination PODS and their container ports. Every destination, with its source of truth:
+#   DNS        CoreDNS (kube-system, k8s-app=kube-dns) 53 UDP/TCP.
+#   Postgres   pods app.kubernetes.io/name=postgres, 5432: DATABASE_URL ...@postgres.memory.svc:5432
+#              (Secret memory-workers); the queue (claim/heartbeat/complete) and /readyz.
+#   Embedder   pods app.kubernetes.io/name=memory-embedder, 8080: MEMORY_EMBED_BASE_URL
+#              http://memory-embedder.memory.svc/v1 (workers-config.env; Service 80 -> 8080). The embed
+#              stage embeds facts; ../embedder/networkpolicy.yaml admits both worker names.
+# LiteLLM is extract-only: see the next policy. No internet, no tailnet: the workers call nothing else
+# (olympus-sdk packages/memory-workers/src: llm.py is the only HTTP client).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-worker-egress
+  namespace: memory
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: memory
+      app.kubernetes.io/component: worker
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: memory-embedder
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# The extract worker's model calls: LITELLM_BASE_URL http://litellm.inference.svc:4000/v1
+# (workers-config.env) -> pods app.kubernetes.io/name=litellm in ns inference, container port 4000
+# (Service litellm 4000 -> targetPort http = 4000, ../../inference/litellm.yaml). The inference
+# namespace's `allow-litellm` admits only memory-worker-extract, so the embed pods get no such rule.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-worker-extract-litellm
+  namespace: memory
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: memory-worker-extract
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: inference
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: litellm
+      ports:
+        - protocol: TCP
+          port: 4000

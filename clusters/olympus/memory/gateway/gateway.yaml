@@ -8,7 +8,8 @@
 # Two replicas of the TypeScript gateway (MCP + REST on :8080, metrics on :9090, never routed).
 # Reachability: ClusterIP Service `memory-gateway` (80 -> 8080, in-cluster and blackbox probe) and
 # the Tailscale LoadBalancer Service `memory-ts` (tailscale-service.yaml, tailnet host `memory`).
-# There is deliberately no cloudflared/public exposure here: that is olympus-sdk#451.
+# Public path (olympus-sdk#736): the cloudflared tunnel rule for memory.nwlnexus.io points at Service
+# `memory-gateway` (olympus-infra roles/cloudflare-access); networkpolicy.yaml admits the cloudflared pods.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -33,15 +34,14 @@ data:
   MEMORY_EMBED_BASE_URL: "http://memory-embedder.memory.svc/v1"
   MEMORY_EMBED_MODEL: "nomic-embed-text-v1.5"
   # --- Cloudflare Access (design 5.2, 5.6) -------------------------------------------------
-  # OWNER-SUPPLIED PLACEHOLDERS (issue olympus-sdk#451 creates the Access application and
-  # gives both values). Leave BOTH unset until then. The gateway requires both or neither
-  # (src/config.ts): with neither it starts, the Access-JWT path is disabled, and a request
-  # that carries only an Access JWT is refused with 401 (fail closed). Gateway keys
-  # (Authorization: Bearer mgw_...) work either way, which is all tailnet mode needs.
-  # Do NOT put a dummy value here: with Access configured /readyz waits for the JWKS to be
-  # fetched from the team domain, so a wrong value keeps both pods NotReady.
-  #   MEMORY_ACCESS_TEAM_DOMAIN: "https://<team>.cloudflareaccess.com"   # no trailing slash
-  #   MEMORY_ACCESS_AUD: "<application AUD tag>"                          # comma-separated if several
+  # Printed by olympus-infra `playbooks/push/cloudflare-access.yml` (olympus-sdk#736), Access application
+  # `memory` on memory.nwlnexus.io, created 2026-11-04. The gateway requires both or neither
+  # (src/config.ts). With both set, /readyz waits for the JWKS fetched from the team domain over 443
+  # (allowed by `allow-gateway-egress`, Cloudflare ranges), so a wrong value keeps both pods NotReady,
+  # tailnet path included. Gateway keys (Authorization: Bearer mgw_...) keep working on the tailnet;
+  # the public Host requires a verified Access JWT (olympus-sdk#735).
+  MEMORY_ACCESS_TEAM_DOMAIN: "https://nwlnexus.cloudflareaccess.com"
+  MEMORY_ACCESS_AUD: "3304a440d0d40f598b35935bede6ff9d03ba514107fc739a4542b165e92e36b7"
 ---
 apiVersion: v1
 kind: Service
