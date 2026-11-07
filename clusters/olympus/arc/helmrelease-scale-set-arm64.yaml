@@ -127,6 +127,31 @@ spec:
             # The amd64 scale sets stay on their single-arch pin until they are moved deliberately.
             image: ghcr.io/nwlnexus/olympus-ci-runner@sha256:e45e955bed258dec4bb23ef3eec4902689fb63bb4f2cef891ba10801b73a3753
             command: ["/home/runner/run.sh"]
+            # Egress proxy (olympus-sdk#407, ../ci-egress/, README "Egress proxy"). Set explicitly on the
+            # runner container, not with the chart's `proxy:` value: that would also route the
+            # listener in arc-system through it, whose network policy has no path to the proxy.
+            # Phase 1 is log-only and direct egress still works, so a tool that ignores these keeps
+            # working. Both cases: curl reads only lowercase http_proxy, others prefer uppercase.
+            # NO_PROXY: loopback (QEMU guests are reached through hostfwd on 127.0.0.1), in-cluster
+            # names (incl. the LiteLLM Service the olympus-kvm executor uses), 10.0.0.0/8 for clients
+            # that understand CIDR (curl 7.81 does not), and the pod's own IP.
+            env:
+              - name: POD_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.podIP
+              - name: HTTP_PROXY
+                value: http://egress-proxy.ci-egress.svc.cluster.local:3128
+              - name: HTTPS_PROXY
+                value: http://egress-proxy.ci-egress.svc.cluster.local:3128
+              - name: http_proxy
+                value: http://egress-proxy.ci-egress.svc.cluster.local:3128
+              - name: https_proxy
+                value: http://egress-proxy.ci-egress.svc.cluster.local:3128
+              - name: NO_PROXY
+                value: localhost,127.0.0.1,::1,0.0.0.0,.svc,.cluster.local,10.0.0.0/8,litellm.inference.svc,litellm.inference.svc.cluster.local,$(POD_IP)
+              - name: no_proxy
+                value: localhost,127.0.0.1,::1,0.0.0.0,.svc,.cluster.local,10.0.0.0/8,litellm.inference.svc,litellm.inference.svc.cluster.local,$(POD_IP)
             resources:
               requests:
                 cpu: "2"

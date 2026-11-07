@@ -41,7 +41,9 @@ data:
     max_filedescriptors 8192
 
     logformat egress egress method=%rm host=%>rd port=%>rP status=%>Hs result=%Ss/%Sh client=%>a dst=%<a bytes_in=%<st bytes_out=%>st ms=%tr ua="%"{User-Agent}>h"
-    access_log stdio:/dev/stdout logformat=egress
+    # Only transactions with a request: the kubelet's TCP probes (connect, close) are not logged.
+    acl has_request has request
+    access_log stdio:/dev/stdout logformat=egress has_request
     cache_log stdio:/dev/stderr
 
     # Never act as a bridge into the cluster, the LAN, the tailnet or the node: the network policy
