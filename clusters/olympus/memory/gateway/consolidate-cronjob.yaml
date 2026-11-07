@@ -28,7 +28,7 @@ metadata:
     app.kubernetes.io/name: memory-consolidate
     app.kubernetes.io/part-of: memory
 spec:
-  # 04:17 UTC: after the 02:40 indexer and the 03:00 backups, off the hour.
+  # 01:10 UTC: before the host compile reads facts (04:45 local on ai-agent-host), off the hour.
   schedule: "10 1 * * *"
   timeZone: Etc/UTC
   concurrencyPolicy: Forbid
