@@ -34,6 +34,8 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
+              namespace: ci-egress
+              deployment: egress-proxy
             exp_annotations:
               summary: "The CI egress proxy (ci-egress/egress-proxy) has no available replica."
               description: "No Ready squid pod for 2m: every job on olympus-linux, olympus-gate, olympus-kvm and olympus-arm64 fails (the runner reaches GitHub through the proxy). `kubectl -n ci-egress get pods,events` and `kubectl -n ci-egress logs deploy/egress-proxy`; a bad squid.conf shows there (ci-egress/configmap.yaml, roll back by reverting). Fallback: arc/README.md, \"Egress proxy\"."
