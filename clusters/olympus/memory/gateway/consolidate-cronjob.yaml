@@ -12,6 +12,8 @@
 #   entities  graph entities named by ONE second-brain identity page (wiki/reference/identities/, title + aliases, via
 #           memory.knowledge_page) are merged through graph_merge_entities, with a snapshot in the audit row that
 #           `consolidate undo` restores (contract section 16.2a, olympus-sdk#818). Ambiguous groups are proposals only.
+#   suggestions  pending supersession suggestions whose older or newer fact is no longer current are closed as obsolete
+#           by internal:worker (contract section 14.5 / 16.2, olympus-sdk#819); `consolidate undo` reopens them.
 # 07:20 UTC: after the graph backfill window (00:00-07:00 UTC), before the host compile (04:45 local, ~09:45 UTC).
 #
 # Role: memory_worker (Secret memory-purge, purge-externalsecret.yaml; the same DATABASE_URL): UPDATE on fact, SELECT
@@ -78,7 +80,7 @@ spec:
             # purge failed every run with "connect ECONNREFUSED" (olympus-sdk#734, same race as #724).
             # Wait up to 120 s for a TCP connection from this pod; a postgres that stays down still fails.
             - name: wait-for-postgres
-              image: ghcr.io/nwlnexus/memory-gateway@sha256:470a55002fa8eabfe45017907d03f161a3434964087ee683106c63fdca7ba395
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:644744a4c58fc7fa437c6bf56f5972aa970a49d058e4839bcf737d20eb1f4ef4
               imagePullPolicy: IfNotPresent
               command:
                 - node
@@ -112,7 +114,7 @@ spec:
           containers:
             - name: consolidate
               # Same digest as the memory-gateway Deployment (gateway.yaml) and the wait-for-postgres init container. Bump all together.
-              image: ghcr.io/nwlnexus/memory-gateway@sha256:470a55002fa8eabfe45017907d03f161a3434964087ee683106c63fdca7ba395
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:644744a4c58fc7fa437c6bf56f5972aa970a49d058e4839bcf737d20eb1f4ef4
               imagePullPolicy: IfNotPresent
               command:
                 - node
