@@ -1,0 +1,187 @@
+# Unit tests for the memory graph alerts (contract section 9 "Amended 2026-10-21", olympus-sdk#519 task A1).
+# Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease first).
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  # --- MemoryGraphBackfillStalled: > 100 facts without graph, no fewer than 2d ago, backfill on, not paused, 6h ---
+  - name: backfill with no progress in 2 days fires after 6h
+    interval: 1m
+    input_series:
+      - series: 'memory_graph_facts{state="without_graph", pod="memory-gateway-a"}'
+        values: "5000x3400"
+      - series: 'memory_worker_graph_backfill_enabled{pod="memory-worker-extract-a"}'
+        values: "1x3400"
+      - series: 'memory_worker_paused{scope="llm", pod="memory-worker-extract-a"}'
+        values: "0x3400"
+      - series: 'memory_worker_paused{scope="backfill", pod="memory-worker-extract-a"}'
+        values: "0x3400"
+    alert_rule_test:
+      - eval_time: 47h
+        alertname: MemoryGraphBackfillStalled
+        exp_alerts: []
+      - eval_time: 53h
+        alertname: MemoryGraphBackfillStalled
+        exp_alerts: []
+      - eval_time: 55h
+        alertname: MemoryGraphBackfillStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The memory graph backfill has made no progress in 2 days."
+              description: "5000 current facts still have no graph, no fewer than 2 days ago, while the backfill is on (MEMORY_GRAPH_ENABLED and MEMORY_GRAPH_BACKFILL) and the worker is not paused. The backfill only runs inside MEMORY_EXTRACT_WINDOW and when the LLM worker is idle: check `kubectl -n memory logs deploy/memory-worker-extract`, the A9 llama-server, and `memory_worker_backfill_enqueued_total`."
+
+  - name: backfill stall stays silent while the worker is paused
+    interval: 1m
+    input_series:
+      - series: 'memory_graph_facts{state="without_graph"}'
+        values: "5000x3400"
+      - series: 'memory_worker_graph_backfill_enabled'
+        values: "1x3400"
+      - series: 'memory_worker_paused{scope="backfill"}'
+        values: "1x3400"
+    alert_rule_test:
+      - eval_time: 55h
+        alertname: MemoryGraphBackfillStalled
+        exp_alerts: []
+
+  - name: backfill stall stays silent while facts are being processed
+    interval: 1m
+    input_series:
+      - series: 'memory_graph_facts{state="without_graph"}'
+        values: "5000-1x3400"
+      - series: 'memory_worker_graph_backfill_enabled'
+        values: "1x3400"
+      - series: 'memory_worker_paused{scope="llm"}'
+        values: "0x3400"
+    alert_rule_test:
+      - eval_time: 55h
+        alertname: MemoryGraphBackfillStalled
+        exp_alerts: []
+
+  - name: backfill stall stays silent while the backfill is off (graph flag or backfill flag false)
+    interval: 1m
+    input_series:
+      - series: 'memory_graph_facts{state="without_graph"}'
+        values: "5000x3400"
+      - series: 'memory_worker_graph_backfill_enabled'
+        values: "0x3400"
+      - series: 'memory_worker_paused{scope="llm"}'
+        values: "0x3400"
+    alert_rule_test:
+      - eval_time: 55h
+        alertname: MemoryGraphBackfillStalled
+        exp_alerts: []
+
+  - name: backfill stall stays silent with 100 or fewer facts waiting
+    interval: 1m
+    input_series:
+      - series: 'memory_graph_facts{state="without_graph"}'
+        values: "100x3400"
+      - series: 'memory_worker_graph_backfill_enabled'
+        values: "1x3400"
+    alert_rule_test:
+      - eval_time: 55h
+        alertname: MemoryGraphBackfillStalled
+        exp_alerts: []
+
+  # --- MemoryGraphExtractionFailing: > 5 % failed over 24h, for 1h ---------------------------------------------
+  - name: graph extraction failure rate above 5 percent fires after 1h
+    interval: 1m
+    input_series:
+      - series: 'memory_worker_graph_extractions_total{mode="full", outcome="failed"}'
+        values: "0+1x150"
+      - series: 'memory_worker_graph_extractions_total{mode="full", outcome="ok"}'
+        values: "0+9x150"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: MemoryGraphExtractionFailing
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: MemoryGraphExtractionFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "More than 5% of memory graph extractions failed in 24h."
+              description: "10% of graph-v1 answers were unusable after the feedback retry (the PoC measured 0%). A model or prompt change is the likely cause. Failed facts get graph_mode 'failed' and wait for `memory-admin graph retry-failed --apply` once the cause is fixed."
+
+  - name: graph extraction failure rate at or below 5 percent stays silent
+    interval: 1m
+    input_series:
+      - series: 'memory_worker_graph_extractions_total{mode="entities", outcome="failed"}'
+        values: "0+1x150"
+      - series: 'memory_worker_graph_extractions_total{mode="entities", outcome="ok"}'
+        values: "0+19x150"
+      - series: 'memory_worker_graph_extractions_total{mode="entities", outcome="partial"}'
+        values: "0+5x150"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: MemoryGraphExtractionFailing
+        exp_alerts: []
+
+  # --- MemorySupersessionReviewBacklog: > 200 pending, for 7d ----------------------------------------------------
+  - name: supersession backlog above 200 for a week fires
+    interval: 1m
+    input_series:
+      - series: 'memory_graph_suggestions_pending{pod="memory-gateway-a"}'
+        values: "250x10300"
+      - series: 'memory_graph_suggestions_pending{pod="memory-gateway-b"}'
+        values: "250x10300"
+    alert_rule_test:
+      - eval_time: 160h
+        alertname: MemorySupersessionReviewBacklog
+        exp_alerts: []
+      - eval_time: 170h
+        alertname: MemorySupersessionReviewBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "More than 200 supersession suggestions have waited for review for a week."
+              description: "250 suggestions are pending. Suggestions nobody reviews lose their value: `kubectl -n memory exec deploy/memory-gateway -- node dist/admin/cli.js supersession list`, then `supersession accept|reject <id> --apply`."
+
+  - name: supersession backlog of 200 or fewer stays silent
+    interval: 1m
+    input_series:
+      - series: 'memory_graph_suggestions_pending'
+        values: "200x10300"
+    alert_rule_test:
+      - eval_time: 170h
+        alertname: MemorySupersessionReviewBacklog
+        exp_alerts: []
+
+  # --- MemoryWorkerPausedLong: any scope paused, for 24h ----------------------------------------------------------
+  - name: a pause held for more than a day fires
+    interval: 1m
+    input_series:
+      - series: 'memory_worker_paused{scope="llm", pod="memory-worker-extract-a"}'
+        values: "1x1600"
+      - series: 'memory_worker_paused{scope="backfill", pod="memory-worker-extract-a"}'
+        values: "0x1600"
+    alert_rule_test:
+      - eval_time: 23h
+        alertname: MemoryWorkerPausedLong
+        exp_alerts: []
+      - eval_time: 25h
+        alertname: MemoryWorkerPausedLong
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Memory LLM work has been paused for more than 24h."
+              description: "A `memory-admin worker pause` has held for over a day (bounded to 7 days); it was probably forgotten. Live extraction (scope llm) or the backfill (scope backfill) is stopped. Resume with `kubectl -n memory exec deploy/memory-gateway -- node dist/admin/cli.js worker resume --scope <scope> --apply`."
+
+  - name: no pause stays silent
+    interval: 1m
+    input_series:
+      - series: 'memory_worker_paused{scope="llm"}'
+        values: "0x1600"
+      - series: 'memory_worker_paused{scope="backfill"}'
+        values: "0x1600"
+    alert_rule_test:
+      - eval_time: 25h
+        alertname: MemoryWorkerPausedLong
+        exp_alerts: []

@@ -5,8 +5,8 @@ The queue workers of the memory gateway: they take `extract` and `embed` jobs fr
 [`2026-10-21-memory-gateway-contract-design.md`](https://github.com/nwlnexus/olympus-sdk/blob/main/docs/superpowers/specs/2026-10-21-memory-gateway-contract-design.md)
 sections 3.4, 8 and 9. Code, configuration reference and image: `packages/memory-workers` in olympus-sdk
 (`README.md` there lists every setting), published as `ghcr.io/nwlnexus/memory-workers` by
-`.github/workflows/memory-workers.yml`. Two processes: the LLM process (`extract`, `graph_ingest` and the
-legacy `graph_forget` drain, design 14.7, olympus-sdk#516) and `embed`.
+`.github/workflows/memory-workers.yml`. Two processes: the LLM process (`extract` and `graph_ingest`, which
+also runs the graph backfill; design 14.6/14.7, olympus-sdk#516, #519) and `embed`.
 
 | File | What |
 |---|---|
@@ -29,7 +29,7 @@ Not here, on purpose:
 
 | | `memory-worker-extract` | `memory-worker-embed` |
 |---|---|---|
-| args | `--stage extract,graph_ingest,graph_forget` | `--stage embed` |
+| args | `--stage extract,graph_ingest` | `--stage embed` |
 | replicas | **1** (the 27B llama-server is single-slot) | 2, preferred anti-affinity across nodes |
 | claim loops x batch | 1 x 1 | 4 x 4 per pod (a batch is one `/embeddings` request) |
 | rollout | `Recreate` (never two extractors at once) | rolling, `maxUnavailable: 0`, `maxSurge: 1` |
@@ -50,12 +50,15 @@ A restart or rollout therefore never loses a job, at worst an extraction restart
 
 Settings live in `workers-config.env` (generated `ConfigMap/memory-workers-config-<hash>`) (shared keys through `envFrom`, the four per-stage keys
 `extract-*` / `embed-*` through `configMapKeyRef`). Anything not listed there keeps the worker default (README of
-the package: leases extract 600 s / graph_ingest 300 s / graph_forget 60 s / embed 120 s, job timeouts 2400 s /
-1200 s / 60 s / 90 s). Changing the ConfigMap or the Secret rolls the pods (stakater reloader).
+the package: leases extract 600 s / graph_ingest 300 s / embed 120 s, job timeouts 2400 s /
+1200 s / 90 s). Changing the ConfigMap or the Secret rolls the pods (stakater reloader).
 `MEMORY_EXTRACT_WINDOW=0-7`: backlog work (priority >= 200) runs 00:00-07:59 UTC only; live work any time.
 `MEMORY_GRAPH_ENABLED` is the graph kill switch (olympus-sdk#516): `false` = facts only, graph_ingest jobs wait
 (`MemoryQueueBacklogOld` fires after 4 h, deliberately loud); it is turned on only after the golden-set evaluation
 (olympus-sdk#517) passes. A `memory-admin worker pause --scope llm|backfill` is honoured before every claim.
+`MEMORY_GRAPH_BACKFILL=true` (olympus-sdk#519): while the graph is on, the idle LLM process keeps one backfill
+`graph_ingest` job (`:bf` full / `:bfe` entities-only, priority 300) in the queue inside the window; progress is the
+gateway gauge `memory_graph_facts{state="without_graph"}`. The `graph_forget` stage is gone (removed from the worker; migration 0006 follows).
 
 Connections: each pod opens `concurrency + 4` Postgres connections as `memory_worker` (5 for extract, 8 per embed
 pod), 21 in total against `max_connections = 100` (the gateway uses its own pool).
