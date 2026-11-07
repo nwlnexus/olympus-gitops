@@ -712,6 +712,46 @@ spec:
                 annotations:
                   summary: "Memory embedder p95 latency is above 8s."
                   description: "p95 /v1/embeddings latency is {{ $value | humanizeDuration }} over 5m. The embedder is saturated (offered load above its CPU capacity: see memory/embedder/README.md, \"Sizing\") or CPU-throttled on the node. Check `te_queue_size` and `kubectl -n memory top pods`."
+          - name: memory-graph
+            rules:
+              # Postgres graph (olympus-sdk#519 task A1, contract section 9 "Amended 2026-10-21"). Gauges
+              # memory_graph_* come from the gateway (Q-GRAPH-METRICS every 30 s, both replicas, hence max);
+              # memory_worker_* from the LLM worker (memory-worker-extract). Scraped through kubernetes-pods.
+              # The expr/for/severity are the design's, verbatim; the annotations are additions.
+              - alert: MemoryGraphBackfillStalled
+                expr: |
+                  max(memory_graph_facts{state="without_graph"}) > 100
+                  and max(memory_graph_facts{state="without_graph"} offset 2d) <= max(memory_graph_facts{state="without_graph"})
+                  and on() max(memory_worker_graph_backfill_enabled) == 1
+                  unless on() max(memory_worker_paused) > 0
+                for: 6h
+                labels: { severity: warning }
+                annotations:
+                  summary: "The memory graph backfill has made no progress in 2 days."
+                  description: "{{ $value }} current facts still have no graph, no fewer than 2 days ago, while the backfill is on (MEMORY_GRAPH_ENABLED and MEMORY_GRAPH_BACKFILL) and the worker is not paused. The backfill only runs inside MEMORY_EXTRACT_WINDOW and when the LLM worker is idle: check `kubectl -n memory logs deploy/memory-worker-extract`, the A9 llama-server, and `memory_worker_backfill_enqueued_total`."
+              - alert: MemoryGraphExtractionFailing
+                expr: |
+                  sum(increase(memory_worker_graph_extractions_total{outcome="failed"}[24h]))
+                    / clamp_min(sum(increase(memory_worker_graph_extractions_total[24h])), 1) > 0.05
+                for: 1h
+                labels: { severity: warning }
+                annotations:
+                  summary: "More than 5% of memory graph extractions failed in 24h."
+                  description: "{{ $value | humanizePercentage }} of graph-v1 answers were unusable after the feedback retry (the PoC measured 0%). A model or prompt change is the likely cause. Failed facts get graph_mode 'failed' and wait for `memory-admin graph retry-failed --apply` once the cause is fixed."
+              - alert: MemorySupersessionReviewBacklog
+                expr: max(memory_graph_suggestions_pending) > 200
+                for: 7d
+                labels: { severity: warning }
+                annotations:
+                  summary: "More than 200 supersession suggestions have waited for review for a week."
+                  description: "{{ $value }} suggestions are pending. Suggestions nobody reviews lose their value: `kubectl -n memory exec deploy/memory-gateway -- node dist/admin/cli.js supersession list`, then `supersession accept|reject <id> --apply`."
+              - alert: MemoryWorkerPausedLong
+                expr: max(memory_worker_paused) > 0
+                for: 24h
+                labels: { severity: warning }
+                annotations:
+                  summary: "Memory LLM work has been paused for more than 24h."
+                  description: "A `memory-admin worker pause` has held for over a day (bounded to 7 days); it was probably forgotten. Live extraction (scope llm) or the backfill (scope backfill) is stopped. Resume with `kubectl -n memory exec deploy/memory-gateway -- node dist/admin/cli.js worker resume --scope <scope> --apply`."
           - name: inference
             rules:
               # Cluster LiteLLM (olympus-sdk#569, HW11). Probes: job blackbox-inference-http above;

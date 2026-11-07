@@ -5,8 +5,8 @@
 # Deployed by its own Flux Kustomization (../../flux-kustomizations/memory-workers.yaml), like the
 # gateway, so a broken worker rollout can never make the stores or the gateway unhealthy.
 #
-# One image, two processes: the LLM process `--stage extract,graph_ingest,graph_forget` (design 14.7,
-# olympus-sdk#516: one consumer of the 27B; it also writes the Postgres graph) and `--stage embed`. Workers pull jobs from
+# One image, two processes: the LLM process `--stage extract,graph_ingest` (design 14.7,
+# olympus-sdk#516, #519: one consumer of the 27B; it also writes the Postgres graph) and `--stage embed`. Workers pull jobs from
 # the Postgres queue (connecting as role `memory_worker`); nothing connects to them except
 # Prometheus (9090: /metrics, /healthz, /readyz). There is therefore no Service.
 # Embed pair: 2 replicas, a node drain may take one, never both. (The extract worker is a single
@@ -98,11 +98,11 @@ spec:
           # Pinned by digest, never by tag: the multi-arch INDEX digest (linux/amd64 + linux/arm64) of
           # tag sha-493b33b, built from olympus-sdk main by .github/workflows/memory-workers.yml
           # (olympus-sdk#707). The embed Deployment below pins the same digest; bump both together.
-          image: ghcr.io/nwlnexus/memory-workers@sha256:efbcd1284a47f58640640561463cb85819afe58f7ac7dcfe1909f8974a0502ee
+          image: ghcr.io/nwlnexus/memory-workers@sha256:38a0cfc9ab449fac9d5059a6c7cdd732c37c170b308a8409280c5fe2f1db0edb
           imagePullPolicy: IfNotPresent
           # The image ENTRYPOINT is `python -m memory_workers`; the stages are the argument. One process
-          # for every LLM stage (design 14.7/14.8): claim order extract, graph_ingest, graph_forget.
-          args: ["--stage", "extract,graph_ingest,graph_forget"]
+          # for every LLM stage (design 14.7/14.8): claim order extract, graph_ingest, then the backfill.
+          args: ["--stage", "extract,graph_ingest"]
           ports:
             - name: metrics
               containerPort: 9090
@@ -264,7 +264,7 @@ spec:
                     app.kubernetes.io/name: memory-worker-embed
       containers:
         - name: memory-worker
-          image: ghcr.io/nwlnexus/memory-workers@sha256:efbcd1284a47f58640640561463cb85819afe58f7ac7dcfe1909f8974a0502ee
+          image: ghcr.io/nwlnexus/memory-workers@sha256:38a0cfc9ab449fac9d5059a6c7cdd732c37c170b308a8409280c5fe2f1db0edb
           imagePullPolicy: IfNotPresent
           args: ["--stage", "embed"]
           ports:
