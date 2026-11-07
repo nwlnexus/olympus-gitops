@@ -11,13 +11,12 @@ kind: Namespace
 metadata:
   name: arc-system
   labels:
-    # Enforce baseline, but audit + warn on restricted. The listener pod is
-    # synthesised by the controller at runtime (not by the Helm chart), so its
-    # restricted compliance could not be verified from rendered manifests. The
-    # controller Deployment and the listener (via listenerTemplate) are configured
-    # to the restricted profile; promote enforce to `restricted` once the listener
-    # is Running with no audit/warn events.
-    pod-security.kubernetes.io/enforce: baseline
+    # Restricted enforce (olympus-sdk#408). The controller Deployment and the listener
+    # pods (via listenerTemplate) run as non-root with all capabilities dropped and
+    # seccomp RuntimeDefault; `kubectl label --dry-run=server ... enforce=restricted`
+    # printed no warnings for them (2026-10-19, re-checked 2026-11-07 on chart 0.15.0).
+    # Re-check with that dry run after any chart bump before merging it.
+    pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
 ---
