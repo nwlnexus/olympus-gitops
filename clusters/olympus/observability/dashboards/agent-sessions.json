@@ -908,6 +908,108 @@
           "mode": "multi"
         }
       }
+    },
+    {
+      "id": 19,
+      "title": "Cost by query source (main / subagent / auxiliary)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 12,
+        "h": 8
+      },
+      "description": "subagent = Agent and Workflow tool agents (olympus-sdk#574): a Workflow run shows as a subagent spike over its run window.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": {
+            "fillOpacity": 20,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "legendFormat": "{{query_source}}",
+          "expr": "sum by (query_source) (increase(claude_code_cost_usage_USD_total{account=~\"$account\", vcs_repository_name=~\"$repo\"}[$__rate_interval]))"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "title": "Subagent and workflow cost by model",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 52,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Cost of query_source=subagent by model, the per-run cost of Workflow scripts and named subagents (olympus-sdk#574).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": {
+            "fillOpacity": 20,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "legendFormat": "{{model}}",
+          "expr": "sum by (model) (increase(claude_code_cost_usage_USD_total{account=~\"$account\", vcs_repository_name=~\"$repo\", query_source=\"subagent\"}[$__rate_interval]))"
+        }
+      ]
     }
   ]
 }
