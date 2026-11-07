@@ -453,6 +453,19 @@ VM suites fetch `dl.nwlnexus.io` inside the guest), Node's built-in `fetch()` wi
 `NODE_USE_ENV_PROXY=1`, and anything speaking non-HTTP (ssh, NTP). Phase 2 must pass the proxy into
 those or accept that they fail closed under phase 3.
 
+Monitoring: Prometheus alerts `CiEgressProxyDown` (no available replica, 2m), `CiEgressProxyDegraded`
+(one replica, 30m) and `CiEgressProbeFailing` (blackbox HTTPS GET of `api.github.com/rate_limit` through
+the proxy, job `blackbox-ci-egress`, 5m) in group `ci-egress-proxy`
+(`../observability/prometheus-helmrelease.yaml`); the Loki ruler alert `CiEgressDenials` (more than 5
+`status=403` lines in 10m, `../observability/loki-rules-ci-egress.yaml`). The runner templates also set
+`WRANGLER_SEND_METRICS=false`, `TURBO_TELEMETRY_DISABLED=1` and `DO_NOT_TRACK=1`, so tool telemetry is
+off at the source instead of showing up as denials. `squid -k parse` runs on every PR against the
+pinned image (validate workflow).
+
+The Flux Kustomization `arc` deliberately does **not** `dependsOn` `ci-egress`: a broken proxy would then
+also block reconciling `arc`, i.e. the drain switch and the fallback below (removing the proxy env and
+reverting the runner network policy), exactly when they are needed.
+
 **If the proxy is down**, every job on these runners fails (the runner reaches GitHub through it).
 Fallback, fastest first: (1) fix or roll back `../ci-egress/` (Flux Kustomization `ci-egress`
 turns not-ready when its pods are not Ready); (2) PR removing the proxy env from the scale-set

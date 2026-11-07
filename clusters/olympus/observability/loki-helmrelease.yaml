@@ -61,6 +61,18 @@ spec:
           # QNAP S3 serves a self-signed cert → skip verification.
           http_config:
             insecure_skip_verify: true
+      # Log-based alerts (olympus-sdk#407): the ruler evaluates the LogQL rules the loki-sc-rules sidecar
+      # writes from ConfigMaps labelled `loki_rule` in this namespace (e.g. loki-rules-ci-egress.yaml) and
+      # sends alerts to the same Alertmanager as Prometheus. Local rule storage: the sidecar's folder is
+      # /rules/fake (sidecar.rules.folder below; `fake` is the tenant when auth_enabled is false).
+      # rule_path is the ruler's scratch copy, kept off the sidecar's directory.
+      rulerConfig:
+        alertmanager_url: http://prometheus-alertmanager.observability.svc:9093
+        rule_path: /var/loki/rules-temp
+        storage:
+          type: local
+          local:
+            directory: /rules
       limits_config:
         retention_period: 744h   # 31d
         reject_old_samples: true
@@ -79,6 +91,8 @@ spec:
         size: 10Gi
     # The loki-sc-rules sidecar container.
     sidecar:
+      rules:
+        folder: /rules/fake
       resources:
         requests:
           cpu: 10m

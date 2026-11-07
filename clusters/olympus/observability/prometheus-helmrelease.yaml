@@ -327,6 +327,27 @@ spec:
             target_label: instance
           - target_label: __address__
             replacement: blackbox-exporter.observability.svc:9115
+      # CI egress proxy (olympus-sdk#407, ../ci-egress/, ../arc/README.md "Egress proxy"): an HTTPS GET through
+      # squid as a runner makes it (module http_via_ci_egress). GitHub's /rate_limit does not count against the
+      # unauthenticated API quota, which the CI jobs share (same public IP). probe_success 0 = the proxy is down,
+      # refuses GitHub (allowlist) or GitHub is unreachable from it.
+      - job_name: blackbox-ci-egress
+        metrics_path: /probe
+        params:
+          module: [http_via_ci_egress]
+        scrape_interval: 60s
+        scrape_timeout: 15s
+        static_configs:
+          - targets: ["https://api.github.com/rate_limit"]
+            labels:
+              service: ci-egress-proxy
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.observability.svc:9115
       # ARC, the CI runner scale sets on the cluster (olympus-sdk#392, epic #383; ../arc/README.md, "Monitoring").
       # The controller and one listener pod per scale set serve metrics on the container port named
       # `metrics` (8080; ../arc/helmrelease-controller.yaml `metrics:`). Allowed by
@@ -799,6 +820,34 @@ spec:
                 annotations:
                   summary: "Account {{ $labels.account }} used more than $25 of API-equivalent Claude usage in the last hour."
                   description: "${{ $value | humanize }} of API-equivalent usage (list price; on a Max plan this counts against the plan, it is not billed) in the last hour for account {{ $labels.account }}. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
+          - name: ci-egress-proxy
+            rules:
+              # CI egress proxy (olympus-sdk#407, ../ci-egress/). Every job on the cluster runners reaches GitHub through
+              # it (the runner itself too), so down = all on-cluster CI fails. Fallback: arc/README.md "Egress proxy".
+              # Denials (HTTP 403 from the allowlist) are alerted by the Loki ruler (loki-rules-ci-egress.yaml).
+              - alert: CiEgressProxyDown
+                expr: >-
+                  max(kube_deployment_status_replicas_available{namespace="ci-egress", deployment="egress-proxy"}) < 1
+                  or absent(kube_deployment_status_replicas_available{namespace="ci-egress", deployment="egress-proxy"})
+                for: 2m
+                labels: { severity: critical }
+                annotations:
+                  summary: "The CI egress proxy (ci-egress/egress-proxy) has no available replica."
+                  description: "No Ready squid pod for 2m: every job on olympus-linux, olympus-gate, olympus-kvm and olympus-arm64 fails (the runner reaches GitHub through the proxy). `kubectl -n ci-egress get pods,events` and `kubectl -n ci-egress logs deploy/egress-proxy`; a bad squid.conf shows there (ci-egress/configmap.yaml, roll back by reverting). Fallback: arc/README.md, \"Egress proxy\"."
+              - alert: CiEgressProxyDegraded
+                expr: max(kube_deployment_status_replicas_available{namespace="ci-egress", deployment="egress-proxy"}) < 2
+                for: 30m
+                labels: { severity: warning }
+                annotations:
+                  summary: "The CI egress proxy has had only {{ $value }} available replica(s) for 30m."
+                  description: "One node failure away from all on-cluster CI failing. `kubectl -n ci-egress get pods -o wide,events`: the two replicas need two eligible nodes (required anti-affinity)."
+              - alert: CiEgressProbeFailing
+                expr: probe_success{job="blackbox-ci-egress"} == 0
+                for: 5m
+                labels: { severity: critical }
+                annotations:
+                  summary: "HTTPS to GitHub through the CI egress proxy has failed for 5m."
+                  description: "The blackbox probe of {{ $labels.instance }} through egress-proxy.ci-egress.svc:3128 fails while runner jobs need the same path. Pods up but failing: squid's allowlist refuses api.github.com (ci-egress/configmap.yaml), its upstream DNS or internet egress is broken (ci-egress/networkpolicy.yaml), or GitHub is down. `kubectl -n ci-egress logs deploy/egress-proxy | grep api.github.com`."
           - name: arc-ci-runners
             rules:
               # CI runner scale sets on the cluster (olympus-sdk#392, epic #383). Scrape jobs arc-controller and
