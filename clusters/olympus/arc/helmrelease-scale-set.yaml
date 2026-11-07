@@ -153,6 +153,10 @@ spec:
                 value: localhost,127.0.0.1,::1,0.0.0.0,.svc,.cluster.local,10.0.0.0/8,litellm.inference.svc,litellm.inference.svc.cluster.local,$(POD_IP)
               - name: no_proxy
                 value: localhost,127.0.0.1,::1,0.0.0.0,.svc,.cluster.local,10.0.0.0/8,litellm.inference.svc,litellm.inference.svc.cluster.local,$(POD_IP)
+              # Node 24 ignores HTTP(S)_PROXY unless this is set; actions such as
+              # create-github-app-token refuse to run when a proxy env is set without it (#407).
+              - name: NODE_USE_ENV_PROXY
+                value: "1"
             resources:
               requests:
                 cpu: "2"
