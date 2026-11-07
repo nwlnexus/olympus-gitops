@@ -1,0 +1,13 @@
+# Every CI job depends on this proxy once the runners use it (the runner itself reaches GitHub
+# through it), so voluntary disruptions (node drains by system-upgrade-controller, descheduler
+# evictions) may take down at most one replica at a time.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: egress-proxy
+  namespace: ci-egress
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: egress-proxy

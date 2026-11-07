@@ -27,6 +27,7 @@ resources:
   - flux-kustomizations/system-upgrade.yaml
   - flux-kustomizations/arc.yaml
   - flux-kustomizations/kvm-device-plugin.yaml
+  - flux-kustomizations/ci-egress.yaml
   - flux-kustomizations/memory.yaml
   - flux-kustomizations/memory-gateway.yaml
   - flux-kustomizations/memory-workers.yaml

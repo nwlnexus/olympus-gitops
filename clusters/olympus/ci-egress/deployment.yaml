@@ -1,0 +1,139 @@
+# CI egress forward proxy (squid), nwlnexus/olympus-sdk#407. Runner pods in arc-runners send
+# HTTP(S) through it (HTTP(S)_PROXY in ../arc/helmrelease-scale-set*.yaml). Phase 1: log-only
+# (configmap.yaml).
+#
+# Availability: once the runners use it, every CI job depends on it (the actions runner itself
+# reaches GitHub through it). Hence 2 replicas on different nodes (required anti-affinity), a PDB
+# (pdb.yaml), a readiness probe (the Service routes only to Ready pods), surge-only rollouts and a
+# graceful shutdown that lets in-flight requests finish. Fallback if it is down: README in ../arc/.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: egress-proxy
+  namespace: ci-egress
+  annotations:
+    # Roll the pods when configmap.yaml changes (stakater reloader, ../reloader).
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: egress-proxy
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: egress-proxy
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        # `_daemon_` in the Ubuntu rock (the image's own USER); numeric for runAsNonRoot.
+        runAsUser: 584792
+        runAsGroup: 584792
+        seccompProfile:
+          type: RuntimeDefault
+      # arm64 opt-in (olympus-sdk#707): the image is a multi-arch index with linux/arm64, so the
+      # proxy may run on the Mac VMs too.
+      tolerations:
+        - key: olympus.io/arch
+          operator: Equal
+          value: arm64
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          # Never on the agent-services onodes (memory + inference; tainted anyway).
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: olympus.io/role
+                    operator: DoesNotExist
+          # Prefer nodes that are not control-plane/etcd: that is naraka-01 and the Mac VMs, i.e.
+          # off the three compute onodes where the amd64 runners (olympus-linux, -gate, -kvm) and
+          # etcd compete for CPU and I/O. Soft, so it still schedules if those nodes are full.
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+        # One replica per node: a single node failure or drain never takes both down.
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: egress-proxy
+      containers:
+        - name: squid
+          # ubuntu/squid rock 7.2-26.04_edge (Canonical, Ubuntu 26.04 LTS, squid 7.7, runs as a
+          # non-root user, multi-arch index: amd64 + arm64), pinned by index digest. Never use a tag.
+          # Bump: `skopeo inspect --raw docker://docker.io/ubuntu/squid:<tag> | sha256sum`.
+          image: docker.io/ubuntu/squid@sha256:041c64dd14c81548023c9532e4c2fac487e9a3f9f490913b50547d2974722025
+          # The binary directly (not the image's pebble entrypoint): foreground (-N), our config.
+          command: ["/usr/sbin/squid-gnutls", "-N", "-f", "/etc/squid-egress/squid.conf"]
+          ports:
+            - name: proxy
+              containerPort: 3128
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: proxy
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            tcpSocket:
+              port: proxy
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+          lifecycle:
+            # Give kube-proxy time to drop this pod from the Service before squid stops accepting.
+            preStop:
+              sleep:
+                seconds: 5
+          resources:
+            # Measured locally: about 95 MB RSS at start, no cache; tunnels add buffers per
+            # connection. Revisit from real usage (docs/sizing) after phase 2.
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/squid-egress
+              readOnly: true
+            - name: spool
+              mountPath: /var/spool/squid
+            - name: run
+              mountPath: /run
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: egress-proxy-config
+        - name: spool
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

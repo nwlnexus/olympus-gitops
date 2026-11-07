@@ -16,7 +16,8 @@ and, with `../kvm-device-plugin/`, #390).
 | `namespace.yaml` | `arc-system` (controller + listeners), `arc-runners` (runner pods of all scale sets, PSA `restricted`) |
 | `priorityclass.yaml` | `ci-runner` and `ci-runner-kvm`, both value -1000, `preemptionPolicy: Never` (below every other workload); two classes only so the quota can scope the KVM budget |
 | `quota.yaml`, `limitrange.yaml` | hard ceilings: total 14 pods; `ci-runners-non-kvm` (olympus-linux + olympus-gate: 12 pods, 8.5 CPU / 17 GiB requests, 20 CPU / 36 GiB limits, no `/dev/kvm`) and `ci-runners-kvm` (2 pods, 4 CPU / 8 GiB requests, 6 CPU / 16 GiB limits, 2 `olympus.io/kvm`); default requests/limits for every container |
-| `networkpolicy.yaml` | default-deny ingress; runner egress = DNS + public internet only (no IPv4 cluster, node, LAN or tailnet addresses), plus `egress-litellm-kvm`: pods labelled `olympus.io/ci-kvm` (olympus-kvm only) may reach the `inference` LiteLLM pods on TCP 4000 (executor, olympus-sdk#642); controller/listener egress adds the API server only |
+| `networkpolicy.yaml` | default-deny ingress; runner egress = DNS + public internet only (no IPv4 cluster, node, LAN or tailnet addresses), plus `egress-litellm-kvm`: pods labelled `olympus.io/ci-kvm` (olympus-kvm only) may reach the `inference` LiteLLM pods on TCP 4000 (executor, olympus-sdk#642), plus `egress-ci-egress-proxy`: every runner pod may reach the egress proxy pods in `ci-egress` on TCP 3128 (olympus-sdk#407); controller/listener egress adds the API server only |
+| `../ci-egress/` | separate Flux app: the CI egress forward proxy (squid, 2 replicas), see "Egress proxy" below |
 | `externalsecret.yaml` | `arc-github-app` Secret (GitHub App credentials) from 1Password via ESO |
 | `ocirepository.yaml` | both charts pinned by digest (`ghcr.io/actions/actions-runner-controller-charts`) |
 | `helmrelease-controller.yaml` | `gha-runner-scale-set-controller` (release `arc`, CRDs `CreateReplace`, `watchSingleNamespace: arc-runners`, image pinned by digest) |
@@ -319,13 +320,53 @@ skopeo logout ghcr.io
 then update the digest in `../kvm-device-plugin/daemonset.yaml` AND `../kvm-device-plugin/vap.yaml`
 in one PR (the policy rejects any other image). Review the upstream diff first: the plugin is root-equivalent on the node.
 
+## Egress proxy (olympus-sdk#407)
+
+Runner pods can reach any public IP, so a malicious job can exfiltrate whatever it can read.
+NetworkPolicy (kube-router) cannot match hostnames, so egress goes through an allowlisting forward
+proxy in its own namespace, `../ci-egress/` (squid, `ubuntu/squid` rock by digest, 2 replicas on
+different nodes, PDB, PSA `restricted`, read-only root fs). Its policy admits TCP 3128 from
+`arc-runners` only; its egress is DNS + the public internet with the runners' except-list, and squid
+itself refuses internal destinations. It prefers nodes that are not control-plane (naraka-01, the
+Mac VMs), away from the amd64 runners and etcd.
+
+Staged, because a wrong allowlist breaks all CI:
+
+1. **Log-only (live).** squid allows everything and logs one line per request
+   (`egress method=CONNECT host=github.com port=443 status=200 ... ua="..."`; host and port only,
+   never URL paths). The runner templates set `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (both cases,
+   all four scale sets). Direct egress stays allowed, so a tool that ignores the proxy env keeps
+   working; it shows up as missing from the proxy log, not as a failed job.
+2. **Allowlist from the logs.** Distinct hosts over real CI traffic from Loki (the otel-logs
+   DaemonSet ships the pod logs):
+   `sum by (host) (count_over_time({k8s_namespace_name="ci-egress"} |= "egress method=" | logfmt [7d]))`.
+   Then squid enforces a `dstdomain` allowlist (CONNECT to 443 only); denials show as
+   `status=403 result=TCP_DENIED`.
+3. **Enforce at the network.** `egress-dns-and-internet` shrinks to DNS + the proxy (+ the LiteLLM
+   exception for olympus-kvm), so nothing can bypass the proxy.
+
+`NO_PROXY` keeps local and in-cluster traffic direct: `localhost`, `127.0.0.1`, `::1` (QEMU guests
+are reached through hostfwd on 127.0.0.1 in the kvm pods), `.svc`, `.cluster.local`, `10.0.0.0/8`
+(only for clients that understand CIDR; curl 7.81 in the runner image does not), the LiteLLM
+Service (`litellm.inference.svc`, executor on olympus-kvm) and the pod's own IP.
+
+Not proxied today (they ignore the env or never see it): the QEMU guests (user-mode NAT through the
+pod's sockets; the executor's provision boot downloads node, uv and pnpm inside the guest, and some
+VM suites fetch `dl.nwlnexus.io` inside the guest), Node's built-in `fetch()` without
+`NODE_USE_ENV_PROXY=1`, and anything speaking non-HTTP (ssh, NTP). Phase 2 must pass the proxy into
+those or accept that they fail closed under phase 3.
+
+**If the proxy is down**, every job on these runners fails (the runner reaches GitHub through it).
+Fallback, fastest first: (1) fix or roll back `../ci-egress/` (Flux Kustomization `ci-egress`
+turns not-ready when its pods are not Ready); (2) PR removing the proxy env from the scale-set
+templates (works while phase 3 is not in place; with phase 3, also revert the network policy);
+(3) the hosted-runner fallback under "Drain, fallback and removal".
+
 ## Later (intentionally not included yet)
 
 - Controller/listener metrics, dashboards, alerts: #392 (no scrape job exists; arc-system allows no ingress).
-- Egress allowlist: runners can reach any public IP, so a malicious job can exfiltrate
-  anything it can read (repository secrets exposed to the job). Standard NetworkPolicy
-  and kube-router cannot match hostnames. Follow-up: an allowlisting forward proxy in its
-  own namespace with runner egress limited to it (tracked in a separate issue).
+- Egress allowlist: phase 1 (log-only proxy) is live, phases 2 and 3 are open ("Egress proxy" above,
+  olympus-sdk#407).
 
 ## Notes
 

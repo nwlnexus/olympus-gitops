@@ -1,0 +1,62 @@
+# squid configuration for the CI egress proxy (nwlnexus/olympus-sdk#407).
+#
+# PHASE 1 = LOG-ONLY: every destination is allowed (except internal addresses, which the
+# runners cannot reach directly either) and every request is logged, one line per request:
+#   egress method=CONNECT host=github.com port=443 status=200 result=TCP_TUNNEL/HIER_DIRECT ...
+# The pod's stdout goes to Loki through the otel-logs DaemonSet (../otel-collector/helmrelease-logs.yaml),
+# so phase 2 derives the allowlist from real CI traffic, e.g.
+#   sum by (host) (count_over_time({k8s_namespace_name="ci-egress"} |= "egress method=" | logfmt [7d]))
+# Only method, host and port are logged, never the URL path or query (signed URLs, tokens); for
+# HTTPS (CONNECT) squid sees nothing else anyway. `ua` is the client's User-Agent (which tool).
+#
+# PHASE 2/3 (not yet): replace `http_access allow all` with a dstdomain allowlist, e.g.
+#   acl ci_allowed dstdomain .github.com .githubusercontent.com crates.io .crates.io ...
+#   acl SSL_ports port 443
+#   http_access deny CONNECT !SSL_ports
+#   http_access allow ci_allowed
+#   http_access deny all
+#
+# Change procedure: edit, merge; reloader rolls the pods one at a time (deployment.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: egress-proxy-config
+  namespace: ci-egress
+data:
+  squid.conf: |
+    http_port 3128
+
+    # Pure forwarding proxy: no memory or disk cache, no pid file, no state files, logs to stdio
+    # (read-only root filesystem; /var/spool/squid is an emptyDir only for coredump_dir).
+    cache deny all
+    cache_mem 0 MB
+    pid_filename none
+    netdb_filename none
+    coredump_dir /var/spool/squid
+    logfile_rotate 0
+    cache_store_log none
+    # The ICMP pinger is a setuid helper; no_new_privs (PSA restricted) makes it fail anyway.
+    pinger_enable off
+    # Each tunnel holds two descriptors; 8192 is ample for 14 runner pods.
+    max_filedescriptors 8192
+
+    logformat egress egress method=%rm host=%>rd port=%>rP status=%>Hs result=%Ss/%Sh client=%>a dst=%<a bytes_in=%<st bytes_out=%>st ms=%tr ua="%"{User-Agent}>h"
+    access_log stdio:/dev/stdout logformat=egress
+    cache_log stdio:/dev/stderr
+
+    # Never act as a bridge into the cluster, the LAN, the tailnet or the node: the network policy
+    # (networkpolicy.yaml) already drops these, this refuses them with a clear 403 instead of a
+    # timeout and covers hostnames that resolve to internal addresses.
+    acl to_internal dst 0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16 ::1 fc00::/7 fe80::/10
+    http_access deny manager
+    http_access deny to_internal
+
+    # PHASE 1: log-only. Replaced by the allowlist in phase 2/3 (see the header comment).
+    http_access allow all
+
+    # Do not tell upstreams about the client (pod IPs) or the proxy.
+    forwarded_for delete
+    # Long-lived CONNECT tunnels (the runner's broker long-poll, log streaming) are fine; idle ones
+    # are closed after the default read_timeout (15 min). On SIGTERM finish in-flight requests
+    # for up to 20 s (terminationGracePeriodSeconds is 30).
+    shutdown_lifetime 20 seconds
