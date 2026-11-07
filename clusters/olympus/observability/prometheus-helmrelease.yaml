@@ -852,7 +852,7 @@ spec:
             rules:
               # CI runner scale sets on the cluster (olympus-sdk#392, epic #383). Scrape jobs arc-controller and
               # arc-listeners above; procedures in clusters/olympus/arc/README.md ("Runbook"). The macOS JIT runners
-              # on the Macs are not ARC and are not covered here (README, "macOS runners").
+              # on the Macs are not ARC: group ci-runners-macos below.
               - alert: ArcControllerDown
                 expr: absent(up{job="arc-controller"} == 1)
                 for: 10m
@@ -976,6 +976,55 @@ spec:
                 annotations:
                   summary: "etcd request p99 seen by the apiserver {{ $labels.instance }} is {{ $value | humanizeDuration }}."
                   description: "Non-list etcd requests from the apiserver take over 0.5s at p99 (normal: under 0.1s). Disk contention on the control-plane onodes is the usual cause; CI runs on the same disks. Compare with busy runners on the \"CI runners\" dashboard and drain CI (arc/README.md, Runbook) if they coincide."
+          - name: ci-runners-macos
+            rules:
+              # Native macOS JIT runners on data-hub, mmini-01 and mmini-02 (olympus-sdk#392; not ARC). Each Mac's
+              # root LaunchDaemon io.olympus.ci-runner-heartbeat (nix-darwin-hm d.server.ciRunner.heartbeat) pushes
+              # gauges every 60s over OTLP to the otel collector (obs-otlp, pipeline metrics/agents), which
+              # remote-writes them here as {job="ci-runner", host_name="<host>"}. Hosts that never reported (not
+              # deployed yet) raise nothing: the heartbeat alert only covers hosts seen in the last 7d, the others need
+              # a series to exist. No alert on registration age: a JIT runner re-registers only after a job, so an
+              # idle host keeps one registration for days; ci_runner_runner_up covers "no registered runner".
+              # Procedures: clusters/olympus/arc/README.md, Runbook "macOS runners".
+              - alert: MacCIRunnerHeartbeatMissing
+                expr: >-
+                  max by (host_name) (max_over_time(ci_runner_daemon_up{job="ci-runner"}[7d]))
+                  unless on (host_name) max by (host_name) (ci_runner_daemon_up{job="ci-runner"})
+                for: 10m
+                labels: { severity: warning }
+                annotations:
+                  summary: "No CI runner heartbeat from {{ $labels.host_name }} for 15m."
+                  description: "{{ $labels.host_name }} reported within the last 7 days but has pushed no ci_runner_* gauges for about 15m. The Mac is down or asleep, off the tailnet, or its heartbeat daemon fails (`sudo launchctl print system/io.olympus.ci-runner-heartbeat`, `sudo cat /var/log/ci-runner-heartbeat.log`). Its runner may still take jobs; check the org runners list. A host retired on purpose keeps firing for 7 days."
+              # launchd restarts the loop (KeepAlive, 30s throttle), so 10m down means launchd gave up on it, e.g. a
+              # missing executable at boot (mmini-01, 2026-10-31).
+              - alert: MacCIRunnerDaemonDown
+                expr: max by (host_name) (ci_runner_daemon_up{job="ci-runner"}) == 0
+                for: 10m
+                labels: { severity: warning }
+                annotations:
+                  summary: "The CI runner daemon on {{ $labels.host_name }} is not running."
+                  description: "launchd reports io.olympus.ci-runner as not running for 10m, so {{ $labels.host_name }} takes no macOS jobs. On the host (LAN sshd, admin): `sudo launchctl print system/io.olympus.ci-runner`, `sudo tail -n 50 /var/log/ci-runner.log`, then `sudo launchctl kickstart -k system/io.olympus.ci-runner` (arc/README.md, Runbook \"macOS runners\")."
+              # The loop fails closed: with a failed wipe it registers no runner and retries with backoff (30s to
+              # 5m), so 0 for 15m means repeated failures, not one.
+              - alert: MacCIRunnerWipeFailing
+                expr: max by (host_name) (ci_runner_last_wipe_ok{job="ci-runner"}) == 0
+                for: 15m
+                labels: { severity: warning }
+                annotations:
+                  summary: "The runner user wipe keeps failing on {{ $labels.host_name }}."
+                  description: "The last wipe of _ghrunner on {{ $labels.host_name }} failed and has not succeeded for 15m; the loop registers no runner until it does, so the host takes no jobs. The log names what survived (processes, launchd services, files): `sudo grep 'wipe:' /var/log/ci-runner.log | tail`. Something a job left behind that the wipe cannot remove needs a look before it is cleared by hand."
+              # The loop is running and the wipe is fine, yet no runner has been registered for 30m: credentials
+              # missing or rejected, GitHub API errors, or the pf check failing (the loop backs off; its log says why).
+              - alert: MacCIRunnerNotRegistered
+                expr: >-
+                  max by (host_name) (ci_runner_daemon_up{job="ci-runner"}) == 1
+                  and on (host_name) max by (host_name) (ci_runner_runner_up{job="ci-runner"}) == 0
+                  unless on (host_name) max by (host_name) (ci_runner_last_wipe_ok{job="ci-runner"}) == 0
+                for: 30m
+                labels: { severity: warning }
+                annotations:
+                  summary: "{{ $labels.host_name }} has had no registered CI runner for 30m."
+                  description: "The runner loop on {{ $labels.host_name }} is running but no runner of _ghrunner has been up for 30m, so the host takes no jobs. `sudo tail -n 50 /var/log/ci-runner.log`: \"waiting for the credential files\", \"could not get a JIT config\" (App key or installation, GitHub API) or \"network isolation not in force\" (pf)."
     prometheus-pushgateway:
       enabled: false
     kube-state-metrics:

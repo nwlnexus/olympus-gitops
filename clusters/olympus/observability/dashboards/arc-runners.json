@@ -13,7 +13,7 @@
     "from": "now-24h",
     "to": "now"
   },
-  "description": "ARC runner scale sets on compute-hub (olympus-sdk#392, epic #383): runners, queue time, job duration, quota, and node/etcd load while CI runs. Runbook: clusters/olympus/arc/README.md in olympus-gitops. The macOS JIT runners on the Macs are not ARC and do not appear here.",
+  "description": "ARC runner scale sets on compute-hub (olympus-sdk#392, epic #383): runners, queue time, job duration, quota, and node/etcd load while CI runs. Runbook: clusters/olympus/arc/README.md in olympus-gitops. The macOS JIT runners on the Macs are not ARC and do not appear here. macOS JIT runners (data-hub, mmini-01, mmini-02): heartbeat gauges pushed over OTLP, row \"macOS runners\".",
   "templating": {
     "list": [
       {
@@ -972,6 +972,208 @@
         "tooltip": {
           "mode": "multi"
         }
+      }
+    },
+    {
+      "id": 22,
+      "type": "row",
+      "title": "macOS runners (native JIT on data-hub, mmini-01, mmini-02; heartbeat every 60s)",
+      "gridPos": {
+        "x": 0,
+        "y": 54,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Loop daemon up and registered runner up by host (alerts: MacCIRunnerDaemonDown, MacCIRunnerNotRegistered)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 55,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "max by (host_name) (ci_runner_daemon_up{job=\"ci-runner\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "legendFormat": "daemon {{host_name}}"
+        },
+        {
+          "expr": "max by (host_name) (ci_runner_runner_up{job=\"ci-runner\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "legendFormat": "runner {{host_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Last wipe ok by host (0 = the loop registers no runner; alert: MacCIRunnerWipeFailing)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 55,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "max by (host_name) (ci_runner_last_wipe_ok{job=\"ci-runner\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "legendFormat": "{{host_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Time since last JIT registration (re-registers after each job; long on an idle host is normal)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 63,
+        "w": 12,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "time() - max by (host_name) (ci_runner_last_registration_timestamp_seconds{job=\"ci-runner\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "instant": true,
+          "legendFormat": "{{host_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "Time since last heartbeat (alert: MacCIRunnerHeartbeatMissing at ~15m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 63,
+        "w": 12,
+        "h": 4
+      },
+      "targets": [
+        {
+          "expr": "time() - max by (host_name) (max_over_time(timestamp(ci_runner_daemon_up{job=\"ci-runner\"})[1d:1m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "instant": true,
+          "legendFormat": "{{host_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none",
+        "graphMode": "none"
       }
     }
   ]
