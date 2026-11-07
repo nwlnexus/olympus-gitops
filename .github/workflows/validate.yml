@@ -95,7 +95,10 @@ jobs:
           docker run --rm --network none -v "$conf:/etc/squid-egress:ro" \
             --entrypoint /usr/sbin/squid-gnutls "$image" -k parse -f /etc/squid-egress/squid.conf 2>&1 \
             | tee "$RUNNER_TEMP/squid-parse.log"
-          if grep -E 'FATAL|ERROR|WARNING' "$RUNNER_TEMP/squid-parse.log"; then
+          # --network none: the container's own hostname cannot be reverse-resolved; that warning is about
+          # the lint container, not the config.
+          if grep -E 'FATAL|ERROR|WARNING' "$RUNNER_TEMP/squid-parse.log" \
+            | grep -vE "rDNS test failed|Could not determine this machines public hostname"; then
             echo "::error title=squid.conf::squid -k parse reported errors or warnings (see above)"
             exit 1
           fi
