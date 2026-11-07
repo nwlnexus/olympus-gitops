@@ -481,11 +481,11 @@ all. Anything speaking non-HTTP (ssh, NTP, raw TCP) fails closed under phase 3.
   `productionresultssa*` storage accounts. The allowlist stops arbitrary hosts and C2 endpoints, not
   exfiltration through these. TLS interception would be needed to restrict paths; not done.
 - *DNS.* Runner pods resolve any public name through CoreDNS, so data can leak in DNS queries even under
-  phase 3. Follow-up: a cluster.local-only resolver for runner pods (olympus-sdk issue linked in #407).
+  phase 3. Follow-up: a cluster.local-only resolver for runner pods (olympus-sdk#809).
 - *The executor's LiteLLM path* (olympus-kvm -> `inference` 4000) is an intentional in-cluster exception.
 - *Node IPv6 link-local* is closed at node level, not by these policies (see networkpolicy.yaml).
 - *Hosted runners* (release, edge-deploy, Docker jobs) are not covered: they run on GitHub's machines.
-  What they need if they move on-cluster: olympus-sdk issue linked in #407.
+  What they need if they move on-cluster: olympus-sdk#810.
 
 Monitoring: Prometheus alerts `CiEgressProxyDown` (no available replica, 2m), `CiEgressProxyDegraded`
 (one replica, 30m) and `CiEgressProbeFailing` (blackbox HTTPS GET of `api.github.com/rate_limit` through
