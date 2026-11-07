@@ -823,8 +823,9 @@ spec:
                 annotations:
                   summary: "ARC listener {{ $labels.name }} is down."
                   description: "The listener for {{ $labels.name }} has not been running or scrapeable for 10m. A scale set without a listener takes no jobs: they stay queued on GitHub. `kubectl -n arc-system get pods -l app.kubernetes.io/component=runner-scale-set-listener` and the listener logs; a GitHub App or network problem shows there. Restart: delete the listener pod (the controller recreates it)."
-              # Jobs are assigned to the scale set but none runs: drained (maxRunners 0), no node or quota for the
-              # runner pod, or the 0.15.0 stuck-queue bug (actions-runner-controller#4715).
+              # Jobs are assigned to the scale set but none runs: no node or quota for the runner pod, or the 0.15.0
+              # stuck-queue bug (actions-runner-controller#4715). NOT a drain: with maxRunners 0 the listener does
+              # not acquire jobs at all (gha_assigned_jobs stays 0; drain test 2026-11-07), see ArcScaleSetDrained.
               - alert: ArcJobsStuckInQueue
                 expr: >-
                   max by (name) (gha_assigned_jobs{job="arc-listeners"}) > 0
@@ -833,7 +834,16 @@ spec:
                 labels: { severity: warning }
                 annotations:
                   summary: "Scale set {{ $labels.name }} has {{ $value }} assigned job(s) and nothing running for 20m."
-                  description: "gha_assigned_jobs > 0 with gha_running_jobs == 0 for 20m. Check in order: maxRunners (a drain leaves jobs waiting; fall back to hosted runners), Pending runner pods (`kubectl -n arc-runners get pods,ephemeralrunners`; no node, quota, Insufficient olympus.io/kvm), and the stuck-queue bug #4715 (restart the listener: `kubectl -n arc-system delete pod -l actions.github.com/scale-set-name={{ $labels.name }}`)."
+                  description: "gha_assigned_jobs > 0 with gha_running_jobs == 0 for 20m. Check in order: Pending runner pods (`kubectl -n arc-runners get pods,ephemeralrunners`; no node, quota, Insufficient olympus.io/kvm), and the stuck-queue bug #4715 (restart the listener: `kubectl -n arc-system delete pod -l actions.github.com/scale-set-name={{ $labels.name }}`)."
+              # A drained set takes no jobs and nothing else reports it: queued jobs wait on GitHub invisibly (the
+              # listener does not acquire them, so ArcJobsStuckInQueue stays silent). A reminder, not an outage.
+              - alert: ArcScaleSetDrained
+                expr: max by (name) (gha_max_runners{job="arc-listeners"}) == 0
+                for: 2h
+                labels: { severity: warning }
+                annotations:
+                  summary: "Scale set {{ $labels.name }} has been drained (maxRunners 0) for 2h."
+                  description: "Jobs for {{ $labels.name }} wait on GitHub and are not visible in these metrics. Either fall back to hosted runners (arc/README.md, Runbook) or restore maxRunners from Git; after a kubectl drain, also unsuspend the HelmRelease (`kubectl -n arc-runners get helmrelease {{ $labels.name }} -o jsonpath='{.spec.suspend}'`)."
               # Queue time = runner assigned minus job assigned to the scale set (listener histogram). At least 3 jobs in
               # the hour so one slow start does not page.
               - alert: ArcJobQueueTimeHigh

@@ -270,7 +270,7 @@ curl -sS -m 5 -k https://68.134.149.230:443                    # gateway WAN IP 
   CPU/memory/root disk plus apiserver-side etcd latency while CI runs.
 - **Alerts** (group `arc-ci-runners`): `ArcControllerDown`, `ArcListenerDown` (critical);
   `ArcJobsStuckInQueue`, `ArcJobQueueTimeHigh`, `ArcEphemeralRunnersFailed`, `ArcRunnerPodPending`,
-  `ArcQuotaSaturated`. Group `cluster-nodes`: `KubeNodePressure`, `ClusterNodeRootDiskLow` (critical,
+  `ArcQuotaSaturated`, `ArcScaleSetDrained`. Group `cluster-nodes`: `KubeNodePressure`, `ClusterNodeRootDiskLow` (critical,
   under 12% free on `/`: etcd, containerd and the runner emptyDirs share that disk on the onodes),
   `ClusterNodeRootDiskFillingUp`, `EtcdRequestLatencyHigh`. Unit tests:
   `../observability/tests/arc-alerts.test.yaml`.
@@ -284,8 +284,8 @@ curl -sS -m 5 -k https://68.134.149.230:443                    # gateway WAN IP 
 ### Drain a scale set (no new runners; running jobs finish)
 
 Durable (Git): set `maxRunners: 0` in that set's `helmrelease-scale-set*.yaml`, merge. Queued jobs wait
-on GitHub (`ArcJobsStuckInQueue` fires after 20 min); fall back to hosted runners (below) if the drain
-will last.
+on GitHub. The listener does not even acquire them (`gha_assigned_jobs` stays 0), so no queue alert
+fires; `ArcScaleSetDrained` reminds after 2 h. Fall back to hosted runners (below) if the drain will last.
 
 Immediate (kubectl, minutes, then follow up in Git or restore): suspend the HelmRelease so helm-controller
 does not fight the patch, then patch the AutoscalingRunnerSet. Tested on `olympus-arm64` 2026-11-07
@@ -297,15 +297,17 @@ kubectl -n arc-runners patch autoscalingrunnerset olympus-arm64 --type merge -p 
 kubectl -n arc-runners get autoscalingrunnerset olympus-arm64
 ```
 
-The controller recreates the listener with the new maximum (`gha_max_runners{name="olympus-arm64"}`
-reads 0); a job dispatched now stays queued and no runner pod is created. Restore:
+The controller recreates the listener with the new maximum within seconds (`gha_max_runners{name="olympus-arm64"}`
+reads 0, listener log `max=0`); a job dispatched now stays `queued` on GitHub and no EphemeralRunner or pod
+is created (2026-11-07: `arm64-runner-smoke` queued for 3 min, `assigned job=0 decision=0`). Restore:
 
 ```sh
 kubectl -n arc-runners patch autoscalingrunnerset olympus-arm64 --type merge -p '{"spec":{"maxRunners":3}}'
 kubectl -n arc-runners patch helmrelease olympus-arm64 --type merge -p '{"spec":{"suspend":false}}'
 ```
 
-Use the value from Git for `maxRunners`. If a job queued during the drain does not start within a minute
+Use the value from Git for `maxRunners`. In the test the queued job got a runner 6 s after the restore (a
+fresh listener acquires waiting jobs on start). If a job queued during the drain does not start within a minute
 (known issue #4715), restart the listener:
 `kubectl -n arc-system delete pod -l actions.github.com/scale-set-name=<set>`.
 

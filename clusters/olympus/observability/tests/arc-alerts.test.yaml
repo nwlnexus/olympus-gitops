@@ -67,7 +67,7 @@ tests:
               name: olympus-arm64
             exp_annotations:
               summary: "Scale set olympus-arm64 has 1 assigned job(s) and nothing running for 20m."
-              description: "gha_assigned_jobs > 0 with gha_running_jobs == 0 for 20m. Check in order: maxRunners (a drain leaves jobs waiting; fall back to hosted runners), Pending runner pods (`kubectl -n arc-runners get pods,ephemeralrunners`; no node, quota, Insufficient olympus.io/kvm), and the stuck-queue bug #4715 (restart the listener: `kubectl -n arc-system delete pod -l actions.github.com/scale-set-name=olympus-arm64`)."
+              description: "gha_assigned_jobs > 0 with gha_running_jobs == 0 for 20m. Check in order: Pending runner pods (`kubectl -n arc-runners get pods,ephemeralrunners`; no node, quota, Insufficient olympus.io/kvm), and the stuck-queue bug #4715 (restart the listener: `kubectl -n arc-system delete pod -l actions.github.com/scale-set-name=olympus-arm64`)."
 
   - name: quota at 100% of pods fires, hard 0 resources are ignored
     interval: 1m
@@ -133,3 +133,24 @@ tests:
             exp_annotations:
               summary: "Node onode-0314ac reports DiskPressure."
               description: "The kubelet on onode-0314ac has reported DiskPressure for 5m and is evicting or refusing pods. If CI is running there, drain the scale set (arc/README.md, Runbook) and check `kubectl describe node onode-0314ac`."
+
+  - name: a set drained for more than 2h fires, a working one does not
+    interval: 1m
+    input_series:
+      - series: 'gha_max_runners{job="arc-listeners", name="olympus-arm64", namespace="arc-runners"}'
+        values: "0x150"
+      - series: 'gha_max_runners{job="arc-listeners", name="olympus-linux", namespace="arc-runners"}'
+        values: "3x150"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: ArcScaleSetDrained
+        exp_alerts: []
+      - eval_time: 140m
+        alertname: ArcScaleSetDrained
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              name: olympus-arm64
+            exp_annotations:
+              summary: "Scale set olympus-arm64 has been drained (maxRunners 0) for 2h."
+              description: "Jobs for olympus-arm64 wait on GitHub and are not visible in these metrics. Either fall back to hosted runners (arc/README.md, Runbook) or restore maxRunners from Git; after a kubectl drain, also unsuspend the HelmRelease (`kubectl -n arc-runners get helmrelease olympus-arm64 -o jsonpath='{.spec.suspend}'`)."
