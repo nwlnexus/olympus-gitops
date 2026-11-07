@@ -274,6 +274,19 @@ curl -sS -m 5 -k https://68.134.149.230:443                    # gateway WAN IP 
   under 12% free on `/`: etcd, containerd and the runner emptyDirs share that disk on the onodes),
   `ClusterNodeRootDiskFillingUp`, `EtcdRequestLatencyHigh`. Unit tests:
   `../observability/tests/arc-alerts.test.yaml`.
+- **macOS runners** (data-hub, mmini-01, mmini-02; not ARC). Each Mac's root LaunchDaemon
+  `io.olympus.ci-runner-heartbeat` (nix-darwin-hm `d.server.ciRunner.heartbeat`) pushes gauges every 60 s over
+  OTLP/HTTP to `obs-otlp:4318` (`../otel-collector/otlp-tailscale-service.yaml`); the collector's `metrics/agents`
+  pipeline remote-writes them here as `{job="ci-runner", host_name="<host>"}`: `ci_runner_daemon_up` (the loop
+  daemon runs), `ci_runner_runner_up` (a registered runner is up, idle or busy),
+  `ci_runner_last_registration_timestamp_seconds` and `ci_runner_last_wipe_ok`. Alerts (group `ci-runners-macos`,
+  all warning): `MacCIRunnerHeartbeatMissing` (a host seen in the last 7 days pushed nothing for about 15 min),
+  `MacCIRunnerDaemonDown` (10 min), `MacCIRunnerWipeFailing` (15 min; the loop fails closed and takes no jobs),
+  `MacCIRunnerNotRegistered` (loop up, wipe fine, no runner for 30 min: credentials, GitHub API or pf). Hosts that
+  never reported raise nothing. No alert on registration age: a JIT runner re-registers only after a job, so an idle
+  host keeps one registration for days. Dashboard row "macOS runners"; unit tests
+  `../observability/tests/macos-runner-alerts.test.yaml`. The minis are `tag:mac-server`, which has no source grant
+  in the tailnet policy, so they cannot reach `obs-otlp` until the owner adds a narrow grant (see "Later").
 - **etcd.** k3s serves etcd's own metrics (`etcd_disk_wal_fsync_duration_seconds`) on
   `127.0.0.1:2381` only, so they are not scraped; `EtcdRequestLatencyHigh` uses the apiservers'
   `etcd_request_duration_seconds` instead (non-list p99, 7-day peak under 0.1 s on 2026-11-07, alert at
@@ -360,7 +373,11 @@ sudo tail -n 50 /var/log/ci-runner.log
 `kickstart -k` sends TERM: the loop kills the current job's runner and wipes the work dir, so the job
 fails as "runner lost". A healthy idle host shows an online runner named `<host>-<timestamp>` in the org
 runners list (`gh api orgs/nwlnexus/actions/runners --jq '.runners[] | [.name,.status,.busy] | @tsv'`,
-needs an admin token). Not alerted yet: see "Later".
+needs an admin token). Alerts (`MacCIRunner*`, Monitoring above): for a missing heartbeat check the host is up and
+on the tailnet, then `sudo launchctl print system/io.olympus.ci-runner-heartbeat` and
+`sudo cat /var/log/ci-runner-heartbeat.log` (failed pushes only); the loop's own state is in
+`/var/db/ci-runner/state` (`last_wipe_ok`, `last_registration_timestamp`). A host retired on purpose keeps
+`MacCIRunnerHeartbeatMissing` firing for 7 days; silence it in Alertmanager.
 
 ### Remove scale sets
 
@@ -474,15 +491,17 @@ templates (works while phase 3 is not in place; with phase 3, also revert the ne
 
 ## Later (intentionally not included yet)
 
-- Alerting on the macOS runners (#392 scope). Nothing the Macs export today covers them (no exporter on the
-  hosts, no host logs in Loki), and the reliable signal, "GitHub sees an online runner per host", needs an
-  org runners API credential. Proposal: a fine-grained PAT (or a separate GitHub App) with only
+- macOS runners, beyond the heartbeat (Monitoring above). (1) Tailnet: `tag:mac-server` has no source grant, so
+  mmini-01 and mmini-02 cannot push to `obs-otlp` yet. Narrowest fix, both owner decisions: tag the `otlp-ts`
+  proxy (`tailscale.com/tags`, e.g. `tag:obs-otlp`) and grant `tag:mac-server` -> `tag:obs-otlp` on `tcp:4318`
+  only. Job code cannot use it: the runner user's pf anchor blocks 100.64.0.0/10 and all IPv6 but `::1`.
+  (2) The heartbeat runs on the host, so it cannot prove GitHub sees the runner online. For that, a GitHub-side
+  probe: a fine-grained PAT (or a separate GitHub App) with only
   **Self-hosted runners: read** on the org, in 1Password, synced by ESO into `observability`, used by a
   blackbox `http_2xx` module on `https://api.github.com/orgs/nwlnexus/actions/runners?per_page=100`
   with `fail_if_body_not_matches_regexp` per host (`"name":"<host>-[0-9]{14}"[^}]*"status":"online"`)
   and an alert at 15 min. Deliberately NOT the `arc-github-app` key: that one can register runners
-  org-wide and stays in the arc namespaces. Credential-free alternative: a launchd heartbeat on each Mac
-  pushing an OTLP gauge to `obs-otlp` (needs a nix-darwin-hm change and a host switch per Mac).
+  org-wide and stays in the arc namespaces.
 - Egress allowlist: phase 1 (log-only proxy) is live, phases 2 and 3 are open ("Egress proxy" above,
   olympus-sdk#407).
 
