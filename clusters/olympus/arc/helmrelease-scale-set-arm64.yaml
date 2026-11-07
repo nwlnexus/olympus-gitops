@@ -156,6 +156,14 @@ spec:
               # create-github-app-token refuse to run when a proxy env is set without it (#407).
               - name: NODE_USE_ENV_PROXY
                 value: "1"
+              # No telemetry from CI tools (#407): with the egress allowlist these hosts are denied
+              # anyway; off at the source so the proxy log only shows real denials.
+              - name: WRANGLER_SEND_METRICS
+                value: "false"
+              - name: TURBO_TELEMETRY_DISABLED
+                value: "1"
+              - name: DO_NOT_TRACK
+                value: "1"
             resources:
               requests:
                 cpu: "2"

@@ -59,6 +59,19 @@ spec:
           timeout: 5s
           tcp:
             preferred_ip_protocol: "ip4"
+        # End-to-end check of the CI egress proxy (olympus-sdk#407, ../ci-egress/): an HTTPS GET through
+        # squid exactly as a runner makes it (CONNECT host:443). skip_resolve_phase_with_proxy: the
+        # proxy resolves the name; otherwise the exporter would CONNECT to an IP literal, which the
+        # proxy's hostname allowlist refuses. Allowed by ../ci-egress/networkpolicy.yaml.
+        http_via_ci_egress:
+          prober: http
+          timeout: 10s
+          http:
+            valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+            valid_status_codes: [200]
+            preferred_ip_protocol: "ip4"
+            proxy_url: http://egress-proxy.ci-egress.svc:3128
+            skip_resolve_phase_with_proxy: true
         # Authenticated GET /v1/models on the cluster LiteLLM (olympus-sdk#649). The token file is
         # re-read on every probe, so a rotated key needs no restart. The probe fails when the body
         # lacks any configured alias (inference/litellm-config.yaml; the `monitor` scope in

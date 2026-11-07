@@ -1,0 +1,28 @@
+# Loki ruler alerts for the CI egress proxy (olympus-sdk#407, ../ci-egress/, ../arc/README.md "Egress proxy").
+# Picked up by the loki-sc-rules sidecar (label loki_rule) and evaluated by the Loki ruler
+# (loki-helmrelease.yaml, rulerConfig), which sends to the Prometheus Alertmanager.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-ci-egress
+  namespace: observability
+  labels:
+    loki_rule: ""
+data:
+  ci-egress.yaml: |
+    groups:
+      - name: ci-egress-denials
+        rules:
+          # squid's allowlist refused requests (status=403, result=TCP_DENIED). A few are expected (a tool's
+          # telemetry, a deliberate test); a burst means a CI job needs a host the allowlist lacks and is
+          # failing. Find it: {k8s_namespace_name="ci-egress"} |= "status=403" (host=, client= is the runner
+          # pod IP). Legit: add the host to ci-egress/configmap.yaml (narrowest name) or revert.
+          - alert: CiEgressDenials
+            expr: |
+              sum(count_over_time({k8s_namespace_name="ci-egress"} |= "egress method=" |= "status=403" [10m])) > 5
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "The CI egress proxy refused {{ $value }} requests in the last 10m."
+              description: "squid's allowlist (ci-egress/configmap.yaml) denied more than 5 requests in 10m: a CI job on the cluster runners probably needs a host that is not allowed and is failing. Loki: {k8s_namespace_name=\"ci-egress\"} |= \"status=403\" shows host= and client= (runner pod IP). Add the narrowest host name or revert the allowlist change; arc/README.md, \"Egress proxy\"."

@@ -1,7 +1,9 @@
 # Network isolation for the CI egress proxy (nwlnexus/olympus-sdk#407). Enforced by k3s'
 # kube-router (see ../arc/networkpolicy.yaml for the cluster facts and the IPv6 caveat).
-#   ingress  TCP 3128 from runner pods in arc-runners only (all scale sets). The kubelet's probes
-#            come from the node and are not subject to NetworkPolicy under k3s.
+#   ingress  TCP 3128 from runner pods in arc-runners (all scale sets), and from the blackbox exporter
+#            in observability (the end-to-end probe through the proxy, job blackbox-ci-egress in
+#            ../observability/prometheus-helmrelease.yaml). The kubelet's probes come from the node and
+#            are not subject to NetworkPolicy under k3s.
 #   egress   DNS via CoreDNS + the PUBLIC internet only, the same except-list as the runners: the
 #            proxy must never become a path into the cluster, the LAN, the tailnet or link-local
 #            (squid also refuses those destinations itself, configmap.yaml).
@@ -33,6 +35,16 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: arc-runners
+      ports:
+        - protocol: TCP
+          port: 3128
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus-blackbox-exporter
       ports:
         - protocol: TCP
           port: 3128

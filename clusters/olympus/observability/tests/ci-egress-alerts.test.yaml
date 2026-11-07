@@ -1,0 +1,81 @@
+# Unit tests for the ci-egress-proxy group (olympus-sdk#407).
+# Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease first).
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  - name: no available replica fires after 2m, two replicas stay quiet
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="ci-egress", deployment="egress-proxy", instance="ksm"}'
+        values: "2x5 0x5"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: CiEgressProxyDown
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: CiEgressProxyDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "The CI egress proxy (ci-egress/egress-proxy) has no available replica."
+              description: "No Ready squid pod for 2m: every job on olympus-linux, olympus-gate, olympus-kvm and olympus-arm64 fails (the runner reaches GitHub through the proxy). `kubectl -n ci-egress get pods,events` and `kubectl -n ci-egress logs deploy/egress-proxy`; a bad squid.conf shows there (ci-egress/configmap.yaml, roll back by reverting). Fallback: arc/README.md, \"Egress proxy\"."
+
+  - name: a missing deployment fires too
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="other", deployment="x"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: CiEgressProxyDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "The CI egress proxy (ci-egress/egress-proxy) has no available replica."
+              description: "No Ready squid pod for 2m: every job on olympus-linux, olympus-gate, olympus-kvm and olympus-arm64 fails (the runner reaches GitHub through the proxy). `kubectl -n ci-egress get pods,events` and `kubectl -n ci-egress logs deploy/egress-proxy`; a bad squid.conf shows there (ci-egress/configmap.yaml, roll back by reverting). Fallback: arc/README.md, \"Egress proxy\"."
+
+  - name: one replica for 30m is degraded, not down
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="ci-egress", deployment="egress-proxy"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CiEgressProxyDegraded
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: CiEgressProxyDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The CI egress proxy has had only 1 available replica(s) for 30m."
+              description: "One node failure away from all on-cluster CI failing. `kubectl -n ci-egress get pods -o wide,events`: the two replicas need two eligible nodes (required anti-affinity)."
+      - eval_time: 35m
+        alertname: CiEgressProxyDown
+        exp_alerts: []
+
+  - name: the probe through the proxy failing for 5m fires
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-ci-egress", instance="https://api.github.com/rate_limit", service="ci-egress-proxy"}'
+        values: "1x3 0x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: CiEgressProbeFailing
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: CiEgressProbeFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: blackbox-ci-egress
+              instance: https://api.github.com/rate_limit
+              service: ci-egress-proxy
+            exp_annotations:
+              summary: "HTTPS to GitHub through the CI egress proxy has failed for 5m."
+              description: "The blackbox probe of https://api.github.com/rate_limit through egress-proxy.ci-egress.svc:3128 fails while runner jobs need the same path. Pods up but failing: squid's allowlist refuses api.github.com (ci-egress/configmap.yaml), its upstream DNS or internet egress is broken (ci-egress/networkpolicy.yaml), or GitHub is down. `kubectl -n ci-egress logs deploy/egress-proxy | grep api.github.com`."
