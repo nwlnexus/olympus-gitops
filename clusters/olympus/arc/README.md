@@ -446,29 +446,46 @@ Mac VMs), away from the amd64 runners and etcd.
 
 Staged, because a wrong allowlist breaks all CI:
 
-1. **Log-only (live).** squid allows everything and logs one line per request
-   (`egress method=CONNECT host=github.com port=443 status=200 ... ua="..."`; host and port only,
-   never URL paths). The runner templates set `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (both cases,
-   all four scale sets). Direct egress stays allowed, so a tool that ignores the proxy env keeps
-   working; it shows up as missing from the proxy log, not as a failed job.
-2. **Allowlist from the logs.** Distinct hosts over real CI traffic from Loki (the otel-logs
-   DaemonSet ships the pod logs):
-   `sum by (host) (count_over_time({k8s_namespace_name="ci-egress"} |= "egress method=" | logfmt [7d]))`.
-   Then squid enforces a `dstdomain` allowlist (CONNECT to 443 only); denials show as
-   `status=403 result=TCP_DENIED`.
+1. **Log-only** (2026-11-07, olympus-gitops#221/#223/#225). squid allowed everything and logged one
+   line per request (`egress method=CONNECT host=github.com port=443 status=200 ... ua="..."`; host and
+   port only, never URL paths). The runner templates set `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (both
+   cases, all four scale sets) and `NODE_USE_ENV_PROXY=1`.
+2. **Allowlist (live).** squid allows only the hosts in `../ci-egress/configmap.yaml` (CONNECT to 443
+   for the TLS list, plain HTTP on 80 only to the Ubuntu mirrors), derived from the phase-1 log and one
+   green run of every CI class. Denials show as `status=403 result=TCP_DENIED` and alert as
+   `CiEgressDenials`. Direct egress is still open, so a tool that ignores the proxy env still works.
+   Distinct hosts: `sum by (host) (count_over_time({k8s_namespace_name="ci-egress"} |= "egress method=" | logfmt [2d]))`.
 3. **Enforce at the network.** `egress-dns-and-internet` shrinks to DNS + the proxy (+ the LiteLLM
-   exception for olympus-kvm), so nothing can bypass the proxy.
+   exception for olympus-kvm), per scale set, so nothing can bypass the proxy.
+
+**A job fails with a 403 / "CONNECT tunnel failed"**: find the host in Loki
+(`{k8s_namespace_name="ci-egress"} |= "status=403"`, `client=` is the runner pod IP), add the narrowest
+name to the matching ACL in `../ci-egress/configmap.yaml` with a comment naming the job, merge (the
+validate workflow runs `squid -k parse`). Or revert the allowlist PR.
 
 `NO_PROXY` keeps local and in-cluster traffic direct: `localhost`, `127.0.0.1`, `::1` (QEMU guests
 are reached through hostfwd on 127.0.0.1 in the kvm pods), `.svc`, `.cluster.local`, `10.0.0.0/8`
 (only for clients that understand CIDR; curl 7.81 in the runner image does not), the LiteLLM
 Service (`litellm.inference.svc`, executor on olympus-kvm) and the pod's own IP.
 
-Not proxied today (they ignore the env or never see it): the QEMU guests (user-mode NAT through the
-pod's sockets; the executor's provision boot downloads node, uv and pnpm inside the guest, and some
-VM suites fetch `dl.nwlnexus.io` inside the guest), Node's built-in `fetch()` without
-`NODE_USE_ENV_PROXY=1`, and anything speaking non-HTTP (ssh, NTP). Phase 2 must pass the proxy into
-those or accept that they fail closed under phase 3.
+QEMU guests (olympus-kvm): their traffic leaves through the pod's sockets, so the VM harness suites
+and the executor's provision boot get the pod's proxy env in the guest (`vm_guest_proxy_env` in
+olympus-sdk `vms/harness/lib.sh`, olympus-sdk#808); the executor's restricted boot has no route out at
+all. Anything speaking non-HTTP (ssh, NTP, raw TCP) fails closed under phase 3.
+
+**Residual risks (accepted, olympus-sdk#407 review):**
+- *Shared hosts.* squid sees only the host of a CONNECT, so an allowed multi-tenant host is an exfil
+  channel to an account the attacker controls: github.com / api.github.com (push to any repo or gist
+  with the attacker's own token), registry.npmjs.org (publish), ghcr.io, storage.googleapis.com (any
+  GCS bucket; needed because Playwright's Chrome for Testing downloads redirect there), the Actions
+  `productionresultssa*` storage accounts. The allowlist stops arbitrary hosts and C2 endpoints, not
+  exfiltration through these. TLS interception would be needed to restrict paths; not done.
+- *DNS.* Runner pods resolve any public name through CoreDNS, so data can leak in DNS queries even under
+  phase 3. Follow-up: a cluster.local-only resolver for runner pods (olympus-sdk#809).
+- *The executor's LiteLLM path* (olympus-kvm -> `inference` 4000) is an intentional in-cluster exception.
+- *Node IPv6 link-local* is closed at node level, not by these policies (see networkpolicy.yaml).
+- *Hosted runners* (release, edge-deploy, Docker jobs) are not covered: they run on GitHub's machines.
+  What they need if they move on-cluster: olympus-sdk#810.
 
 Monitoring: Prometheus alerts `CiEgressProxyDown` (no available replica, 2m), `CiEgressProxyDegraded`
 (one replica, 30m) and `CiEgressProbeFailing` (blackbox HTTPS GET of `api.github.com/rate_limit` through

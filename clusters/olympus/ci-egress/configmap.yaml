@@ -1,22 +1,26 @@
 # squid configuration for the CI egress proxy (nwlnexus/olympus-sdk#407).
 #
-# PHASE 1 = LOG-ONLY: every destination is allowed (except internal addresses, which the
-# runners cannot reach directly either) and every request is logged, one line per request:
+# PHASE 2 = ALLOWLIST: squid allows only the destinations below and logs every request, one line per
+# request:
 #   egress method=CONNECT host=github.com port=443 status=200 result=TCP_TUNNEL/HIER_DIRECT ...
-# The pod's stdout goes to Loki through the otel-logs DaemonSet (../otel-collector/helmrelease-logs.yaml),
-# so phase 2 derives the allowlist from real CI traffic, e.g.
-#   sum by (host) (count_over_time({k8s_namespace_name="ci-egress"} |= "egress method=" | logfmt [7d]))
+# Denials are `status=403 result=TCP_DENIED/HIER_NONE`; the Loki ruler alerts on a burst
+# (../observability/loki-rules-ci-egress.yaml, CiEgressDenials). The pod's stdout goes to Loki through
+# the otel-logs DaemonSet; distinct hosts over real CI traffic:
+#   sum by (host) (count_over_time({k8s_namespace_name="ci-egress"} |= "egress method=" | logfmt [2d]))
 # Only method, host and port are logged, never the URL path or query (signed URLs, tokens); for
 # HTTPS (CONNECT) squid sees nothing else anyway. `ua` is the client's User-Agent (which tool).
 #
-# PHASE 2/3 (not yet): replace `http_access allow all` with a dstdomain allowlist, e.g.
-#   acl ci_allowed dstdomain .github.com .githubusercontent.com crates.io .crates.io ...
-#   acl SSL_ports port 443
-#   http_access deny CONNECT !SSL_ports
-#   http_access allow ci_allowed
-#   http_access deny all
+# Allowlist rules (derived from the phase-1 log and the coverage runs, olympus-sdk#407):
+# - HTTPS only as CONNECT to port 443; plain HTTP only to the Ubuntu mirrors (apt) on port 80.
+# - Host names only, never IP literals: every ACL uses `-n` (no reverse lookup), so a CONNECT to an IP
+#   matches nothing and is denied.
+# - Narrowest names that work. squid sees only the host of a CONNECT, never the path, so a shared host
+#   (storage.googleapis.com, the GitHub hosts) is allowed as a whole; residuals: ../arc/README.md.
+# - Adding a host: evidence from a 403 in Loki (host=, client= is the runner pod IP), the narrowest
+#   name, a comment saying which job needs it. `squid -k parse` runs in the validate workflow.
 #
-# Change procedure: edit, merge; reloader rolls the pods one at a time (deployment.yaml).
+# Change procedure: edit, merge; reloader rolls the pods one at a time (deployment.yaml). A roll ends
+# in-flight tunnels after shutdown_lifetime, so merge when few runners are busy.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -53,8 +57,37 @@ data:
     http_access deny manager
     http_access deny to_internal
 
-    # PHASE 1: log-only. Replaced by the allowlist in phase 2/3 (see the header comment).
-    http_access allow all
+    # The allowlist (header comment). Hosts by job:
+    #   gh          the actions runner (broker, pipelines, results, token, launch), checkout, git, the API,
+    #               release assets, ghcr.io images, raw.githubusercontent.com
+    #   gh_results  the Actions results/cache/artifact storage accounts behind results-receiver
+    #   rust        rustup, crates.io index and downloads (atlas)
+    #   node        npm/pnpm installs, nodejs.org (setup-node, executor provisioning)
+    #   python      uv: PyPI, and releases.astral.sh (uv's Python and self downloads)
+    #   cf          wrangler (worker deploy checks)
+    #   ubuntu_*    the VM harness base image (HTTPS) and apt mirrors (HTTP, port 80 only)
+    #   own         dl.nwlnexus.io (VM suites, atlas releases), the 1Password Connect server
+    #   playwright  Playwright browser downloads; cdn.playwright.dev redirects Chrome for Testing builds to
+    #               storage.googleapis.com (worker-ci, iris component tests)
+    #   onepassword 1password/load-secrets-action installs the op CLI (agent-execute on olympus-kvm)
+    acl SSL_ports port 443
+    acl Safe_http port 80
+    acl gh dstdomain -n .github.com .githubusercontent.com ghcr.io
+    acl gh_results dstdom_regex -n ^productionresultssa[0-9]+\.blob\.core\.windows\.net$
+    acl rust dstdomain -n static.rust-lang.org index.crates.io static.crates.io
+    acl node dstdomain -n registry.npmjs.org nodejs.org
+    acl python dstdomain -n pypi.org files.pythonhosted.org releases.astral.sh
+    acl cf dstdomain -n api.cloudflare.com workers.cloudflare.com
+    acl ubuntu_tls dstdomain -n cloud-images.ubuntu.com
+    acl ubuntu_http dstdomain -n archive.ubuntu.com security.ubuntu.com ports.ubuntu.com
+    acl own dstdomain -n dl.nwlnexus.io olympus-op-connect.fly.dev
+    acl playwright dstdomain -n cdn.playwright.dev playwright.download.prss.microsoft.com storage.googleapis.com
+    acl onepassword dstdomain -n app-updates.agilebits.com cache.agilebits.com
+    acl ci_tls any-of gh gh_results rust node python cf ubuntu_tls own playwright onepassword
+    http_access deny CONNECT !SSL_ports
+    http_access allow CONNECT ci_tls
+    http_access allow !CONNECT ubuntu_http Safe_http
+    http_access deny all
 
     # Do not tell upstreams about the client (pod IPs) or the proxy.
     forwarded_for delete
