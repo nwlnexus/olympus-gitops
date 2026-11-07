@@ -1,7 +1,7 @@
 # memory — data stores for the memory platform
 
 Namespace `memory`. Implements nwlnexus/olympus-sdk#449 (epic #444, spec sections D3, D4
-and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0004 and 0007-0010, see below); the
+and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0005 and 0007-0011, see below); the
 gateway (#450, see `gateway/README.md`; deployed by its own Flux Kustomization), workers (#453, see
 `workers/README.md`) and the CPU embedding service (olympus-sdk#529, see `embedder/README.md`) have their
 own manifests and Flux Kustomizations.
@@ -59,7 +59,7 @@ the Postgres password later: change the 1Password field, then
 Migrations are plain SQL files in `migrations/`, named `NNNN_short_description.sql`
 (zero-padded, next free number), applied in filename order by `Job/memory-migrate`.
 
-1. Create `migrations/<next number>_<what>.sql` (the next free number is `0010`; `0005` and `0006` are reserved for the Postgres graph of the gateway design §3.6, and `0007_knowledge` is the wiki index of olympus-sdk#563). It must be **idempotent** (`CREATE ... IF NOT EXISTS`,
+1. Create `migrations/<next number>_<what>.sql` (the next free number is `0012`; `0006` is reserved for the cleanup that drops the inert Graphiti leftovers once the graph worker has been in production, gateway design §14.10 step 4). It must be **idempotent** (`CREATE ... IF NOT EXISTS`,
    `ADD COLUMN IF NOT EXISTS`, `DO $$ ... $$` guards), because it is run once per database but
    may be replayed by hand or after a restore. Do not put `BEGIN`/`COMMIT` in it: the runner
    wraps each file and its ledger row in one transaction, so a failing file leaves nothing behind.
@@ -93,6 +93,18 @@ section 3 in olympus-sdk (epic #444, issue #450). That document is the authority
 tables, the roles' privileges and the queue semantics; do not edit these files, add a new
 migration instead. The gateway and the workers connect as `memory_gateway` / `memory_worker`,
 never as `postgres`.
+
+### Migrations 0005 and 0011: the Postgres graph
+
+| File | What |
+|---|---|
+| `0005_postgres_graph.sql` | the knowledge graph in Postgres only (olympus-sdk#513, design §3.6 and §14): `memory.graph_norm()`, `graph_predicate` (the relation vocabulary), `entity_alias`, entity name embeddings, literal objects / polarity / `invalidated_by` / constraints on `entity_edge`, per-fact graph state, `supersession_suggestion`, `worker_pause`, the `graph_detach_fact()` and `graph_merge_entities()` functions (SECURITY DEFINER) and the grants for `memory_gateway` / `memory_worker` |
+| `0011_audit_actions_union.sql` | restores the full audit action list (0005 and 0009 each replace `audit_log_action_check`; on a fresh database 0009 runs after 0005) |
+
+0005 is the block of design §3.6 with one deviation: its audit action list also carries `suggest_closed`, which 0009 added after
+the design was written (without it 0005 fails on the existing `suggest_closed` audit rows). The graph files are 0005 and 0011
+because 0010 was taken by the extractor provenance (olympus-sdk#672) while this was in review; `0006` stays free for the later
+cleanup (§14.10 step 4).
 
 ### Migrations 0007 to 0010
 
