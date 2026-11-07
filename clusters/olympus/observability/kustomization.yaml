@@ -26,3 +26,10 @@ configMapGenerator:
       - dashboards/agent-sessions.json
     options:
       disableNameSuffixHash: true
+  # CI runners (ARC) dashboard, olympus-sdk#392; mounted by the `ci` provider in grafana-helmrelease.yaml.
+  - name: grafana-dashboard-arc-runners
+    namespace: observability
+    files:
+      - dashboards/arc-runners.json
+    options:
+      disableNameSuffixHash: true

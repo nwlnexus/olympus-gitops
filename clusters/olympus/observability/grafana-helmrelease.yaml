@@ -97,8 +97,19 @@ spec:
             editable: false
             options:
               path: /var/lib/grafana/dashboards/agents
+          # CI runner dashboards (olympus-sdk#392): dashboards/arc-runners.json -> ConfigMap
+          # grafana-dashboard-arc-runners, mounted at /var/lib/grafana/dashboards/ci.
+          - name: ci
+            orgId: 1
+            folder: ""
+            type: file
+            disableDeletion: true
+            editable: false
+            options:
+              path: /var/lib/grafana/dashboards/ci
     dashboardsConfigMaps:
       agents: grafana-dashboard-agent-sessions
+      ci: grafana-dashboard-arc-runners
     dashboards:
       default:
         # "Traefik Official Kubernetes Dashboard" (native v3 Prometheus metrics).

@@ -327,6 +327,45 @@ spec:
             target_label: instance
           - target_label: __address__
             replacement: blackbox-exporter.observability.svc:9115
+      # ARC, the CI runner scale sets on the cluster (olympus-sdk#392, epic #383; ../arc/README.md, "Monitoring").
+      # The controller and one listener pod per scale set serve metrics on the container port named
+      # `metrics` (8080; ../arc/helmrelease-controller.yaml `metrics:`). Allowed by
+      # ../arc/networkpolicy-metrics.yaml (Prometheus -> arc-system 8080 only). No `namespace` target
+      # label: the gha_* series carry their own `namespace` (the scale set's, arc-runners) and `name`
+      # (the scale set) labels, which a target label would rename to exported_*.
+      - job_name: arc-controller
+        scrape_interval: 30s
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [arc-system]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component, __meta_kubernetes_pod_container_port_name]
+            regex: controller-manager;metrics
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+      # One target per scale set. `scale_set` is added because the job counters and histograms
+      # (gha_started/completed_jobs_total, gha_job_startup/execution_duration_seconds) carry no scale
+      # set label of their own.
+      - job_name: arc-listeners
+        scrape_interval: 30s
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [arc-system]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component, __meta_kubernetes_pod_container_port_name]
+            regex: runner-scale-set-listener;metrics
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_label_actions_github_com_scale_set_name]
+            target_label: scale_set
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
     serverFiles:
       alerting_rules.yml:
         groups:
@@ -760,6 +799,124 @@ spec:
                 annotations:
                   summary: "Account {{ $labels.account }} used more than $25 of API-equivalent Claude usage in the last hour."
                   description: "${{ $value | humanize }} of API-equivalent usage (list price; on a Max plan this counts against the plan, it is not billed) in the last hour for account {{ $labels.account }}. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
+          - name: arc-ci-runners
+            rules:
+              # CI runner scale sets on the cluster (olympus-sdk#392, epic #383). Scrape jobs arc-controller and
+              # arc-listeners above; procedures in clusters/olympus/arc/README.md ("Runbook"). The macOS JIT runners
+              # on the Macs are not ARC and are not covered here (README, "macOS runners").
+              - alert: ArcControllerDown
+                expr: absent(up{job="arc-controller"} == 1)
+                for: 10m
+                labels: { severity: critical }
+                annotations:
+                  summary: "The ARC controller (arc-system) is not being scraped."
+                  description: "No successful scrape of the gha-rs-controller for 10m. Without it no listener or runner is reconciled, so CI on olympus-linux, olympus-gate, olympus-kvm and olympus-arm64 stops once the current runners finish. `kubectl -n arc-system get pods,events` and `kubectl -n arc-system logs deploy/arc-gha-rs-controller`. Fallback to hosted runners: arc/README.md, Runbook."
+              # Either the controller reports the listener as not running (gha_controller_running_listeners carries the
+              # AutoscalingListener's name, <set>-<hash>-listener) or the listener's own target is down.
+              - alert: ArcListenerDown
+                expr: >-
+                  (max by (name) (gha_controller_running_listeners{job="arc-controller"}) == 0)
+                  or
+                  label_replace(max by (scale_set) (up{job="arc-listeners"}) == 0, "name", "$1", "scale_set", "(.*)")
+                for: 10m
+                labels: { severity: critical }
+                annotations:
+                  summary: "ARC listener {{ $labels.name }} is down."
+                  description: "The listener for {{ $labels.name }} has not been running or scrapeable for 10m. A scale set without a listener takes no jobs: they stay queued on GitHub. `kubectl -n arc-system get pods -l app.kubernetes.io/component=runner-scale-set-listener` and the listener logs; a GitHub App or network problem shows there. Restart: delete the listener pod (the controller recreates it)."
+              # Jobs are assigned to the scale set but none runs: drained (maxRunners 0), no node or quota for the
+              # runner pod, or the 0.15.0 stuck-queue bug (actions-runner-controller#4715).
+              - alert: ArcJobsStuckInQueue
+                expr: >-
+                  max by (name) (gha_assigned_jobs{job="arc-listeners"}) > 0
+                  and max by (name) (gha_running_jobs{job="arc-listeners"}) == 0
+                for: 20m
+                labels: { severity: warning }
+                annotations:
+                  summary: "Scale set {{ $labels.name }} has {{ $value }} assigned job(s) and nothing running for 20m."
+                  description: "gha_assigned_jobs > 0 with gha_running_jobs == 0 for 20m. Check in order: maxRunners (a drain leaves jobs waiting; fall back to hosted runners), Pending runner pods (`kubectl -n arc-runners get pods,ephemeralrunners`; no node, quota, Insufficient olympus.io/kvm), and the stuck-queue bug #4715 (restart the listener: `kubectl -n arc-system delete pod -l actions.github.com/scale-set-name={{ $labels.name }}`)."
+              # Queue time = runner assigned minus job assigned to the scale set (listener histogram). At least 3 jobs in
+              # the hour so one slow start does not page.
+              - alert: ArcJobQueueTimeHigh
+                expr: >-
+                  histogram_quantile(0.9, sum by (le, scale_set) (rate(gha_job_startup_duration_seconds_bucket{job="arc-listeners"}[1h]))) > 1200
+                  and sum by (scale_set) (increase(gha_job_startup_duration_seconds_count{job="arc-listeners"}[1h])) >= 3
+                for: 15m
+                labels: { severity: warning }
+                annotations:
+                  summary: "p90 job queue time on {{ $labels.scale_set }} is {{ $value | humanizeDuration }} over the last hour."
+                  description: "CI jobs wait more than 20 minutes for a runner on {{ $labels.scale_set }}. The pool is saturated (see ArcQuotaSaturated and the \"CI runners\" dashboard) or runner pods are slow to start or schedule. Raising maxRunners needs the quota and node headroom in arc/README.md."
+              # Failed EphemeralRunners hold their slot until deleted (0.15.0 bugs #4712/#4718, non-quota 403s).
+              - alert: ArcEphemeralRunnersFailed
+                expr: max by (name) (gha_controller_failed_ephemeral_runners{job="arc-controller"}) > 0
+                for: 15m
+                labels: { severity: warning }
+                annotations:
+                  summary: "Scale set {{ $labels.name }} has {{ $value }} failed ephemeral runner(s)."
+                  description: "Failed EphemeralRunners keep their slot until deleted (actions-runner-controller#4712/#4718). `kubectl -n arc-runners get ephemeralrunners` and `kubectl -n arc-runners delete ephemeralrunner <name>` after reading its status."
+              - alert: ArcRunnerPodPending
+                expr: max by (namespace, pod) (kube_pod_status_phase{namespace="arc-runners", phase="Pending"}) == 1
+                for: 15m
+                labels: { severity: warning }
+                annotations:
+                  summary: "Runner pod {{ $labels.pod }} has been Pending for 15m."
+                  description: "`kubectl -n arc-runners describe pod {{ $labels.pod }}`: no node with room (olympus-arm64 needs a Mac VM, olympus-kvm a labelled KVM node with a free olympus.io/kvm), or the quota. A job is waiting on it."
+              # used/hard per quota and resource; hard 0 (pvc, services, kvm on the non-KVM quota) is excluded.
+              - alert: ArcQuotaSaturated
+                expr: >-
+                  max by (namespace, resourcequota, resource) (kube_resourcequota{namespace=~"arc-runners|arc-system", type="used"})
+                  / max by (namespace, resourcequota, resource) (kube_resourcequota{namespace=~"arc-runners|arc-system", type="hard"} > 0)
+                  >= 0.9
+                for: 30m
+                labels: { severity: warning }
+                annotations:
+                  summary: "Quota {{ $labels.namespace }}/{{ $labels.resourcequota }} is at {{ $value | humanizePercentage }} of {{ $labels.resource }}."
+                  description: "At 100% new runner pods are rejected and jobs queue. Sustained saturation means CI needs more capacity: raise maxRunners and the quotas together (arc/quota.yaml keeps the sums), only with node headroom."
+          - name: cluster-nodes
+            rules:
+              # Node and control-plane health while CI runs (olympus-sdk#392). The onodes are k3s servers whose etcd and
+              # containerd share the root disk with the runner pods' emptyDirs. kube_node_status_condition and the
+              # node-exporter series are each scraped twice (kube-state-metrics + service endpoints), hence max by.
+              - alert: KubeNodePressure
+                expr: max by (node, condition) (kube_node_status_condition{condition=~"MemoryPressure|DiskPressure|PIDPressure", status="true"}) == 1
+                for: 5m
+                labels: { severity: warning }
+                annotations:
+                  summary: "Node {{ $labels.node }} reports {{ $labels.condition }}."
+                  description: "The kubelet on {{ $labels.node }} has reported {{ $labels.condition }} for 5m and is evicting or refusing pods. If CI is running there, drain the scale set (arc/README.md, Runbook) and check `kubectl describe node {{ $labels.node }}`."
+              # kubelet eviction-hard is nodefs.available<10% (arc/README.md, kubelet reserves); etcd on the onodes
+              # stops writing when its disk is full. 12% leaves a margin before eviction starts.
+              - alert: ClusterNodeRootDiskLow
+                expr: >-
+                  min by (node) (node_filesystem_avail_bytes{job="kubernetes-service-endpoints", service="node-exporter", mountpoint="/"})
+                  / max by (node) (node_filesystem_size_bytes{job="kubernetes-service-endpoints", service="node-exporter", mountpoint="/"})
+                  < 0.12
+                for: 5m
+                labels: { severity: critical }
+                annotations:
+                  summary: "Root disk on {{ $labels.node }} has only {{ $value | humanizePercentage }} free."
+                  description: "Below 10% the kubelet evicts pods; on the onodes etcd and containerd share this disk and etcd stops accepting writes when it is full. Drain CI if it runs there, then free space (`crictl rmi --prune`, journal, old images)."
+              - alert: ClusterNodeRootDiskFillingUp
+                expr: >-
+                  predict_linear(min by (node) (node_filesystem_avail_bytes{job="kubernetes-service-endpoints", service="node-exporter", mountpoint="/"})[6h:5m], 24 * 3600) < 0
+                  and
+                  min by (node) (node_filesystem_avail_bytes{job="kubernetes-service-endpoints", service="node-exporter", mountpoint="/"})
+                  / max by (node) (node_filesystem_size_bytes{job="kubernetes-service-endpoints", service="node-exporter", mountpoint="/"})
+                  < 0.4
+                for: 1h
+                labels: { severity: warning }
+                annotations:
+                  summary: "Root disk on {{ $labels.node }} will be full within 24h at the current rate."
+                  description: "Linear prediction over the last 6h reaches zero free space within 24h (less than 40% free now). Find the writer (`du -xh / | sort -h`, container images, CI emptyDirs) before ClusterNodeRootDiskLow fires."
+              # Apiserver-side etcd request latency (etcd's own metrics are not exposed: k3s serves them on
+              # 127.0.0.1:2381 only). Non-list operations; their 7-day p99 peak was under 0.1s (2026-11-07).
+              - alert: EtcdRequestLatencyHigh
+                expr: >-
+                  histogram_quantile(0.99, sum by (le, instance) (rate(etcd_request_duration_seconds_bucket{job="kubernetes-api-servers", operation!~"list.*"}[5m]))) > 0.5
+                for: 10m
+                labels: { severity: warning }
+                annotations:
+                  summary: "etcd request p99 seen by the apiserver {{ $labels.instance }} is {{ $value | humanizeDuration }}."
+                  description: "Non-list etcd requests from the apiserver take over 0.5s at p99 (normal: under 0.1s). Disk contention on the control-plane onodes is the usual cause; CI runs on the same disks. Compare with busy runners on the \"CI runners\" dashboard and drain CI (arc/README.md, Runbook) if they coincide."
     prometheus-pushgateway:
       enabled: false
     kube-state-metrics:

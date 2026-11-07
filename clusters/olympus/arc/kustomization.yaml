@@ -6,6 +6,7 @@ resources:
   - quota.yaml
   - limitrange.yaml
   - networkpolicy.yaml
+  - networkpolicy-metrics.yaml
   - externalsecret.yaml
   - ocirepository.yaml
   - helmrelease-controller.yaml
