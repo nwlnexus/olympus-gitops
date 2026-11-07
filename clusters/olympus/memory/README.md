@@ -1,7 +1,7 @@
 # memory — data stores for the memory platform
 
 Namespace `memory`. Implements nwlnexus/olympus-sdk#449 (epic #444, spec sections D3, D4
-and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0005 and 0007-0011, see below); the
+and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0005 and 0007-0012, see below); the
 gateway (#450, see `gateway/README.md`; deployed by its own Flux Kustomization), workers (#453, see
 `workers/README.md`) and the CPU embedding service (olympus-sdk#529, see `embedder/README.md`) have their
 own manifests and Flux Kustomizations.
@@ -114,6 +114,12 @@ cleanup (§14.10 step 4).
 | `0008_capture_key_per_client.sql` | transcript-capture idempotency key `(session_id, seq)` becomes `(client_id, session_id, seq)`: new unique index `episode_client_session_seq_uq`, drops `episode_session_seq_uq` (olympus-sdk#503) |
 | `0009_closure_suggestion.sql` | `fact.possibly_closed_by` (the fact that probably finished a to-do; session start shows it as "possibly done") and the audit action `suggest_closed` (olympus-sdk#726). Apply before the gateway/workers images that use it |
 | `0010_fact_extract_provenance.sql` | `fact.extract_model` and `fact.extract_prompt_version` (both set by the extract worker, both NULL otherwise; olympus-sdk#672). Apply before the gateway/workers images that use them |
+
+### Migration 0012: usage-labelled recall evaluation
+
+| File | What |
+|---|---|
+| `0012_recall_usage.sql` | `recall_injection` (one row per rendering recall showed a model: surface, session id, client, project, sha256 of the query) and `recall_injection_fact` (fact id, rank, `used`, `used_via`) for the live hit-rate / MRR evaluation (olympus-sdk#666). Ids and flags only, no text. The gateway writes it best-effort, so the order against the gateway image does not matter |
 
 ### Role passwords
 
