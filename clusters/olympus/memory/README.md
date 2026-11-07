@@ -1,7 +1,7 @@
 # memory — data stores for the memory platform
 
 Namespace `memory`. Implements nwlnexus/olympus-sdk#449 (epic #444, spec sections D3, D4
-and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0005 and 0007-0012, see below); the
+and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0005 and 0007-0013, see below); the
 gateway (#450, see `gateway/README.md`; deployed by its own Flux Kustomization), workers (#453, see
 `workers/README.md`) and the CPU embedding service (olympus-sdk#529, see `embedder/README.md`) have their
 own manifests and Flux Kustomizations.
@@ -59,7 +59,7 @@ the Postgres password later: change the 1Password field, then
 Migrations are plain SQL files in `migrations/`, named `NNNN_short_description.sql`
 (zero-padded, next free number), applied in filename order by `Job/memory-migrate`.
 
-1. Create `migrations/<next number>_<what>.sql` (the next free number is `0012`; `0006` is reserved for the cleanup that drops the inert Graphiti leftovers once the graph worker has been in production, gateway design §14.10 step 4). It must be **idempotent** (`CREATE ... IF NOT EXISTS`,
+1. Create `migrations/<next number>_<what>.sql` (the next free number is `0014`; `0006` is reserved for the cleanup that drops the inert Graphiti leftovers once the graph worker has been in production, gateway design §14.10 step 4). It must be **idempotent** (`CREATE ... IF NOT EXISTS`,
    `ADD COLUMN IF NOT EXISTS`, `DO $$ ... $$` guards), because it is run once per database but
    may be replayed by hand or after a restore. Do not put `BEGIN`/`COMMIT` in it: the runner
    wraps each file and its ledger row in one transaction, so a failing file leaves nothing behind.
@@ -120,6 +120,12 @@ cleanup (§14.10 step 4).
 | File | What |
 |---|---|
 | `0012_recall_usage.sql` | `recall_injection` (one row per rendering recall showed a model: surface, session id, client, project, sha256 of the query) and `recall_injection_fact` (fact id, rank, `used`, `used_via`) for the live hit-rate / MRR evaluation (olympus-sdk#666). Ids and flags only, no text. The gateway writes it best-effort, so the order against the gateway image does not matter |
+
+### Migration 0013: graph function repairs (R1 review)
+
+| File | What |
+|---|---|
+| `0013_graph_detach_repair.sql` | `CREATE OR REPLACE` of `graph_detach_fact` and `graph_merge_entities` (same signatures and grants) plus the helper `graph_repair_invalidated`, from the independent review olympus-sdk#518: a forget no longer aborts with 23505 when it revives an edge whose dying twin is still present (the dead edges are deleted first); a revived edge is never re-pointed to a statement of its own fact, and it invalidates the older current statements it contradicts; a self-edge dropped by a merge has the edges it had invalidated repaired instead of left invalid for ever. No table change; order against the gateway and worker images does not matter |
 
 ### Role passwords
 
