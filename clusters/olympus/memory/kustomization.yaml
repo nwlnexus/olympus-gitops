@@ -23,6 +23,7 @@ configMapGenerator:
       - migrations/0003_queue_and_graph.sql
       - migrations/0004_roles.sql
       - migrations/0005_postgres_graph.sql
+      - migrations/0006_graph_cleanup.sql
       - migrations/0007_knowledge.sql
       - migrations/0008_capture_key_per_client.sql
       - migrations/0009_closure_suggestion.sql
@@ -30,3 +31,4 @@ configMapGenerator:
       - migrations/0011_audit_actions_union.sql
       - migrations/0012_recall_usage.sql
       - migrations/0013_graph_detach_repair.sql
+      - migrations/0014_graph_retry_failed_audit.sql
