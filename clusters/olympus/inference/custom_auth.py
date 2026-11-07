@@ -24,6 +24,10 @@ _SCOPES = {c: list(a) for c, a in json.loads(os.environ.get("LITELLM_CLIENT_SCOP
 # Optional per-client caps, JSON: {"client": {"rpm": N, "parallel": M}}. LiteLLM enforces them from
 # the returned UserAPIKeyAuth (in memory, per replica; there is no database or shared cache).
 _LIMITS = json.loads(os.environ.get("LITELLM_CLIENT_LIMITS", "{}"))
+# Optional per-client route lists, JSON: {"client": ["/v1/models", ...]}. A client listed here may call
+# only those routes (the monitoring probe, olympus-sdk#649, is limited to the model list); every
+# other client gets _ROUTES.
+_CLIENT_ROUTES = {c: tuple(r) for c, r in json.loads(os.environ.get("LITELLM_CLIENT_ROUTES", "{}")).items()}
 _cache: dict = {"stamp": None, "keys": {}}
 # Routes a client key may call: inference and the model list. Everything else (admin, UI, key
 # management) is refused; this proxy has no database and no admin clients.
@@ -52,7 +56,7 @@ async def user_api_key_auth(request: Request, api_key: str) -> UserAPIKeyAuth:
     )
     if client is None:
         raise HTTPException(status_code=401, detail="invalid api key")
-    if request.url.path.rstrip("/") not in _ROUTES:
+    if request.url.path.rstrip("/") not in _CLIENT_ROUTES.get(client, _ROUTES):
         raise HTTPException(status_code=403, detail=f"route {request.url.path} is not available")
     allowed = _SCOPES[client]
     if request.method == "POST":
