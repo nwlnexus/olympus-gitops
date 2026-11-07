@@ -1,6 +1,6 @@
 # CI egress forward proxy (squid), nwlnexus/olympus-sdk#407. Runner pods in arc-runners send
-# HTTP(S) through it (HTTP(S)_PROXY in ../arc/helmrelease-scale-set*.yaml). Phase 1: log-only
-# (configmap.yaml).
+# HTTP(S) through it (HTTP(S)_PROXY in ../arc/helmrelease-scale-set*.yaml). Phase 2: hostname
+# allowlist (configmap.yaml).
 #
 # Availability: once the runners use it, every CI job depends on it (the actions runner itself
 # reaches GitHub through it). Hence 2 replicas on different nodes (required anti-affinity), a PDB
