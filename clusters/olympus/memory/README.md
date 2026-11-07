@@ -1,7 +1,7 @@
 # memory — data stores for the memory platform
 
 Namespace `memory`. Implements nwlnexus/olympus-sdk#449 (epic #444, spec sections D3, D4
-and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0004 and 0007-0009, see below); the
+and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0004 and 0007-0010, see below); the
 gateway (#450, see `gateway/README.md`; deployed by its own Flux Kustomization), workers (#453, see
 `workers/README.md`) and the CPU embedding service (olympus-sdk#529, see `embedder/README.md`) have their
 own manifests and Flux Kustomizations.
@@ -94,13 +94,14 @@ tables, the roles' privileges and the queue semantics; do not edit these files, 
 migration instead. The gateway and the workers connect as `memory_gateway` / `memory_worker`,
 never as `postgres`.
 
-### Migrations 0007 to 0009
+### Migrations 0007 to 0010
 
 | File | What |
 |---|---|
 | `0007_knowledge.sql` | `knowledge_page`, the curated wiki index (olympus-sdk#563) |
 | `0008_capture_key_per_client.sql` | transcript-capture idempotency key `(session_id, seq)` becomes `(client_id, session_id, seq)`: new unique index `episode_client_session_seq_uq`, drops `episode_session_seq_uq` (olympus-sdk#503) |
 | `0009_closure_suggestion.sql` | `fact.possibly_closed_by` (the fact that probably finished a to-do; session start shows it as "possibly done") and the audit action `suggest_closed` (olympus-sdk#726). Apply before the gateway/workers images that use it |
+| `0010_fact_extract_provenance.sql` | `fact.extract_model` and `fact.extract_prompt_version` (both set by the extract worker, both NULL otherwise; olympus-sdk#672). Apply before the gateway/workers images that use them |
 
 ### Role passwords
 
