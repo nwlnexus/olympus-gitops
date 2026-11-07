@@ -1,0 +1,12 @@
+# Egress forward proxy for the CI runner pods in arc-runners (nwlnexus/olympus-sdk#407, epic #383).
+# Own namespace so its network policy (ingress only from arc-runners, egress DNS + public internet)
+# and its lifecycle are separate from the untrusted runner pods. README: ../arc/README.md
+# ("Egress proxy").
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ci-egress
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

@@ -29,6 +29,10 @@
 # set only) may also reach the cluster LiteLLM, pods app.kubernetes.io/name=litellm in `inference`,
 # on TCP 4000 (policy egress-litellm-kvm below; policies are additive). The matching ingress is in
 # ../inference/networkpolicy.yaml.
+# Egress proxy (olympus-sdk#407): every runner pod may also reach the squid pods in `ci-egress` on
+# TCP 3128 (policy egress-ci-egress-proxy below; matching ingress in ../ci-egress/networkpolicy.yaml).
+# Phase 1 (log-only) ADDS that path and leaves direct internet egress in place, so a tool that
+# ignores HTTP(S)_PROXY keeps working; phase 3 narrows egress-dns-and-internet to DNS + the proxy.
 # NOTE: "public internet" is any public address (GitHub, crates.io, npm, ghcr.io
 # ...). A per-host allowlist (spec section 5) needs an L7/FQDN-aware policy,
 # which kube-router cannot do; this is the strongest rule expressible with
@@ -104,6 +108,30 @@ spec:
       ports:
         - protocol: TCP
           port: 4000
+---
+# olympus-sdk#407: runner pods -> the CI egress proxy (squid, ns ci-egress) on TCP 3128. Additive to
+# egress-dns-and-internet (which drops 10.0.0.0/8, so without this the proxy is unreachable). kube-proxy
+# DNATs the Service to the pod before policy evaluation, so the pod selector is what matters.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-ci-egress-proxy
+  namespace: arc-runners
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ci-egress
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: egress-proxy
+      ports:
+        - protocol: TCP
+          port: 3128
 ---
 # ---------------------------------------------------------------------------
 # arc-system: controller + listener. No ingress at all (nothing scrapes them;

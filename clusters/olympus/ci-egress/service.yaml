@@ -1,0 +1,15 @@
+# Runner pods use http://egress-proxy.ci-egress.svc.cluster.local:3128 as HTTP(S)_PROXY
+# (env in ../arc/helmrelease-scale-set*.yaml). Only Ready pods are endpoints.
+apiVersion: v1
+kind: Service
+metadata:
+  name: egress-proxy
+  namespace: ci-egress
+spec:
+  selector:
+    app.kubernetes.io/name: egress-proxy
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: proxy
+      protocol: TCP

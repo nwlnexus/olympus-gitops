@@ -1,0 +1,18 @@
+# Egress forward proxy for the CI runners (nwlnexus/olympus-sdk#407). Separate from `arc` so the
+# proxy can be changed or rolled back without touching the runner scale sets, and so `arc` (the
+# drain switch) never waits on it: no dependsOn either way.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ci-egress
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/ci-egress
+  prune: true
+  # A broken proxy (pods not Ready) turns this Kustomization not-ready.
+  wait: true
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
