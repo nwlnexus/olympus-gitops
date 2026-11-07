@@ -74,7 +74,7 @@ spec:
           port: 53
 ---
 # Direct public internet for the scale sets NOT YET enforced (olympus-sdk#407 phase 3, one scale set
-# per PR: olympus-gate, then olympus-linux, olympus-arm64, olympus-kvm). A set removed from this list
+# per PR: olympus-gate, olympus-linux (done), then olympus-arm64, olympus-kvm). A set removed from this list
 # can reach only DNS (egress-dns), the egress proxy (egress-ci-egress-proxy) and, for olympus-kvm, the
 # LiteLLM exception. The label is set by ARC on every runner pod of the set.
 apiVersion: networking.k8s.io/v1
@@ -87,7 +87,7 @@ spec:
     matchExpressions:
       - key: actions.github.com/scale-set-name
         operator: In
-        values: ["olympus-linux", "olympus-arm64", "olympus-kvm"]
+        values: ["olympus-arm64", "olympus-kvm"]
   policyTypes:
     - Egress
   egress:
