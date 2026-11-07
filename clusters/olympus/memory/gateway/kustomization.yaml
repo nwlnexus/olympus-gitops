@@ -15,3 +15,5 @@ resources:
   # Forget purge (olympus-sdk#734): daily `memory-admin purge`, runs the gateway image as memory_worker.
   - purge-externalsecret.yaml
   - purge-cronjob.yaml
+  # Fact consolidation (olympus-sdk#455): nightly `memory-admin consolidate` (dedupe/decay), gateway image as memory_worker.
+  - consolidate-cronjob.yaml

@@ -1,0 +1,151 @@
+# Fact consolidation (olympus-sdk#455 part 1; contract: olympus-sdk
+# docs/superpowers/specs/2026-10-21-memory-gateway-contract-design.md section 16.2).
+#
+# Nightly: `memory-admin consolidate --apply`.
+#   dedupe  a live fact from the last 2 days that restates an older current live fact of the same project and kind
+#           (cosine >= 0.95 AND the embed worker's text check: same numbers, no polarity conflict) is superseded by it.
+#           The embed worker collapses within one session at embed time; this pass catches restatements across sessions.
+#   decay   a live fact/event/todo never recalled, importance <= 1, recorded more than 120 days ago is deprecated,
+#           unless a duplicate points at it.
+# Every change carries a marker tag and an audit row; `memory-admin consolidate undo --since <time> --apply` reverses
+# a run. Output carries ids and counts only. Entity consolidation joins as a third step after graph B4 (#516).
+# 01:10 UTC: before the host compile (olympus-sdk#455, 04:45 local on ai-agent-host) reads the facts.
+#
+# Role: memory_worker (Secret memory-purge, purge-externalsecret.yaml; the same DATABASE_URL): UPDATE on fact, SELECT
+# on fact_embedding and audit_log, INSERT on audit_log (migration 0004). Same image as the gateway.
+# IMAGE DIGEST: an image with `dist/admin/consolidate.js` (olympus-sdk #771). Bump with gateway.yaml.
+#
+# Monitoring: kube-state-metrics' kube_cronjob_* feed MemoryConsolidateStale (no success for 48h). NetworkPolicy:
+# none needed (postgres admits every pod in the namespace). Run once by hand:
+#   kubectl -n memory create job --from=cronjob/memory-consolidate consolidate-manual
+# Dry run: kubectl -n memory exec deploy/memory-gateway -- node dist/admin/cli.js consolidate --json
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: memory-consolidate
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-consolidate
+    app.kubernetes.io/part-of: memory
+spec:
+  # 04:17 UTC: after the 02:40 indexer and the 03:00 backups, off the hour.
+  schedule: "10 1 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: memory-consolidate
+            app.kubernetes.io/part-of: memory
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            # The gateway image is private (same pull secret as gateway.yaml).
+            - name: ghcr-pull
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          # Spreads across the cluster like the other memory workloads (owner decision 2026-11-01,
+          # olympus-sdk#707): the agent-services toleration and the arm64 one (the image is a multi-arch index).
+          tolerations:
+            - key: olympus.io/role
+              operator: Equal
+              value: agent-services
+              effect: NoSchedule
+            - key: olympus.io/arch
+              operator: Equal
+              value: arm64
+              effect: NoSchedule
+          initContainers:
+            # A new pod's IP joins the postgres allow-list only when the k3s (kube-router) network-policy
+            # controller next syncs, 1-12 s after start; until then the default-deny REJECTs it and the
+            # purge failed every run with "connect ECONNREFUSED" (olympus-sdk#734, same race as #724).
+            # Wait up to 120 s for a TCP connection from this pod; a postgres that stays down still fails.
+            - name: wait-for-postgres
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:d0363877ee60a00d81dabde8379c4856a76722f5766b161fb5f5eb6f970888e9
+              imagePullPolicy: IfNotPresent
+              command:
+                - node
+                - -e
+                - |
+                  const net = require('node:net')
+                  const deadline = Date.now() + 120000
+                  const attempt = () => {
+                    const s = net.connect({ host: 'postgres.memory.svc', port: 5432, timeout: 3000 })
+                    s.once('connect', () => { s.destroy(); console.log('postgres reachable'); process.exit(0) })
+                    const retry = (e) => {
+                      s.destroy()
+                      if (Date.now() > deadline) { console.error('postgres unreachable after 120 s: ' + (e && e.code)); process.exit(1) }
+                      setTimeout(attempt, 2000)
+                    }
+                    s.once('error', retry)
+                    s.once('timeout', () => retry({ code: 'ETIMEDOUT' }))
+                  }
+                  attempt()
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi
+          containers:
+            - name: consolidate
+              # Same digest as the memory-gateway Deployment (gateway.yaml) and the wait-for-postgres init container. Bump all together.
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:d0363877ee60a00d81dabde8379c4856a76722f5766b161fb5f5eb6f970888e9
+              imagePullPolicy: IfNotPresent
+              command:
+                - node
+                - dist/admin/cli.js
+                - consolidate
+                - --apply
+                - --json
+                - --actor
+                - memory-consolidate-cronjob
+              env:
+                - name: DATABASE_URL_FILE
+                  value: /run/secrets/consolidate/DATABASE_URL
+                - name: LOG_LEVEL
+                  value: info
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 96Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                - name: secrets
+                  mountPath: /run/secrets/consolidate
+                  readOnly: true
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 32Mi
+            - name: secrets
+              secret:
+                secretName: memory-purge
+                defaultMode: 0440
