@@ -1,0 +1,30 @@
+# Prometheus -> ARC metrics (olympus-sdk#392). arc-system is default-deny for ingress
+# (networkpolicy.yaml); this additive policy lets ONLY the Prometheus server in `observability`
+# reach the controller and the listeners on their metrics port (8080, helmrelease-controller.yaml
+# `metrics:`). Kept in its own file so it is independent of the isolation policies.
+# arc-runners (the runner pods) stays closed: nothing is scraped there.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ingress-prometheus-metrics
+  namespace: arc-system
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: ["controller-manager", "runner-scale-set-listener"]
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+              app.kubernetes.io/component: server
+      ports:
+        - protocol: TCP
+          port: 8080

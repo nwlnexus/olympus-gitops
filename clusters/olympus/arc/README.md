@@ -18,6 +18,7 @@ and, with `../kvm-device-plugin/`, #390).
 | `quota.yaml`, `limitrange.yaml` | hard ceilings: total 14 pods; `ci-runners-non-kvm` (olympus-linux + olympus-gate: 12 pods, 8.5 CPU / 17 GiB requests, 20 CPU / 36 GiB limits, no `/dev/kvm`) and `ci-runners-kvm` (2 pods, 4 CPU / 8 GiB requests, 6 CPU / 16 GiB limits, 2 `olympus.io/kvm`); default requests/limits for every container |
 | `networkpolicy.yaml` | default-deny ingress; runner egress = DNS + public internet only (no IPv4 cluster, node, LAN or tailnet addresses), plus `egress-litellm-kvm`: pods labelled `olympus.io/ci-kvm` (olympus-kvm only) may reach the `inference` LiteLLM pods on TCP 4000 (executor, olympus-sdk#642), plus `egress-ci-egress-proxy`: every runner pod may reach the egress proxy pods in `ci-egress` on TCP 3128 (olympus-sdk#407); controller/listener egress adds the API server only |
 | `../ci-egress/` | separate Flux app: the CI egress forward proxy (squid, 2 replicas), see "Egress proxy" below |
+| `networkpolicy-metrics.yaml` | additive: only the Prometheus server (ns `observability`) may reach the controller and listener pods in `arc-system` on TCP 8080 (metrics, olympus-sdk#392) |
 | `externalsecret.yaml` | `arc-github-app` Secret (GitHub App credentials) from 1Password via ESO |
 | `ocirepository.yaml` | both charts pinned by digest (`ghcr.io/actions/actions-runner-controller-charts`) |
 | `helmrelease-controller.yaml` | `gha-runner-scale-set-controller` (release `arc`, CRDs `CreateReplace`, `watchSingleNamespace: arc-runners`, image pinned by digest) |
@@ -254,19 +255,113 @@ curl -sS -m 5 -k https://68.134.149.230:443                    # gateway WAN IP 
 - #4712 / #4718: non-quota 403s mark runners Failed and hold the slot until deleted
   (`kubectl -n arc-runners delete ephemeralrunner <name>`).
 
-## Monitoring watch items
+## Monitoring (olympus-sdk#392)
 
-During the first CI runs watch etcd I/O: `etcd_disk_wal_fsync_duration_seconds` at
-`127.0.0.1:2381/metrics` on the onodes (baseline p99.98 under 8 ms). Pull the
-alerts in #392 forward before raising maxRunners.
+- **Metrics.** `helmrelease-controller.yaml` sets `metrics:` (chart 0.15.0: `controllerManagerAddr`,
+  `listenerAddr`, `listenerEndpoint`); the controller and every listener serve on :8080, port `metrics`.
+  Prometheus scrapes them with the static jobs `arc-controller` and `arc-listeners`
+  (`../observability/prometheus-helmrelease.yaml`; listener targets carry `scale_set`), allowed by
+  `networkpolicy-metrics.yaml`. Listener series: `gha_registered/busy/idle/min/max/desired_runners`,
+  `gha_assigned/running_jobs` (label `name` = scale set), `gha_started/completed_jobs_total`,
+  `gha_job_startup_duration_seconds` (queue time) and `gha_job_execution_duration_seconds`. Controller:
+  `gha_controller_{pending,running,failed}_ephemeral_runners` and `gha_controller_running_listeners`.
+- **Dashboard.** Grafana "CI runners" (uid `arc-runners`, `../observability/dashboards/arc-runners.json`):
+  runners and jobs per scale set, queue time, job duration, ephemeral runner phases, quota use, and node
+  CPU/memory/root disk plus apiserver-side etcd latency while CI runs.
+- **Alerts** (group `arc-ci-runners`): `ArcControllerDown`, `ArcListenerDown` (critical);
+  `ArcJobsStuckInQueue`, `ArcJobQueueTimeHigh`, `ArcEphemeralRunnersFailed`, `ArcRunnerPodPending`,
+  `ArcQuotaSaturated`. Group `cluster-nodes`: `KubeNodePressure`, `ClusterNodeRootDiskLow` (critical,
+  under 12% free on `/`: etcd, containerd and the runner emptyDirs share that disk on the onodes),
+  `ClusterNodeRootDiskFillingUp`, `EtcdRequestLatencyHigh`. Unit tests:
+  `../observability/tests/arc-alerts.test.yaml`.
+- **etcd.** k3s serves etcd's own metrics (`etcd_disk_wal_fsync_duration_seconds`) on
+  `127.0.0.1:2381` only, so they are not scraped; `EtcdRequestLatencyHigh` uses the apiservers'
+  `etcd_request_duration_seconds` instead (non-list p99, 7-day peak under 0.1 s on 2026-11-07, alert at
+  0.5 s). Scraping etcd directly needs `etcd-expose-metrics: true` in the k3s config (olympus-infra).
 
-## Drain, fallback and removal
+## Runbook
 
-- Drain: set `maxRunners: 0` in `helmrelease-scale-set.yaml` (and/or `-gate`, `-kvm`),
-  merge; no new runners start, running jobs finish. (See known issue #4715 when raising it again.)
-- Fallback to hosted runners: set the repository variables (`RUNNER_LINUX` etc.)
-  back to the hosted label (`ubuntu-latest`); for the VM suites delete `VM_TEST_RUNNER`
-  (the workflow falls back to `ubuntu-latest` and re-enables KVM with udev there).
+### Drain a scale set (no new runners; running jobs finish)
+
+Durable (Git): set `maxRunners: 0` in that set's `helmrelease-scale-set*.yaml`, merge. Queued jobs wait
+on GitHub (`ArcJobsStuckInQueue` fires after 20 min); fall back to hosted runners (below) if the drain
+will last.
+
+Immediate (kubectl, minutes, then follow up in Git or restore): suspend the HelmRelease so helm-controller
+does not fight the patch, then patch the AutoscalingRunnerSet. Tested on `olympus-arm64` 2026-11-07
+(evidence in olympus-sdk#392):
+
+```sh
+kubectl -n arc-runners patch helmrelease olympus-arm64 --type merge -p '{"spec":{"suspend":true}}'
+kubectl -n arc-runners patch autoscalingrunnerset olympus-arm64 --type merge -p '{"spec":{"maxRunners":0}}'
+kubectl -n arc-runners get autoscalingrunnerset olympus-arm64
+```
+
+The controller recreates the listener with the new maximum (`gha_max_runners{name="olympus-arm64"}`
+reads 0); a job dispatched now stays queued and no runner pod is created. Restore:
+
+```sh
+kubectl -n arc-runners patch autoscalingrunnerset olympus-arm64 --type merge -p '{"spec":{"maxRunners":3}}'
+kubectl -n arc-runners patch helmrelease olympus-arm64 --type merge -p '{"spec":{"suspend":false}}'
+```
+
+Use the value from Git for `maxRunners`. If a job queued during the drain does not start within a minute
+(known issue #4715), restart the listener:
+`kubectl -n arc-system delete pod -l actions.github.com/scale-set-name=<set>`.
+
+### Fall back to hosted runners
+
+The workflows read their runner from repository variables (JSON: a quoted label or a label array). In
+each repository that uses the pool (`gh variable list -R nwlnexus/<repo>`):
+
+```sh
+gh variable set RUNNER_LINUX -R nwlnexus/olympus-sdk --body '"ubuntu-latest"'
+gh variable set RUNNER_GATE -R nwlnexus/olympus-sdk --body '"ubuntu-latest"'
+gh variable set RUNNER_BROWSER -R nwlnexus/olympus-sdk --body '"ubuntu-latest"'
+gh variable delete VM_TEST_RUNNER -R nwlnexus/olympus-sdk
+```
+
+Deleting `VM_TEST_RUNNER` sends the VM suites to `ubuntu-latest` (the workflow re-enables KVM with udev
+there). `RUNNER_ARM64` unset means `olympus-arm64`; set it to `'"ubuntu-24.04-arm"'` for hosted arm64.
+Undo by setting the variables back to `'"olympus-linux"'`, `'"olympus-gate"'`, `'"olympus-kvm"'`.
+
+### Controller and CRD upgrade
+
+1. Read the release notes between the versions (CRD changes, known issues above).
+2. One PR: bump tag **and** digest of **both** OCIRepository objects (`ocirepository.yaml`; `helm pull`
+   prints the digest) and the controller image tag+digest in `helmrelease-controller.yaml`. Controller
+   and scale-set charts must always match.
+3. CRDs: the controller HelmRelease uses `crds: CreateReplace`, so Flux replaces them on upgrade. If a
+   release requires removing the scale sets first, drain all sets and use the two-step removal below,
+   then re-add.
+4. After merge: `kubectl -n arc-system get pods` (controller and one listener per set Running), the
+   "CI runners" dashboard shows every set registered, then dispatch `arm64-runner-smoke.yml` (olympus-sdk)
+   as a canary before the busy sets see traffic.
+
+### Runner image rebuild
+
+See "Runner image" below: build with `ci/runner/build.sh` (olympus-sdk), replace the digest in the scale
+set file(s), one PR, never a tag. The arm64 set pins the multi-arch index digest; KVM has its own
+variant.
+
+### macOS runners (data-hub, mmini-01, mmini-02; not ARC)
+
+Native JIT runners from nix-darwin-hm `d.server.ciRunner`: LaunchDaemon `io.olympus.ci-runner`, log
+`/var/log/ci-runner.log`, one job at a time as `_ghrunner`. Restart on the host (LAN sshd, as an admin):
+
+```sh
+sudo launchctl kickstart -k system/io.olympus.ci-runner
+sudo launchctl print system/io.olympus.ci-runner
+sudo tail -n 50 /var/log/ci-runner.log
+```
+
+`kickstart -k` sends TERM: the loop kills the current job's runner and wipes the work dir, so the job
+fails as "runner lost". A healthy idle host shows an online runner named `<host>-<timestamp>` in the org
+runners list (`gh api orgs/nwlnexus/actions/runners --jq '.runners[] | [.name,.status,.busy] | @tsv'`,
+needs an admin token). Not alerted yet: see "Later".
+
+### Remove scale sets
+
 - Remove ONLY the KVM scale set (keeps olympus-linux / olympus-gate):
   1. Delete the repository variable `VM_TEST_RUNNER` (jobs go back to hosted).
   2. PR removing `helmrelease-scale-set-kvm.yaml` and its line in `kustomization.yaml`;
@@ -364,7 +459,15 @@ templates (works while phase 3 is not in place; with phase 3, also revert the ne
 
 ## Later (intentionally not included yet)
 
-- Controller/listener metrics, dashboards, alerts: #392 (no scrape job exists; arc-system allows no ingress).
+- Alerting on the macOS runners (#392 scope). Nothing the Macs export today covers them (no exporter on the
+  hosts, no host logs in Loki), and the reliable signal, "GitHub sees an online runner per host", needs an
+  org runners API credential. Proposal: a fine-grained PAT (or a separate GitHub App) with only
+  **Self-hosted runners: read** on the org, in 1Password, synced by ESO into `observability`, used by a
+  blackbox `http_2xx` module on `https://api.github.com/orgs/nwlnexus/actions/runners?per_page=100`
+  with `fail_if_body_not_matches_regexp` per host (`"name":"<host>-[0-9]{14}"[^}]*"status":"online"`)
+  and an alert at 15 min. Deliberately NOT the `arc-github-app` key: that one can register runners
+  org-wide and stays in the arc namespaces. Credential-free alternative: a launchd heartbeat on each Mac
+  pushing an OTLP gauge to `obs-otlp` (needs a nix-darwin-hm change and a host switch per Mac).
 - Egress allowlist: phase 1 (log-only proxy) is live, phases 2 and 3 are open ("Egress proxy" above,
   olympus-sdk#407).
 

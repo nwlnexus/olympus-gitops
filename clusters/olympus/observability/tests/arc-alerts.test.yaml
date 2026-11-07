@@ -1,0 +1,135 @@
+# Unit tests for the arc-ci-runners and cluster-nodes groups (olympus-sdk#392).
+# Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease first).
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  - name: controller not scraped fires after 10m
+    interval: 1m
+    input_series:
+      - series: 'up{job="arc-controller", pod="arc-gha-rs-controller-x"}'
+        values: "1x5 0x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ArcControllerDown
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: ArcControllerDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "The ARC controller (arc-system) is not being scraped."
+              description: "No successful scrape of the gha-rs-controller for 10m. Without it no listener or runner is reconciled, so CI on olympus-linux, olympus-gate, olympus-kvm and olympus-arm64 stops once the current runners finish. `kubectl -n arc-system get pods,events` and `kubectl -n arc-system logs deploy/arc-gha-rs-controller`. Fallback to hosted runners: arc/README.md, Runbook."
+
+  - name: a listener target down fires per scale set, healthy ones stay quiet
+    interval: 1m
+    input_series:
+      - series: 'up{job="arc-listeners", scale_set="olympus-arm64", pod="olympus-arm64-f-listener"}'
+        values: "0x20"
+      - series: 'up{job="arc-listeners", scale_set="olympus-linux", pod="olympus-linux-f-listener"}'
+        values: "1x20"
+      - series: 'gha_controller_running_listeners{job="arc-controller", name="olympus-linux-f-listener", namespace="arc-system"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ArcListenerDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              name: olympus-arm64
+              scale_set: olympus-arm64
+            exp_annotations:
+              summary: "ARC listener olympus-arm64 is down."
+              description: "The listener for olympus-arm64 has not been running or scrapeable for 10m. A scale set without a listener takes no jobs: they stay queued on GitHub. `kubectl -n arc-system get pods -l app.kubernetes.io/component=runner-scale-set-listener` and the listener logs; a GitHub App or network problem shows there. Restart: delete the listener pod (the controller recreates it)."
+
+  - name: assigned jobs with nothing running fire after 20m; a busy set does not
+    interval: 1m
+    input_series:
+      - series: 'gha_assigned_jobs{job="arc-listeners", name="olympus-arm64", namespace="arc-runners"}'
+        values: "1x30"
+      - series: 'gha_running_jobs{job="arc-listeners", name="olympus-arm64", namespace="arc-runners"}'
+        values: "0x30"
+      - series: 'gha_assigned_jobs{job="arc-listeners", name="olympus-linux", namespace="arc-runners"}'
+        values: "4x30"
+      - series: 'gha_running_jobs{job="arc-listeners", name="olympus-linux", namespace="arc-runners"}'
+        values: "3x30"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ArcJobsStuckInQueue
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: ArcJobsStuckInQueue
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              name: olympus-arm64
+            exp_annotations:
+              summary: "Scale set olympus-arm64 has 1 assigned job(s) and nothing running for 20m."
+              description: "gha_assigned_jobs > 0 with gha_running_jobs == 0 for 20m. Check in order: maxRunners (a drain leaves jobs waiting; fall back to hosted runners), Pending runner pods (`kubectl -n arc-runners get pods,ephemeralrunners`; no node, quota, Insufficient olympus.io/kvm), and the stuck-queue bug #4715 (restart the listener: `kubectl -n arc-system delete pod -l actions.github.com/scale-set-name=olympus-arm64`)."
+
+  - name: quota at 100% of pods fires, hard 0 resources are ignored
+    interval: 1m
+    input_series:
+      - series: 'kube_resourcequota{namespace="arc-runners", resourcequota="ci-runners-kvm", resource="pods", type="used"}'
+        values: "2x40"
+      - series: 'kube_resourcequota{namespace="arc-runners", resourcequota="ci-runners-kvm", resource="pods", type="hard"}'
+        values: "2x40"
+      - series: 'kube_resourcequota{namespace="arc-runners", resourcequota="ci-runners", resource="services", type="used"}'
+        values: "0x40"
+      - series: 'kube_resourcequota{namespace="arc-runners", resourcequota="ci-runners", resource="services", type="hard"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: ArcQuotaSaturated
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: arc-runners
+              resourcequota: ci-runners-kvm
+              resource: pods
+            exp_annotations:
+              summary: "Quota arc-runners/ci-runners-kvm is at 100% of pods."
+              description: "At 100% new runner pods are rejected and jobs queue. Sustained saturation means CI needs more capacity: raise maxRunners and the quotas together (arc/quota.yaml keeps the sums), only with node headroom."
+
+  - name: root disk below 12% free fires critical, deduplicated per node
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{job="kubernetes-service-endpoints", service="node-exporter", mountpoint="/", node="onode-030c31", instance="192.168.253.7:9100"}'
+        values: "10x10"
+      - series: 'node_filesystem_size_bytes{job="kubernetes-service-endpoints", service="node-exporter", mountpoint="/", node="onode-030c31", instance="192.168.253.7:9100"}'
+        values: "100x10"
+      - series: 'node_filesystem_avail_bytes{job="kubernetes-service-endpoints", service="node-exporter", mountpoint="/", node="onode-0312ce", instance="192.168.253.8:9100"}'
+        values: "40x10"
+      - series: 'node_filesystem_size_bytes{job="kubernetes-service-endpoints", service="node-exporter", mountpoint="/", node="onode-0312ce", instance="192.168.253.8:9100"}'
+        values: "100x10"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: ClusterNodeRootDiskLow
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              node: onode-030c31
+            exp_annotations:
+              summary: "Root disk on onode-030c31 has only 10% free."
+              description: "Below 10% the kubelet evicts pods; on the onodes etcd and containerd share this disk and etcd stops accepting writes when it is full. Drain CI if it runs there, then free space (`crictl rmi --prune`, journal, old images)."
+
+  - name: node pressure from either kube-state-metrics copy fires once
+    interval: 1m
+    input_series:
+      - series: 'kube_node_status_condition{job="kube-state-metrics", node="onode-0314ac", condition="DiskPressure", status="true"}'
+        values: "1x10"
+      - series: 'kube_node_status_condition{job="kubernetes-service-endpoints", node="onode-0314ac", condition="DiskPressure", status="true"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: KubeNodePressure
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              node: onode-0314ac
+              condition: DiskPressure
+            exp_annotations:
+              summary: "Node onode-0314ac reports DiskPressure."
+              description: "The kubelet on onode-0314ac has reported DiskPressure for 5m and is evicting or refusing pods. If CI is running there, drain the scale set (arc/README.md, Runbook) and check `kubectl describe node onode-0314ac`."

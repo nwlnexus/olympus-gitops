@@ -33,10 +33,17 @@ spec:
       # instead of the cluster-wide ClusterRole. Consequence: scale sets must live
       # in arc-runners (all three do, including olympus-kvm, #390).
       watchSingleNamespace: arc-runners
-    # Metrics are intentionally NOT enabled: the observability stack has no scrape
-    # job for them yet and arc-system allows no ingress. Monitoring is
-    # nwlnexus/olympus-sdk#392 (set `metrics:` here and add a scrape + a
-    # NetworkPolicy ingress rule from the scraper's namespace then).
+    # Metrics (olympus-sdk#392). The controller serves gha_controller_* and controller-runtime
+    # metrics on :8080 (container port `metrics`); it passes listenerAddr/listenerEndpoint to every
+    # listener pod it creates, which then serves the gha_* scale-set metrics on :8080 too (port
+    # `metrics`, default label set: no workflow ref labels). Scraped by the arc-controller and
+    # arc-listeners jobs in ../observability/prometheus-helmrelease.yaml; ingress from Prometheus only,
+    # networkpolicy-metrics.yaml. Changing this block restarts the controller and recreates every
+    # listener (seconds; running jobs are not affected).
+    metrics:
+      controllerManagerAddr: ":8080"
+      listenerAddr: ":8080"
+      listenerEndpoint: "/metrics"
     resources:
       # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
       requests:
