@@ -539,6 +539,23 @@ spec:
                 annotations:
                   summary: "The forget purge has not succeeded for 48h."
                   description: "CronJob memory-purge has had no successful run for more than 48h, so memories users forgot are hidden but their text is still in the database (olympus-sdk#734). `kubectl -n memory get cronjob,jobs,pods -l app.kubernetes.io/name=memory-purge` and the Job logs: a permission error means role memory_worker lost DELETE on fact_revision/capture_queue (migration 0004), 'unknown command' means the image digest predates `memory-admin purge`."
+              # Fact consolidation (olympus-sdk#455, contract section 16.2): CronJob memory/memory-consolidate, daily at
+              # 01:10 UTC. Same shape as MemoryPurgeStale: no success for 48h, or never and older than 48h.
+              - alert: MemoryConsolidateStale
+                expr: >-
+                  (time() - kube_cronjob_status_last_successful_time{namespace="memory", cronjob="memory-consolidate"} > 172800)
+                  or
+                  (
+                    time() - kube_cronjob_created{namespace="memory", cronjob="memory-consolidate"} > 172800
+                    unless on (namespace, cronjob)
+                    kube_cronjob_status_last_successful_time{namespace="memory", cronjob="memory-consolidate"}
+                  )
+                for: 15m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "The fact consolidation has not succeeded for 48h."
+                  description: "CronJob memory-consolidate has had no successful run for more than 48h, so restated facts stay duplicated and stale facts are not deprecated (olympus-sdk#455). `kubectl -n memory get cronjob,jobs,pods -l app.kubernetes.io/name=memory-consolidate` and the Job logs: 'unknown command' means the image digest predates `memory-admin consolidate`; a permission error means role memory_worker lost UPDATE on fact (migration 0004)."
               # Memory gateway and queue (olympus-sdk#450 task G10, design section 9). The queue
               # gauges are exported by the gateway (Q-QUEUE-METRICS, every 30 s, both replicas, hence
               # max by); scraped through the kubernetes-pods job. The expr/for/severity are the

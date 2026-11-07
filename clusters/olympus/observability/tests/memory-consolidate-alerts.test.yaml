@@ -1,0 +1,61 @@
+# Unit tests for MemoryConsolidateStale (olympus-sdk#455): no successful fact consolidation for 48h.
+# Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease).
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  - name: a consolidation that succeeded a day ago does not fire
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="memory", cronjob="memory-consolidate"}'
+        values: "0x3000"
+      - series: 'kube_cronjob_created{namespace="memory", cronjob="memory-consolidate"}'
+        values: "-864000x3000"
+    alert_rule_test:
+      - eval_time: 24h
+        alertname: MemoryConsolidateStale
+        exp_alerts: []
+
+  - name: no success for more than 48h fires
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="memory", cronjob="memory-consolidate"}'
+        values: "0x3600"
+      - series: 'kube_cronjob_created{namespace="memory", cronjob="memory-consolidate"}'
+        values: "-864000x3600"
+    alert_rule_test:
+      - eval_time: 47h
+        alertname: MemoryConsolidateStale
+        exp_alerts: []
+      - eval_time: 49h
+        alertname: MemoryConsolidateStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: memory
+              cronjob: memory-consolidate
+            exp_annotations:
+              summary: "The fact consolidation has not succeeded for 48h."
+              description: "CronJob memory-consolidate has had no successful run for more than 48h, so restated facts stay duplicated and stale facts are not deprecated (olympus-sdk#455). `kubectl -n memory get cronjob,jobs,pods -l app.kubernetes.io/name=memory-consolidate` and the Job logs: 'unknown command' means the image digest predates `memory-admin consolidate`; a permission error means role memory_worker lost UPDATE on fact (migration 0004)."
+
+  - name: a CronJob that never succeeded fires once it is older than 48h
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_created{namespace="memory", cronjob="memory-consolidate"}'
+        values: "0x3600"
+    alert_rule_test:
+      - eval_time: 47h
+        alertname: MemoryConsolidateStale
+        exp_alerts: []
+      - eval_time: 49h
+        alertname: MemoryConsolidateStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: memory
+              cronjob: memory-consolidate
+            exp_annotations:
+              summary: "The fact consolidation has not succeeded for 48h."
+              description: "CronJob memory-consolidate has had no successful run for more than 48h, so restated facts stay duplicated and stale facts are not deprecated (olympus-sdk#455). `kubectl -n memory get cronjob,jobs,pods -l app.kubernetes.io/name=memory-consolidate` and the Job logs: 'unknown command' means the image digest predates `memory-admin consolidate`; a permission error means role memory_worker lost UPDATE on fact (migration 0004)."
+
