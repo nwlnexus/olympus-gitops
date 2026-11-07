@@ -164,7 +164,7 @@ spec:
           # (olympus-sdk#707). To bump: `docker buildx imagetools inspect
           # ghcr.io/nwlnexus/memory-gateway:sha-<short>` and take the index digest.
           # knowledge-indexer-cronjob.yaml pins the same digest; bump both together.
-          image: ghcr.io/nwlnexus/memory-gateway@sha256:36b4028f4a706354d31115534a3f6543efb23657b52815feda2c1016aa26be80
+          image: ghcr.io/nwlnexus/memory-gateway@sha256:ea37192b615b48ba5414ee718d5fa09aee45ee9393e2147f36202f3eb85db9ce
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
