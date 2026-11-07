@@ -22,22 +22,19 @@
 # harness uses QEMU user-mode networking inside the pod, so the guest's traffic
 # leaves through the pod's own sockets and is subject to exactly these rules;
 # SSH/HTTP to the guest is on 127.0.0.1 inside the pod). Ingress: denied entirely.
-# Egress: DNS + the PUBLIC internet only. Runner pods therefore cannot reach any cluster Service
-# or Pod (10.42/16, 10.43/16), any node (192.168.253.0/24), the LAN (QNAP, UniFi),
-# the tailnet (100.64.0.0/10) or the link-local range (169.254.0.0/16).
+# Egress (olympus-sdk#407 phase 3, all scale sets): DNS via CoreDNS (egress-dns) and the CI egress
+# proxy, squid in `ci-egress` on TCP 3128 (egress-ci-egress-proxy; matching ingress in
+# ../ci-egress/networkpolicy.yaml), nothing else. Public hosts are reached only through the proxy's
+# hostname allowlist (../ci-egress/configmap.yaml); a tool that ignores HTTP(S)_PROXY fails closed.
+# Runner pods cannot reach any other cluster Service or Pod (10.42/16, 10.43/16), any node
+# (192.168.253.0/24), the LAN, the tailnet or the link-local range, nor any public IP directly.
 # One exception (olympus-sdk#642): pods labelled olympus.io/ci-kvm=true (the olympus-kvm scale
 # set only) may also reach the cluster LiteLLM, pods app.kubernetes.io/name=litellm in `inference`,
 # on TCP 4000 (policy egress-litellm-kvm below; policies are additive). The matching ingress is in
 # ../inference/networkpolicy.yaml.
-# Egress proxy (olympus-sdk#407): every runner pod may also reach the squid pods in `ci-egress` on
-# TCP 3128 (policy egress-ci-egress-proxy below; matching ingress in ../ci-egress/networkpolicy.yaml).
-# Phase 3 (per scale set): egress-dns applies to every runner pod; direct public internet
-# (egress-dns-and-internet) only to the sets still listed there. An enforced set reaches DNS + the
-# proxy only (+ LiteLLM for olympus-kvm), so a tool that ignores HTTP(S)_PROXY fails closed.
-# NOTE: "public internet" is any public address (GitHub, crates.io, npm, ghcr.io
-# ...). A per-host allowlist (spec section 5) needs an L7/FQDN-aware policy,
-# which kube-router cannot do; this is the strongest rule expressible with
-# standard NetworkPolicy.
+# Rollback (proxy broken, no quick fix): restore the policy egress-dns-and-internet (public internet
+# minus the private ranges, git history of this file) and remove the proxy env from the scale sets
+# (README "Egress proxy").
 # ---------------------------------------------------------------------------
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -73,38 +70,9 @@ spec:
         - protocol: TCP
           port: 53
 ---
-# Direct public internet for the scale sets NOT YET enforced (olympus-sdk#407 phase 3, one scale set
-# per PR: olympus-gate, olympus-linux, olympus-arm64 (done), then olympus-kvm). A set removed from this list
-# can reach only DNS (egress-dns), the egress proxy (egress-ci-egress-proxy) and, for olympus-kvm, the
-# LiteLLM exception. The label is set by ARC on every runner pod of the set.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: egress-dns-and-internet
-  namespace: arc-runners
-spec:
-  podSelector:
-    matchExpressions:
-      - key: actions.github.com/scale-set-name
-        operator: In
-        values: ["olympus-kvm"]
-  policyTypes:
-    - Egress
-  egress:
-    # Public internet, minus every private/internal range.
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8         # pod 10.42.0.0/16 + service 10.43.0.0/16
-              - 172.16.0.0/12
-              - 192.168.0.0/16     # LAN 192.168.253.0/24: nodes, API VIP, QNAP, UniFi
-              - 100.64.0.0/10      # tailnet (CGNAT)
-              - 169.254.0.0/16     # link-local
-              - 127.0.0.0/8
 ---
 # olympus-sdk#642: the executor (Claude Code on olympus-kvm) reaches the cluster LiteLLM and
-# nothing else inside the cluster. Additive to egress-dns-and-internet. kube-proxy DNATs the
+# nothing else inside the cluster. Additive to egress-dns. kube-proxy DNATs the
 # Service to the pod before policy evaluation, so the pod selector is what matters.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -130,7 +98,7 @@ spec:
           port: 4000
 ---
 # olympus-sdk#407: runner pods -> the CI egress proxy (squid, ns ci-egress) on TCP 3128. Additive to
-# egress-dns-and-internet (which drops 10.0.0.0/8, so without this the proxy is unreachable). kube-proxy
+# egress-dns; with phase 3 this is the runners' only way out. kube-proxy
 # DNATs the Service to the pod before policy evaluation, so the pod selector is what matters.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
