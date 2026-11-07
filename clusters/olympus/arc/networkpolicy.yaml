@@ -31,8 +31,9 @@
 # ../inference/networkpolicy.yaml.
 # Egress proxy (olympus-sdk#407): every runner pod may also reach the squid pods in `ci-egress` on
 # TCP 3128 (policy egress-ci-egress-proxy below; matching ingress in ../ci-egress/networkpolicy.yaml).
-# Phase 1 (log-only) ADDS that path and leaves direct internet egress in place, so a tool that
-# ignores HTTP(S)_PROXY keeps working; phase 3 narrows egress-dns-and-internet to DNS + the proxy.
+# Phase 3 (per scale set): egress-dns applies to every runner pod; direct public internet
+# (egress-dns-and-internet) only to the sets still listed there. An enforced set reaches DNS + the
+# proxy only (+ LiteLLM for olympus-kvm), so a tool that ignores HTTP(S)_PROXY fails closed.
 # NOTE: "public internet" is any public address (GitHub, crates.io, npm, ghcr.io
 # ...). A per-host allowlist (spec section 5) needs an L7/FQDN-aware policy,
 # which kube-router cannot do; this is the strongest rule expressible with
@@ -51,7 +52,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: egress-dns-and-internet
+  name: egress-dns
   namespace: arc-runners
 spec:
   podSelector: {}
@@ -71,6 +72,25 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+---
+# Direct public internet for the scale sets NOT YET enforced (olympus-sdk#407 phase 3, one scale set
+# per PR: olympus-gate, then olympus-linux, olympus-arm64, olympus-kvm). A set removed from this list
+# can reach only DNS (egress-dns), the egress proxy (egress-ci-egress-proxy) and, for olympus-kvm, the
+# LiteLLM exception. The label is set by ARC on every runner pod of the set.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-dns-and-internet
+  namespace: arc-runners
+spec:
+  podSelector:
+    matchExpressions:
+      - key: actions.github.com/scale-set-name
+        operator: In
+        values: ["olympus-linux", "olympus-arm64", "olympus-kvm"]
+  policyTypes:
+    - Egress
+  egress:
     # Public internet, minus every private/internal range.
     - to:
         - ipBlock:
