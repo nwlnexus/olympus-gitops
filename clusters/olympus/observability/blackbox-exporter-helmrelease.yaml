@@ -38,6 +38,13 @@ spec:
         memory: 64Mi
       limits:
         memory: 64Mi
+    # Bearer token of the LiteLLM `monitor` client (olympus-sdk#649): Secret litellm-monitor-key
+    # (litellm-monitor-externalsecret.yaml), read by module litellm_models below.
+    extraSecretMounts:
+      - name: litellm-monitor-key
+        secretName: litellm-monitor-key
+        mountPath: /etc/blackbox/litellm
+        readOnly: true
     config:
       modules:
         http_2xx:
@@ -52,3 +59,23 @@ spec:
           timeout: 5s
           tcp:
             preferred_ip_protocol: "ip4"
+        # Authenticated GET /v1/models on the cluster LiteLLM (olympus-sdk#649). The token file is
+        # re-read on every probe, so a rotated key needs no restart. The probe fails when the body
+        # lacks any configured alias (inference/litellm-config.yaml; the `monitor` scope in
+        # inference/litellm.yaml lists the same four), which covers an empty list too.
+        litellm_models:
+          prober: http
+          timeout: 5s
+          http:
+            valid_http_versions: ["HTTP/1.1"]
+            valid_status_codes: [200]
+            preferred_ip_protocol: "ip4"
+            http_client_config:
+              authorization:
+                type: Bearer
+                credentials_file: /etc/blackbox/litellm/token
+            fail_if_body_not_matches_regexp:
+              - '"id"\s*:\s*"memory-extract"'
+              - '"id"\s*:\s*"coder-light"'
+              - '"id"\s*:\s*"coder-medium"'
+              - '"id"\s*:\s*"coder-heavy"'

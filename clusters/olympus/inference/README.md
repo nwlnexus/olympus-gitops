@@ -49,6 +49,9 @@ Metrics identify the client as `api_key_alias`. A key rotated in 1Password is pi
 owner; ExternalSecret `litellm-executor-key` -> Secret `litellm-executor-key`, mounted as file `executor` through a projected
 volume with `optional: true`, kept apart so a missing field never affects the other two ExternalSecrets). Limits for the
 executor (`LITELLM_CLIENT_LIMITS`): 60 requests/min and 3 parallel requests per replica.
+`monitor-key` (#649, the blackbox `/v1/models` probe): client `monitor`, ExternalSecret `litellm-monitor-key` (a second copy in ns `observability`,
+`../observability/litellm-monitor-externalsecret.yaml`, is mounted into the blackbox exporter). `LITELLM_CLIENT_ROUTES` limits `monitor` to
+`/v1/models` and `/models`; its scope lists the four aliases so the list is complete, but it cannot run inference.
 
 Who may call LiteLLM (ingress 4000): memory workers (`memory`), Prometheus and blackbox (`observability`), `olympus-kvm`
 runner pods (`arc-runners`, label `olympus.io/ci-kvm`; executor scope `coder-*` only).
@@ -62,7 +65,10 @@ Scraped by the dedicated job `inference-litellm` (`../observability/prometheus-h
 `user_agent`. Probes: job `blackbox-inference-http` (LiteLLM readiness, A9 `:8081`/`:8082`/`:8084`/`:8085` `/health`); data-hub
 backends are probed by `blackbox-datahub-http` (only the 7B on `:8082`, the coder-light fallback). Alerts (group `inference`, tests in
 `../observability/tests/inference-alerts.test.yaml`): `LiteLLMDown`, `InferenceBackendDown` (coder-light, has a fallback),
-`InferenceBackendDownNoFallback` (every other A9 backend), `InferenceAllBackendsDown` (coder-light on both hosts), `LiteLLMFailoverActive`, `LiteLLMFallbackFailed`, `LiteLLMHighErrorRate`.
+`InferenceBackendDownNoFallback` (every other A9 backend), `InferenceAllBackendsDown` (coder-light on both hosts), `LiteLLMFailoverActive`, `LiteLLMFallbackFailed`, `LiteLLMHighErrorRate`,
+`LiteLLMModelListEmpty` (job `blackbox-litellm-models`, blackbox module `litellm_models`: authenticated `GET /v1/models` answers 200 but the body lacks one of
+the four aliases; **when you add or rename an alias, update the regex list in `../observability/blackbox-exporter-helmrelease.yaml` and the `monitor` scope in `litellm.yaml`**)
+and `LiteLLMModelsProbeFailing` (the same probe gets a non-200 or no answer, e.g. 401 for a missing key).
 
 Failover is visible as `litellm_deployment_successful_fallbacks_total{requested_model, fallback_model}` and
 `litellm_deployment_failure_responses_total{model_id, exception_class}`, and on the backends as
