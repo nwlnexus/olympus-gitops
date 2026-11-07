@@ -103,9 +103,6 @@ spec:
     # data-hub is a Mac Studio host, not a cluster; addresses are its tailnet IP
     # (100.95.232.41) on purpose: the probes must fail if a service is not bound to
     # the tailnet address.
-    # TODO(olympus-sdk#447): add an authenticated LiteLLM /v1/models check (needs a
-    # bearer key) and alert on an empty model list. Needs a Secret and a mechanism
-    # beyond a plain http_2xx probe, so it is deferred until the key exists.
     extraScrapeConfigs: |
       - job_name: blackbox-exporter
         metrics_path: /metrics
@@ -300,6 +297,29 @@ spec:
             labels:
               service: llama-qwen36-27b-coder
               host: a9
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.observability.svc:9115
+      # Authenticated LiteLLM model list (olympus-sdk#649, was #447): module litellm_models presents the
+      # `monitor` client key and requires every configured alias in the /v1/models body. HTTP 200 with
+      # an alias missing (or an empty list) gives probe_success 0 and probe_http_status_code 200
+      # (LiteLLMModelListEmpty); 401/403/5xx or a timeout give probe_success 0 with another code.
+      # Allowed by inference/networkpolicy.yaml (blackbox-exporter -> 4000).
+      - job_name: blackbox-litellm-models
+        metrics_path: /probe
+        params:
+          module: [litellm_models]
+        scrape_interval: 1m
+        scrape_timeout: 10s
+        static_configs:
+          - targets: ["http://litellm.inference.svc:4000/v1/models"]
+            labels:
+              service: litellm
+              host: cluster
         relabel_configs:
           - source_labels: [__address__]
             target_label: __param_target
@@ -628,6 +648,27 @@ spec:
                 annotations:
                   summary: "The cluster LiteLLM (inference/litellm) has no ready endpoint."
                   description: "GET {{ $labels.instance }} has failed for 5m: no LiteLLM pod is ready, so memory extraction stops. Check `kubectl -n inference get pods,events` and the Flux Kustomization `inference`."
+              # Authenticated model list (olympus-sdk#649): LiteLLM answered 200 but /v1/models lacks a
+              # configured alias (a bad config or a reload that dropped models), so requests for it fail
+              # while readiness stays green. Probe: job blackbox-litellm-models.
+              - alert: LiteLLMModelListEmpty
+                expr: probe_success{job="blackbox-litellm-models"} == 0 and on(instance) probe_http_status_code{job="blackbox-litellm-models"} == 200
+                for: 10m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: "The cluster LiteLLM model list is empty or missing an alias."
+                  description: "GET {{ $labels.instance }} answered 200 for 10m but the body lacks one of memory-extract, coder-light, coder-medium, coder-heavy. Compare `kubectl -n inference logs deploy/litellm` and the loaded ConfigMap with inference/litellm-config.yaml; `monitor` scope is LITELLM_CLIENT_SCOPES in inference/litellm.yaml."
+              # The check itself is blind: 401/403 (monitor key missing or rotated without a sync), 5xx or
+              # no answer. LiteLLMDown covers a LiteLLM with no ready pod; this one is the key and route side.
+              - alert: LiteLLMModelsProbeFailing
+                expr: probe_success{job="blackbox-litellm-models"} == 0 and on(instance) probe_http_status_code{job="blackbox-litellm-models"} != 200
+                for: 15m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "The authenticated LiteLLM /v1/models probe cannot get a model list."
+                  description: "GET {{ $labels.instance }} has failed for 15m with a non-200 answer or none. 401 or 403: the `monitor` key is missing or stale (1Password litellm-cluster `monitor-key`; ExternalSecrets litellm-monitor-key in ns inference and observability). Otherwise check `probe_http_status_code` and the blackbox-exporter logs."
               # Only coder-light (llama-qwen35-9b) has a data-hub fallback (llama-qwen25-7b, :8082).
               - alert: InferenceBackendDown
                 expr: probe_success{job="blackbox-inference-http", host="a9", service="llama-qwen35-9b"} == 0
