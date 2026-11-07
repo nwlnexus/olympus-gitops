@@ -54,11 +54,11 @@ the package: leases extract 600 s / graph_ingest 300 s / embed 120 s, job timeou
 1200 s / 90 s). Changing the ConfigMap or the Secret rolls the pods (stakater reloader).
 `MEMORY_EXTRACT_WINDOW=0-7`: backlog work (priority >= 200) runs 00:00-07:59 UTC only; live work any time.
 `MEMORY_GRAPH_ENABLED` is the graph kill switch (olympus-sdk#516): `false` = facts only, graph_ingest jobs wait
-(`MemoryQueueBacklogOld` fires after 4 h, deliberately loud); it is turned on only after the golden-set evaluation
-(olympus-sdk#517) passes. A `memory-admin worker pause --scope llm|backfill` is honoured before every claim.
+(`MemoryQueueBacklogOld` fires after 4 h, deliberately loud). It is on since the golden-set evaluation
+(olympus-sdk#517) passed, together with the gateway's `MEMORY_GRAPH_ENQUEUE=true` (remember, append, restore). A `memory-admin worker pause --scope llm|backfill` is honoured before every claim.
 `MEMORY_GRAPH_BACKFILL=true` (olympus-sdk#519): while the graph is on, the idle LLM process keeps one backfill
 `graph_ingest` job (`:bf` full / `:bfe` entities-only, priority 300) in the queue inside the window; progress is the
-gateway gauge `memory_graph_facts{state="without_graph"}`. The `graph_forget` stage is gone (removed from the worker; migration 0006 follows).
+gateway gauge `memory_graph_facts{state="without_graph"}`. The `graph_forget` stage is gone (removed from the worker; migration 0006 applied).
 
 Connections: each pod opens `concurrency + 4` Postgres connections as `memory_worker` (5 for extract, 8 per embed
 pod), 21 in total against `max_connections = 100` (the gateway uses its own pool).

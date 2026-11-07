@@ -33,6 +33,10 @@ data:
   # Query embeddings from the dedicated in-cluster service (olympus-sdk#529).
   MEMORY_EMBED_BASE_URL: "http://memory-embedder.memory.svc/v1"
   MEMORY_EMBED_MODEL: "nomic-embed-text-v1.5"
+  # Enqueue graph_ingest next to embed for remember, append and fact restore (design 14.9; off until B4,
+  # olympus-sdk#516). On together with MEMORY_GRAPH_ENABLED in ../workers/workers-config.env: with the
+  # worker flag off these jobs wait and MemoryQueueBacklogOld fires after 4 h.
+  MEMORY_GRAPH_ENQUEUE: "true"
   # --- Cloudflare Access (design 5.2, 5.6) -------------------------------------------------
   # Printed by olympus-infra `playbooks/push/cloudflare-access.yml` (olympus-sdk#736), Access application
   # `memory` on memory.nwlnexus.io, created 2026-11-04. The gateway requires both or neither
