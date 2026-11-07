@@ -8,8 +8,11 @@
 #   decay   a live fact/event/todo never recalled, importance <= 1, recorded more than 120 days ago is deprecated,
 #           unless a duplicate points at it.
 # Every change carries a marker tag and an audit row; `memory-admin consolidate undo --since <time> --apply` reverses
-# a run. Output carries ids and counts only. Entity consolidation joins as a third step after graph B4 (#516).
-# 01:10 UTC: before the host compile (olympus-sdk#455, 04:45 local on ai-agent-host) reads the facts.
+# a run. Output carries ids and counts only.
+#   entities  graph entities named by ONE second-brain identity page (wiki/reference/identities/, title + aliases, via
+#           memory.knowledge_page) are merged through graph_merge_entities, with a snapshot in the audit row that
+#           `consolidate undo` restores (contract section 16.2a, olympus-sdk#818). Ambiguous groups are proposals only.
+# 07:20 UTC: after the graph backfill window (00:00-07:00 UTC), before the host compile (04:45 local, ~09:45 UTC).
 #
 # Role: memory_worker (Secret memory-purge, purge-externalsecret.yaml; the same DATABASE_URL): UPDATE on fact, SELECT
 # on fact_embedding and audit_log, INSERT on audit_log (migration 0004). Same image as the gateway.
@@ -28,8 +31,8 @@ metadata:
     app.kubernetes.io/name: memory-consolidate
     app.kubernetes.io/part-of: memory
 spec:
-  # 01:10 UTC: before the host compile reads facts (04:45 local on ai-agent-host), off the hour.
-  schedule: "10 1 * * *"
+  # 07:20 UTC: after the graph backfill window (00:00-07:00 UTC), so the night's new entities are consolidated.
+  schedule: "20 7 * * *"
   timeZone: Etc/UTC
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 3600
@@ -75,7 +78,7 @@ spec:
             # purge failed every run with "connect ECONNREFUSED" (olympus-sdk#734, same race as #724).
             # Wait up to 120 s for a TCP connection from this pod; a postgres that stays down still fails.
             - name: wait-for-postgres
-              image: ghcr.io/nwlnexus/memory-gateway@sha256:8cc45d508f3d2bd9e9a80c503686717c5819b3cfc398d43b4482ad3e486e6b1c
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:470a55002fa8eabfe45017907d03f161a3434964087ee683106c63fdca7ba395
               imagePullPolicy: IfNotPresent
               command:
                 - node
@@ -109,7 +112,7 @@ spec:
           containers:
             - name: consolidate
               # Same digest as the memory-gateway Deployment (gateway.yaml) and the wait-for-postgres init container. Bump all together.
-              image: ghcr.io/nwlnexus/memory-gateway@sha256:8cc45d508f3d2bd9e9a80c503686717c5819b3cfc398d43b4482ad3e486e6b1c
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:470a55002fa8eabfe45017907d03f161a3434964087ee683106c63fdca7ba395
               imagePullPolicy: IfNotPresent
               command:
                 - node
