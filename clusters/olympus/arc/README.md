@@ -450,14 +450,13 @@ Staged, because a wrong allowlist breaks all CI:
    line per request (`egress method=CONNECT host=github.com port=443 status=200 ... ua="..."`; host and
    port only, never URL paths). The runner templates set `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (both
    cases, all four scale sets) and `NODE_USE_ENV_PROXY=1`.
-2. **Allowlist** (2026-11-07 21:00 UTC, olympus-gitops#229). squid allows only the hosts in `../ci-egress/configmap.yaml` (CONNECT to 443
+2. **Allowlist (live).** squid allows only the hosts in `../ci-egress/configmap.yaml` (CONNECT to 443
    for the TLS list, plain HTTP on 80 only to the Ubuntu mirrors), derived from the phase-1 log and one
    green run of every CI class. Denials show as `status=403 result=TCP_DENIED` and alert as
    `CiEgressDenials`. Direct egress is still open, so a tool that ignores the proxy env still works.
    Distinct hosts: `sum by (host) (count_over_time({k8s_namespace_name="ci-egress"} |= "egress method=" | logfmt [2d]))`.
-3. **Enforced at the network** (2026-11-07, one scale set per PR: olympus-gate #232, olympus-linux #233,
-   olympus-arm64 #234, olympus-kvm in this PR). Runner egress is DNS (`egress-dns`) + the proxy
-   (`egress-ci-egress-proxy`) + the LiteLLM exception for olympus-kvm; nothing can bypass the proxy.
+3. **Enforce at the network.** `egress-dns-and-internet` shrinks to DNS + the proxy (+ the LiteLLM
+   exception for olympus-kvm), per scale set, so nothing can bypass the proxy.
 
 **A job fails with a 403 / "CONNECT tunnel failed"**: find the host in Loki
 (`{k8s_namespace_name="ci-egress"} |= "status=403"`, `client=` is the runner pod IP), add the narrowest
