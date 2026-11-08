@@ -24,6 +24,10 @@ data:
   MEMORY_HOST: "0.0.0.0"
   MEMORY_PORT: "8080"
   MEMORY_METRICS_PORT: "9090"
+  # Executor profile (olympus-sdk#671, #833 A4): the client ids that get the read-only, guarded executor
+  # profile. Pinned here so the binding does not rest on the code default. The row `executor` was created
+  # read-only by the owner (2026-11-08); its key is 1Password CI-Executor/memory-executor.
+  MEMORY_EXECUTOR_CLIENT_IDS: "executor"
   LOG_LEVEL: "info"
   # No LITELLM_BASE_URL: the data-hub LiteLLM is retired (olympus-sdk#569) and the cluster LiteLLM
   # has no embedding alias, so query embeddings come only from memory-embedder below (with it down,
