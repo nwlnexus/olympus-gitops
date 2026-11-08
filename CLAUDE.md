@@ -127,44 +127,6 @@ compute-hub runs external-dns with `txtOwnerId: olympus`. Domain filters:
 `nwlnexus.net`, `nwlnexus.xyz`, `nwlnexus.io`. Each managed record carries an
 olympus-owned TXT registry entry so external-dns only touches records it owns.
 
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
+## GitNexus
 
-This project is indexed by GitNexus as **olympus-gitops**. Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
-
-> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
-
-## Flux (self-managed)
-
-Flux reconciles itself: `clusters/olympus/kustomization.yaml` includes `flux-system/`, so the controllers (`gotk-components.yaml`) and the sync objects (`gotk-sync.yaml`) are applied and pruned like any other app.
-
-- **Upgrade Flux** with a PR that regenerates the components with a pinned version: `flux install --version=vX.Y.Z --export > clusters/olympus/flux-system/gotk-components.yaml`. Read the release's upgrade notes first (CRD storage-version migrations: `flux migrate`).
-- **Never remove `flux-system` from the root kustomization**: with `prune: true` that would delete Flux itself.
-- The Git credentials Secret `flux-system/flux-system` is not in git; it stays as created at bootstrap.
-
-## Always Do
-
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
-- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
-
-## Never Do
-
-- NEVER edit a function, class, or method without first running `impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
-- NEVER commit changes without running `detect_changes()` to check affected scope.
-
-## Resources
-
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/olympus-gitops/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/olympus-gitops/clusters` | All functional areas |
-| `gitnexus://repo/olympus-gitops/processes` | All execution flows |
-| `gitnexus://repo/olympus-gitops/process/{name}` | Step-by-step execution trace |
-
-<!-- gitnexus:end -->
+This repo has no GitNexus index on purpose: it is Kubernetes YAML, Flux objects and SQL with almost no code symbols (an index-only build on 2026-11-08 found 2 functions), so impact and detect_changes have nothing to analyse (olympus-sdk#836).
