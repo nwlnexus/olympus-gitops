@@ -70,6 +70,8 @@ data:
     #   playwright  Playwright browser downloads; cdn.playwright.dev redirects Chrome for Testing builds to
     #               storage.googleapis.com (worker-ci, iris component tests)
     #   onepassword 1password/load-secrets-action installs the op CLI (agent-execute on olympus-kvm)
+    #   r2          the R2 S3 endpoint of the account: olympus-sdk docs-site.yml uploads the docs site to bucket
+    #               olympus-docs (olympus-sdk#847; spec 2026-11-08 code-knowledge-layer §7.2, anticipated by #810)
     acl SSL_ports port 443
     acl Safe_http port 80
     acl gh dstdomain -n .github.com .githubusercontent.com ghcr.io
@@ -85,7 +87,8 @@ data:
     acl own dstdomain -n dl.nwlnexus.io olympus-op-connect.fly.dev connect.nwlnexus.net
     acl playwright dstdomain -n cdn.playwright.dev playwright.download.prss.microsoft.com storage.googleapis.com
     acl onepassword dstdomain -n app-updates.agilebits.com cache.agilebits.com
-    acl ci_tls any-of gh gh_results rust node python cf ubuntu_tls own playwright onepassword
+    acl r2 dstdomain -n 1b15dcdab99d4e8d5babb3dc6b1adaec.r2.cloudflarestorage.com
+    acl ci_tls any-of gh gh_results rust node python cf ubuntu_tls own playwright onepassword r2
     http_access deny CONNECT !SSL_ports
     http_access allow CONNECT ci_tls
     http_access allow !CONNECT ubuntu_http Safe_http
