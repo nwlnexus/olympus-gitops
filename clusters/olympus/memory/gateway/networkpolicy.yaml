@@ -46,6 +46,18 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+    # App port from the olympus-kvm runner pods (olympus-sdk#671): the agent-execute route step reads its
+    # SessionStart frame with the read-only `executor` client (executor profile: read only, guarded frame).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: arc-runners
+          podSelector:
+            matchLabels:
+              olympus.io/ci-kvm: "true"
+      ports:
+        - protocol: TCP
+          port: 8080
     # App port from the blackbox-exporter (http probe of /readyz, job blackbox-memory-http in
     # ../../observability/prometheus-helmrelease.yaml).
     - from:

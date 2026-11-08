@@ -125,6 +125,32 @@ spec:
         - protocol: TCP
           port: 4318
 ---
+# olympus-sdk#671: the executor's route step (olympus-kvm) reads its guarded SessionStart frame from the
+# in-cluster memory gateway (read-only client `executor`, executor profile). Gateway pods, TCP 8080 only;
+# the matching ingress is in ../memory/gateway/networkpolicy.yaml.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-memory-gateway-kvm
+  namespace: arc-runners
+spec:
+  podSelector:
+    matchLabels:
+      olympus.io/ci-kvm: "true"
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: memory
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: memory-gateway
+      ports:
+        - protocol: TCP
+          port: 8080
+---
 # olympus-sdk#407: runner pods -> the CI egress proxy (squid, ns ci-egress) on TCP 3128. Additive to
 # egress-dns; with phase 3 this is the runners' only way out. kube-proxy
 # DNATs the Service to the pod before policy evaluation, so the pod selector is what matters.
