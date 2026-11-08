@@ -134,11 +134,12 @@ spec:
               value: INFO
             - name: LITELLM_CLIENT_KEYS_DIR
               value: /etc/litellm/client-keys
-            # client -> aliases it may call (custom_auth.py). A client also needs a key file in
+            # client -> aliases it may call (custom_auth.py). The executor calls the tier aliases (olympus-sdk#646)
+            # and keeps the coder-* names it resolves to. A client also needs a key file in
             # Secret litellm-client-keys (or litellm-executor-key for `executor`, #642: optional,
             # absent until the owner adds the 1Password field; then 401 for that client only).
             - name: LITELLM_CLIENT_SCOPES
-              value: '{"memory-workers": ["memory-extract"], "executor": ["coder-light", "coder-medium", "coder-heavy"], "monitor": ["memory-extract", "coder-light", "coder-medium", "coder-heavy"]}'
+              value: '{"memory-workers": ["memory-extract"], "executor": ["coder-light", "coder-medium", "coder-heavy", "tier-light", "tier-medium", "tier-heavy"], "monitor": ["memory-extract", "coder-light", "coder-medium", "coder-heavy", "tier-light", "tier-medium", "tier-heavy"]}'
             # client -> the only routes it may call (custom_auth.py). `monitor` (olympus-sdk#649,
             # the blackbox /v1/models probe) lists models and nothing else: it holds the aliases in
             # its scope so the list is complete, but cannot run inference.

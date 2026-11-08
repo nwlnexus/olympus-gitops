@@ -11,6 +11,10 @@ data-hub 27B fallbacks: they served 0 requests in 7 days).
 | `coder-medium` | `:8084` qwen3.6-35b-a3b (MoE, 3B active, 64k) | none | #197 executor (olympus-kvm runners; key pending, #642) |
 | `coder-light` | `:8082` qwen3.5-9b | `:8082` qwen2.5-7b-instruct (`coder-light-datahub`, fallback only) | #197 executor (olympus-kvm runners; key pending, #642) |
 
+Tier aliases (olympus-sdk#646, `router_settings.model_group_alias`): `tier-light` -> `coder-light`, `tier-medium` ->
+`coder-medium`, `tier-heavy` -> `coder-heavy`. They are the routing policy's tiers (olympus-sdk `config/routing-policy.yaml`);
+the executor calls them, so only this map knows the model behind a tier. `system1` is reserved and has no alias.
+
 Not here: `memory-embed` (the gateway and workers embed through `memory/embedder`), `coder-cloud` (no cloud tier).
 
 | File | What |
@@ -54,7 +58,7 @@ executor (`LITELLM_CLIENT_LIMITS`): 60 requests/min and 3 parallel requests per 
 `/v1/models` and `/models`; its scope lists the four aliases so the list is complete, but it cannot run inference.
 
 Who may call LiteLLM (ingress 4000): memory workers (`memory`), Prometheus and blackbox (`observability`), `olympus-kvm`
-runner pods (`arc-runners`, label `olympus.io/ci-kvm`; executor scope `coder-*` only).
+runner pods (`arc-runners`, label `olympus.io/ci-kvm`; executor scope `coder-*` and `tier-*` only).
 For a rotation, add a file `<client>.<suffix>` (for example `memory-workers.previous`) to the Secret: `custom_auth.py`
 accepts it as a second key of the same client until it is removed.
 

@@ -31,7 +31,9 @@
 # One exception (olympus-sdk#642): pods labelled olympus.io/ci-kvm=true (the olympus-kvm scale
 # set only) may also reach the cluster LiteLLM, pods app.kubernetes.io/name=litellm in `inference`,
 # on TCP 4000 (policy egress-litellm-kvm below; policies are additive). The matching ingress is in
-# ../inference/networkpolicy.yaml.
+# ../inference/networkpolicy.yaml. A second one (olympus-sdk#646): the same pods may send OTLP/HTTP to the
+# in-cluster otel collector (namespace `otel`, the standalone collector only) on TCP 4318, for the routing
+# decision log (policy egress-otel-kvm below; `otel` has no ingress policy).
 # Rollback (proxy broken, no quick fix): restore the policy egress-dns-and-internet (public internet
 # minus the private ranges, git history of this file) and remove the proxy env from the scale sets
 # (README "Egress proxy").
@@ -96,6 +98,32 @@ spec:
       ports:
         - protocol: TCP
           port: 4000
+---
+# olympus-sdk#646: the executor's routing step (olympus-kvm) writes its decision record over OTLP/HTTP to the
+# in-cluster collector (logs/agents pipeline -> Loki). The standalone collector only, port 4318 only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-otel-kvm
+  namespace: arc-runners
+spec:
+  podSelector:
+    matchLabels:
+      olympus.io/ci-kvm: "true"
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: otel
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: opentelemetry-collector
+              component: standalone-collector
+      ports:
+        - protocol: TCP
+          port: 4318
 ---
 # olympus-sdk#407: runner pods -> the CI egress proxy (squid, ns ci-egress) on TCP 3128. Additive to
 # egress-dns; with phase 3 this is the runners' only way out. kube-proxy

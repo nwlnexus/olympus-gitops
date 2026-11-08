@@ -88,6 +88,13 @@ model_list:
       id: datahub-qwen25-7b-coder-light
 
 router_settings:
+  # Tier aliases (olympus-sdk#646): the routing policy's tiers (olympus-sdk config/routing-policy.yaml, one set of
+  # names: labels tier:<name>, policy, aliases tier-<name>). Clients and the policy name a tier; only this map knows
+  # the model behind it. `system1` is reserved in the policy and has no alias until a model is mapped.
+  model_group_alias:
+    tier-light: coder-light
+    tier-medium: coder-medium
+    tier-heavy: coder-heavy
   # Only coder-light has a fallback (its data-hub twin); the 27B aliases fail straight to the client.
   fallbacks:
     - coder-light: [coder-light-datahub]
