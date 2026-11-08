@@ -80,7 +80,9 @@ data:
     acl cf dstdomain -n api.cloudflare.com workers.cloudflare.com
     acl ubuntu_tls dstdomain -n cloud-images.ubuntu.com
     acl ubuntu_http dstdomain -n archive.ubuntu.com security.ubuntu.com ports.ubuntu.com
-    acl own dstdomain -n dl.nwlnexus.io olympus-op-connect.fly.dev
+    # connect.nwlnexus.net is the Connect server's name in the OP_CONNECT_HOST secret (the same Fly app as
+    # olympus-op-connect.fly.dev); without it every load-secrets step on a cluster runner was denied (olympus-sdk#688).
+    acl own dstdomain -n dl.nwlnexus.io olympus-op-connect.fly.dev connect.nwlnexus.net
     acl playwright dstdomain -n cdn.playwright.dev playwright.download.prss.microsoft.com storage.googleapis.com
     acl onepassword dstdomain -n app-updates.agilebits.com cache.agilebits.com
     acl ci_tls any-of gh gh_results rust node python cf ubuntu_tls own playwright onepassword
