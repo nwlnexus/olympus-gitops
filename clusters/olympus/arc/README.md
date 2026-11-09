@@ -16,7 +16,7 @@ and, with `../kvm-device-plugin/`, #390).
 | `namespace.yaml` | `arc-system` (controller + listeners), `arc-runners` (runner pods of all scale sets, PSA `restricted`) |
 | `priorityclass.yaml` | `ci-runner` and `ci-runner-kvm`, both value -1000, `preemptionPolicy: Never` (below every other workload); two classes only so the quota can scope the KVM budget |
 | `quota.yaml`, `limitrange.yaml` | hard ceilings: total 14 pods; `ci-runners-non-kvm` (olympus-linux + olympus-gate: 12 pods, 8.5 CPU / 17 GiB requests, 20 CPU / 36 GiB limits, no `/dev/kvm`) and `ci-runners-kvm` (2 pods, 4 CPU / 8 GiB requests, 6 CPU / 16 GiB limits, 2 `olympus.io/kvm`); default requests/limits for every container |
-| `networkpolicy.yaml` | default-deny ingress; runner egress = DNS + public internet only (no IPv4 cluster, node, LAN or tailnet addresses), plus `egress-litellm-kvm`: pods labelled `olympus.io/ci-kvm` (olympus-kvm only) may reach the `inference` LiteLLM pods on TCP 4000 (executor, olympus-sdk#642), plus `egress-memory-gateway-kvm`: the same pods may reach the memory gateway pods on TCP 8080 (read-only executor frame, olympus-sdk#671), plus `egress-otel-kvm`: the same olympus-kvm pods may reach the standalone otel collector in `otel` on TCP 4318 (routing decision log, olympus-sdk#646), plus `egress-ci-egress-proxy`: every runner pod may reach the egress proxy pods in `ci-egress` on TCP 3128 (olympus-sdk#407); controller/listener egress adds the API server only |
+| `networkpolicy.yaml` | default-deny ingress; runner egress = DNS + public internet only (no IPv4 cluster, node, LAN or tailnet addresses), plus `egress-litellm-kvm`: pods labelled `olympus.io/ci-kvm` (olympus-kvm only) may reach the `inference` LiteLLM pods on TCP 4000 (executor, olympus-sdk#642), plus `egress-memory-gateway-kvm`: the same pods may reach the memory gateway pods on TCP 8080 (read-only executor frame, olympus-sdk#671), plus `egress-otel-kvm`: the same olympus-kvm pods may reach the standalone otel collector in `otel` on TCP 4318 (routing decision log, olympus-sdk#646), plus `egress-litellm-knowledge`: pods labelled `olympus.io/ci-knowledge` (olympus-knowledge only) may reach the LiteLLM pods on TCP 4000 (olympus-sdk#852), plus `egress-ci-egress-proxy`: every runner pod may reach the egress proxy pods in `ci-egress` on TCP 3128 (olympus-sdk#407); controller/listener egress adds the API server only |
 | `../ci-egress/` | separate Flux app: the CI egress forward proxy (squid, 2 replicas), see "Egress proxy" below |
 | `networkpolicy-metrics.yaml` | additive: only the Prometheus server (ns `observability`) may reach the controller and listener pods in `arc-system` on TCP 8080 (metrics, olympus-sdk#392) |
 | `externalsecret.yaml` | `arc-github-app` Secret (GitHub App credentials) from 1Password via ESO |
@@ -25,6 +25,7 @@ and, with `../kvm-device-plugin/`, #390).
 | `helmrelease-scale-set.yaml` | `gha-runner-scale-set` release `olympus-linux` (`runs-on: olympus-linux`), no container mode |
 | `helmrelease-scale-set-gate.yaml` | scale set `olympus-gate` (`runs-on: olympus-gate`), tiny pods for the CI gate poller |
 | `helmrelease-scale-set-arm64.yaml` | scale set `olympus-arm64` (`runs-on: olympus-arm64`), runners on the arm64 Linux VMs of the Mac minis (olympus-sdk#694, H20); see the arm64 section |
+| `helmrelease-scale-set-knowledge.yaml` | scale set `olympus-knowledge` (`runs-on: olympus-knowledge`), one runner for the code-knowledge pack job (olympus-sdk#852); see the knowledge section |
 | `helmrelease-scale-set-kvm.yaml` | scale set `olympus-kvm` (`runs-on: olympus-kvm`), the QEMU VM suites, `/dev/kvm` via the device plugin |
 | `../kvm-device-plugin/` | separate Flux app: `generic-device-plugin` DaemonSet (our mirror, digest-pinned) advertising `/dev/kvm` as `olympus.io/kvm` on nodes labelled `node-restriction.kubernetes.io/kvm-ci=true`; its PriorityClass `ci-device-plugin` and a ValidatingAdmissionPolicy pinning the image (the one PSA `privileged` namespace; see KVM below) |
 
@@ -39,6 +40,7 @@ image by digest, `activeDeadlineSeconds` so a stuck job cannot hold a slot for d
 | `olympus-linux` | CI jobs (lint, test, build) | max 3 (`maxRunners`; quota room for 4) | 2 CPU, 4 GiB / 4 CPU, 8 GiB; spread over the onodes via label `olympus.io/ci-runner`; deadline 3 h |
 | `olympus-gate` | the CI gate workflow: a poller (bash, gh, jq) that waits up to 120 min for sibling workflows | max 8 | 50m, 128Mi, 256Mi ephemeral / 500m, 512Mi, 2Gi; label `olympus.io/ci-gate`, soft spread (maxSkew 2, ScheduleAnyway); deadline 150 min |
 | `olympus-arm64` | arm64 jobs on the Mac-mini VMs (nothing routes there yet; `arm64-runner-smoke.yml` is the first user) | max 2, one per VM | 2 CPU, 4 GiB, 4 GiB ephemeral / 4 CPU, 7 GiB, 15 GiB; label `olympus.io/ci-runner-arm64`, deadline 3 h |
+| `olympus-knowledge` | the code-knowledge pack job (olympus-sdk `knowledge-pack.yml`) | max 1 (fleet-wide serialization of LLM use) | as `olympus-linux`; label `olympus.io/ci-knowledge`, no spread; deadline 2 h |
 | `olympus-kvm` | VM suites (`vm-tests.yml`, `make vm-test`) | max 2 | 2 CPU, 4 GiB, 4 GiB ephemeral, `olympus.io/kvm: 1` / 3 CPU, 8 GiB, 15 GiB; label `olympus.io/ci-kvm`, only on nodes labelled `node-restriction.kubernetes.io/kvm-ci=true`, supplemental group 994 (`kvm`); KVM image variant by digest; deadline 2 h |
 
 The gate has its own pool on purpose: if it shared the 3 `olympus-linux` slots, three open
@@ -82,6 +84,27 @@ the runner tag is a multi-arch manifest list (olympus-sdk `ci/runner/README.md`)
 - **Rollout order.** (1) olympus-sdk PR merged, image pushed; (2) digest bumped here; (3) VMs joined to k3s;
   (4) dispatch `arm64-runner-smoke.yml`. Merging before the VMs exist is harmless: the set has no nodes to
   schedule on and no workflow requests it.
+
+## Knowledge: `olympus-knowledge` (olympus-sdk#852)
+
+The code-knowledge pack job (olympus-sdk `.github/workflows/knowledge-pack.yml`, called by `knowledge.yml` on a
+push to olympus-sdk main and by `knowledge-fleet.yml` for the other repos; spec
+`2026-11-08-code-knowledge-layer-design.md` §4.4, §4.5, D3) runs here. A copy of `olympus-linux` with
+`maxRunners: 1` (one job at a time across the fleet, so at most one caller of `coder-heavy`), pod label
+`olympus.io/ci-knowledge` instead of `olympus.io/ci-runner` (so it does not skew the olympus-linux spread),
+no topology spread and `activeDeadlineSeconds: 7200`. Same image, hardening, proxy env and node pool.
+
+- **Network.** The standard runner egress (DNS + the squid proxy) plus `egress-litellm-knowledge`: the LiteLLM
+  pods in `inference` on TCP 4000, nothing else in the cluster. The matching ingress rule is in
+  `../inference/networkpolicy.yaml`. `NO_PROXY` already lists `litellm.inference.svc`. Public hosts the job uses
+  (github.com and release assets, registry.npmjs.org, api.cloudflare.com for the Workers AI fallback) are on the
+  allowlist already; add a host only from a 403 in Loki, as for any job.
+- **Key.** LiteLLM client `knowledge` (scope `coder-heavy`, 30 rpm, 1 parallel): 1Password `litellm-cluster` field
+  `knowledge-key` (vault Dev, ESO -> Secret `litellm-knowledge-key`) and the same value in `CI/litellm-knowledge`
+  field `credential`, which the job loads.
+- **Access.** Runner group `olympus-ci` admits olympus-sdk only; the job runs there for every source repo
+  (public sources are cloned anonymously, private ones with a read-only App token).
+- **Quota.** +1 pod in `ci-runners-non-kvm` and `ci-runners` (`quota.yaml`).
 
 ## KVM: `olympus-kvm` and the device plugin (olympus-sdk#390)
 
@@ -525,8 +548,8 @@ templates (works while phase 3 is not in place; with phase 3, also revert the ne
 
 ## Notes
 
-- The runner group `olympus-ci` is org-wide by owner decision, so every private repo
-  in the org shares this isolation boundary: ephemeral pods, quota, network policy, no SA token.
+- The runner group `olympus-ci` admits selected repositories (olympus-sdk only, checked 2026-11-08) and no
+  public repositories; every repo it admits shares this isolation boundary: ephemeral pods, quota, network policy, no SA token.
 - Network policy is enforced by k3s' embedded kube-router controller. If someone adds
   `disable-network-policy` to the k3s config, the policies silently stop applying.
 - kube-router programs a new pod's policy only after the pod starts (measured

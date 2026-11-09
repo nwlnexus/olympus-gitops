@@ -34,6 +34,10 @@
 # ../inference/networkpolicy.yaml. A second one (olympus-sdk#646): the same pods may send OTLP/HTTP to the
 # in-cluster otel collector (namespace `otel`, the standalone collector only) on TCP 4318, for the routing
 # decision log (policy egress-otel-kvm below; `otel` has no ingress policy).
+# A third (olympus-sdk#852): pods labelled olympus.io/ci-knowledge=true (the olympus-knowledge scale set
+# only, one runner) may reach the same LiteLLM pods on TCP 4000 and nothing else in the cluster (policy
+# egress-litellm-knowledge below; matching ingress in ../inference/networkpolicy.yaml). The LiteLLM key
+# that job holds is client `knowledge`, scoped to coder-heavy alone.
 # Rollback (proxy broken, no quick fix): restore the policy egress-dns-and-internet (public internet
 # minus the private ranges, git history of this file) and remove the proxy env from the scale sets
 # (README "Egress proxy").
@@ -85,6 +89,32 @@ spec:
   podSelector:
     matchLabels:
       olympus.io/ci-kvm: "true"
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: inference
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: litellm
+      ports:
+        - protocol: TCP
+          port: 4000
+---
+# olympus-sdk#852: the code-knowledge pack job (olympus-knowledge scale set) calls coder-heavy on the
+# cluster LiteLLM (spec 2026-11-08-code-knowledge-layer-design §4.4, D3). Additive to egress-dns and
+# egress-ci-egress-proxy; LiteLLM pods on TCP 4000 only, nothing else inside the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-litellm-knowledge
+  namespace: arc-runners
+spec:
+  podSelector:
+    matchLabels:
+      olympus.io/ci-knowledge: "true"
   policyTypes:
     - Egress
   egress:
