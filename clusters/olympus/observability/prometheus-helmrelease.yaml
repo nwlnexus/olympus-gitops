@@ -1065,6 +1065,59 @@ spec:
                 annotations:
                   summary: "{{ $labels.host_name }} has had no registered CI runner for 30m."
                   description: "The runner loop on {{ $labels.host_name }} is running but no runner of _ghrunner has been up for 30m, so the host takes no jobs. `sudo tail -n 50 /var/log/ci-runner.log`: \"waiting for the credential files\", \"could not get a JIT config\" (App key or installation, GitHub API) or \"network isolation not in force\" (pf)."
+          - name: knowledge-layer
+            rules:
+              # Code knowledge layer (olympus-sdk#854, HW20-W9; runbook docs/runbooks/2026-11-08-code-knowledge-layer.md
+              # in olympus-sdk). The pack job (knowledge-pack.yml, one per repo and run) pushes one sample of each gauge
+              # over OTLP to the otel collector (netpol egress-otel-knowledge, arc/networkpolicy.yaml), which remote-writes
+              # them here as {job="knowledge-pack", repo="<name>"}; contract packages/knowledge-gen/CONTRACT.md 5.1.
+              # Samples are sparse (one per run), so every rule reads *_over_time with a lookback, never the instant value.
+              # lag = how long the source commit a run was asked for has been missing from olympus-knowledge: a failed
+              # run keeps pushing a growing lag (the 15-minute poll retries), a success pushes 0.
+              - alert: KnowledgePackStale
+                expr: max by (repo) (last_over_time(knowledge_pack_lag_seconds{job="knowledge-pack"}[1d])) > 6 * 3600
+                for: 15m
+                labels: { severity: warning }
+                annotations:
+                  summary: "The code knowledge pack for {{ $labels.repo }} trails its main by {{ $value | humanizeDuration }}."
+                  description: "olympus-knowledge repos/{{ $labels.repo }}/meta.json is more than 6h behind the commit the last pack run was asked for, and the runs since have failed. Find the failed run: `gh run list -R nwlnexus/olympus-sdk --workflow knowledge-fleet.yml` (knowledge.yml for olympus-sdk) and read the Generate step; exit 3 is a redaction refusal, 4 a validation failure, 5 a tool or clone failure. Runbook: docs/runbooks/2026-11-08-code-knowledge-layer.md (olympus-sdk)."
+              # The Monday 03:10 UTC forced run refreshes generated_at for every repo, so 8 days without a refresh means
+              # that run failed for the repo or the pipeline is off (KNOWLEDGE_ENABLED, the olympus-knowledge runner).
+              # A repo that never reported raises nothing; a paused pipeline fires after 8 days (silence it for a planned pause).
+              - alert: KnowledgePackWeeklyMissed
+                expr: time() - max by (repo) (last_over_time(knowledge_pack_generated_timestamp_seconds{job="knowledge-pack"}[30d])) > 8 * 86400
+                for: 1h
+                labels: { severity: warning }
+                annotations:
+                  summary: "The code knowledge pack for {{ $labels.repo }} was last generated {{ $value | humanizeDuration }} ago."
+                  description: "No pack run has refreshed repos/{{ $labels.repo }}/meta.json in over 8 days although the weekly full regenerate (Monday 03:10 UTC, knowledge-fleet.yml) should. Check that the variable KNOWLEDGE_ENABLED is true, that the olympus-knowledge runner (`kubectl -n arc-runners get pods`) is up, and the last Monday run of knowledge-fleet.yml."
+              # inference_failing_streak is kept in meta.json by the generator: consecutive runs that attempted inference and
+              # ended stale (both providers down, previous values kept) or unavailable. ok and partial reset it, skipped and
+              # --no-infer runs leave it. It is exact where PromQL over sparse samples would not be.
+              - alert: KnowledgeInferenceFailing
+                expr: max by (repo) (last_over_time(knowledge_pack_inference_failing_streak{job="knowledge-pack"}[7d])) >= 3
+                labels: { severity: warning }
+                annotations:
+                  summary: "Inference has failed for {{ $value }} consecutive code knowledge runs of {{ $labels.repo }}."
+                  description: "{{ $labels.repo }}'s last {{ $value }} pack runs that attempted inference ended stale or unavailable: LiteLLM (coder-heavy) and the Workers AI fallback both failed, so the inferred fields keep their previous values marked stale_inference. See the LiteLLM and InferenceBackend alerts, then the Generate step log (`inference: litellm failed ...`). After the providers are back, force a full regenerate (`gh workflow run knowledge-fleet.yml -R nwlnexus/olympus-sdk -f repo=all -f force=true`)."
+              # Workers AI is the fallback only: tens of calls on a bad day. Neurons are estimated from the tokens the API
+              # reported times the pinned rates (60000 / 90909 per M input / output tokens for qwen2.5-coder-32b), summed over
+              # a rolling 24h. The free allowance is 10,000 neurons per day for the whole account (memory uses it too);
+              # 25,000 is about $0.17 a day above it.
+              - alert: KnowledgeWorkersAINeuronCeiling
+                expr: sum(sum_over_time(knowledge_pack_workers_ai_neurons_estimate{job="knowledge-pack"}[24h])) > 25000
+                labels: { severity: warning }
+                annotations:
+                  summary: "The code knowledge fallback used about {{ $value | humanize }} Workers AI neurons in 24h."
+                  description: "The pack job's Workers AI fallback is estimated at {{ $value | humanize }} neurons over the last 24h (ceiling 25,000). A fallback that runs all day means LiteLLM coder-heavy is down or failing every call: check LiteLLMDown, InferenceBackendDown and the A9, or pause generation (variable KNOWLEDGE_ENABLED=false). The Cloudflare dashboard (Workers AI) is the authoritative neuron count."
+              # CONTRACT.md BUDGETS.factsBytes (96 KiB, raised from 32 KiB by olympus-sdk#854: olympus-sdk measures 56 KiB
+              # deterministic, about 80 KiB inferred). Samples come from runs that wrote a tree, so a week of lookback.
+              - alert: KnowledgeFactsLarge
+                expr: max by (repo) (last_over_time(knowledge_pack_facts_bytes{job="knowledge-pack"}[7d])) > 96 * 1024
+                labels: { severity: warning }
+                annotations:
+                  summary: "facts.json for {{ $labels.repo }} is {{ $value | humanize1024 }}B, above the 96 KiB target."
+                  description: "repos/{{ $labels.repo }}/facts.json passed the 96 KiB target (the generator also warns in meta.json). Technologies and external_systems carry most of the bytes; shorten evidence excerpts or cap evidence per row in packages/knowledge-gen rather than raising the target again (runbook section \"facts.json size\")."
     prometheus-pushgateway:
       enabled: false
     kube-state-metrics:

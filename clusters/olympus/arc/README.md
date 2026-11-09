@@ -16,7 +16,7 @@ and, with `../kvm-device-plugin/`, #390).
 | `namespace.yaml` | `arc-system` (controller + listeners), `arc-runners` (runner pods of all scale sets, PSA `restricted`) |
 | `priorityclass.yaml` | `ci-runner` and `ci-runner-kvm`, both value -1000, `preemptionPolicy: Never` (below every other workload); two classes only so the quota can scope the KVM budget |
 | `quota.yaml`, `limitrange.yaml` | hard ceilings: total 14 pods; `ci-runners-non-kvm` (olympus-linux + olympus-gate: 12 pods, 8.5 CPU / 17 GiB requests, 20 CPU / 36 GiB limits, no `/dev/kvm`) and `ci-runners-kvm` (2 pods, 4 CPU / 8 GiB requests, 6 CPU / 16 GiB limits, 2 `olympus.io/kvm`); default requests/limits for every container |
-| `networkpolicy.yaml` | default-deny ingress; runner egress = DNS + public internet only (no IPv4 cluster, node, LAN or tailnet addresses), plus `egress-litellm-kvm`: pods labelled `olympus.io/ci-kvm` (olympus-kvm only) may reach the `inference` LiteLLM pods on TCP 4000 (executor, olympus-sdk#642), plus `egress-memory-gateway-kvm`: the same pods may reach the memory gateway pods on TCP 8080 (read-only executor frame, olympus-sdk#671), plus `egress-otel-kvm`: the same olympus-kvm pods may reach the standalone otel collector in `otel` on TCP 4318 (routing decision log, olympus-sdk#646), plus `egress-litellm-knowledge`: pods labelled `olympus.io/ci-knowledge` (olympus-knowledge only) may reach the LiteLLM pods on TCP 4000 (olympus-sdk#852), plus `egress-ci-egress-proxy`: every runner pod may reach the egress proxy pods in `ci-egress` on TCP 3128 (olympus-sdk#407); controller/listener egress adds the API server only |
+| `networkpolicy.yaml` | default-deny ingress; runner egress = DNS + public internet only (no IPv4 cluster, node, LAN or tailnet addresses), plus `egress-litellm-kvm`: pods labelled `olympus.io/ci-kvm` (olympus-kvm only) may reach the `inference` LiteLLM pods on TCP 4000 (executor, olympus-sdk#642), plus `egress-memory-gateway-kvm`: the same pods may reach the memory gateway pods on TCP 8080 (read-only executor frame, olympus-sdk#671), plus `egress-otel-kvm`: the same olympus-kvm pods may reach the standalone otel collector in `otel` on TCP 4318 (routing decision log, olympus-sdk#646), plus `egress-litellm-knowledge`: pods labelled `olympus.io/ci-knowledge` (olympus-knowledge only) may reach the LiteLLM pods on TCP 4000 (olympus-sdk#852), plus `egress-otel-knowledge`: the same olympus-knowledge pods may send their run metrics to the standalone otel collector on TCP 4318 (olympus-sdk#854), plus `egress-ci-egress-proxy`: every runner pod may reach the egress proxy pods in `ci-egress` on TCP 3128 (olympus-sdk#407); controller/listener egress adds the API server only |
 | `../ci-egress/` | separate Flux app: the CI egress forward proxy (squid, 2 replicas), see "Egress proxy" below |
 | `networkpolicy-metrics.yaml` | additive: only the Prometheus server (ns `observability`) may reach the controller and listener pods in `arc-system` on TCP 8080 (metrics, olympus-sdk#392) |
 | `externalsecret.yaml` | `arc-github-app` Secret (GitHub App credentials) from 1Password via ESO |
@@ -310,6 +310,15 @@ curl -sS -m 5 -k https://68.134.149.230:443                    # gateway WAN IP 
   host keeps one registration for days. Dashboard row "macOS runners"; unit tests
   `../observability/tests/macos-runner-alerts.test.yaml`. The minis are `tag:mac-server`, which has no source grant
   in the tailnet policy, so they cannot reach `obs-otlp` until the owner adds a narrow grant (see "Later").
+- **Code knowledge pack** (olympus-knowledge scale set; olympus-sdk#854). Each `knowledge-pack.yml` job ends by pushing
+  gauges over OTLP/HTTP to the in-cluster collector (`egress-otel-knowledge`, TCP 4318); `metrics/agents` remote-writes
+  them as `{job="knowledge-pack", repo="<name>"}` (`knowledge_pack_*`, list in olympus-sdk
+  `packages/knowledge-gen/CONTRACT.md` 5.1). Alerts (group `knowledge-layer`, all warning): `KnowledgePackStale` (a repo's
+  pack trails its main by more than 6 h), `KnowledgePackWeeklyMissed` (no refresh for 8 days), `KnowledgeInferenceFailing`
+  (three consecutive runs ended stale or unavailable), `KnowledgeWorkersAINeuronCeiling` (fallback above 25,000 estimated
+  neurons per 24 h) and `KnowledgeFactsLarge` (facts.json over 96 KiB). Unit tests
+  `../observability/tests/knowledge-layer-alerts.test.yaml`; runbook olympus-sdk
+  `docs/runbooks/2026-11-08-code-knowledge-layer.md`.
 - **etcd.** k3s serves etcd's own metrics (`etcd_disk_wal_fsync_duration_seconds`) on
   `127.0.0.1:2381` only, so they are not scraped; `EtcdRequestLatencyHigh` uses the apiservers'
   `etcd_request_duration_seconds` instead (non-list p99, 7-day peak under 0.1 s on 2026-11-07, alert at

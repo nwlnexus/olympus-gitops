@@ -37,7 +37,8 @@
 # A third (olympus-sdk#852): pods labelled olympus.io/ci-knowledge=true (the olympus-knowledge scale set
 # only, one runner) may reach the same LiteLLM pods on TCP 4000 and nothing else in the cluster (policy
 # egress-litellm-knowledge below; matching ingress in ../inference/networkpolicy.yaml). The LiteLLM key
-# that job holds is client `knowledge`, scoped to coder-heavy alone.
+# that job holds is client `knowledge`, scoped to coder-heavy alone. The same pods may also send OTLP/HTTP run
+# metrics to the otel collector on TCP 4318 (olympus-sdk#854, policy egress-otel-knowledge below).
 # Rollback (proxy broken, no quick fix): restore the policy egress-dns-and-internet (public internet
 # minus the private ranges, git history of this file) and remove the proxy env from the scale sets
 # (README "Egress proxy").
@@ -128,6 +129,33 @@ spec:
       ports:
         - protocol: TCP
           port: 4000
+---
+# olympus-sdk#854 (HW20-W9): the code-knowledge pack job pushes its run metrics (OTLP/HTTP gauges, packages/knowledge-gen
+# CONTRACT.md 5.1) to the in-cluster collector, which remote-writes them to Prometheus (rules: observability
+# knowledge-layer group). Same target as egress-otel-kvm: the standalone collector, port 4318 only. Additive.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-otel-knowledge
+  namespace: arc-runners
+spec:
+  podSelector:
+    matchLabels:
+      olympus.io/ci-knowledge: "true"
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: otel
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: opentelemetry-collector
+              component: standalone-collector
+      ports:
+        - protocol: TCP
+          port: 4318
 ---
 # olympus-sdk#646: the executor's routing step (olympus-kvm) writes its decision record over OTLP/HTTP to the
 # in-cluster collector (logs/agents pipeline -> Loki). The standalone collector only, port 4318 only.

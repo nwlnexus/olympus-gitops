@@ -1,0 +1,118 @@
+# Unit tests for the knowledge-layer group (olympus-sdk#854, HW20-W9): the code knowledge pack job pushes one sample of
+# each gauge per run over OTLP (packages/knowledge-gen/CONTRACT.md 5.1), remote-written as
+# {job="knowledge-pack", repo="<name>"} plus service_name and otel_scope_name (kept here to match the real series).
+# Generated once from the rules' annotation templates; edit by hand afterwards.
+# Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease first).
+rule_files:
+- alerting_rules.yml
+evaluation_interval: "1m"
+tests:
+- name: a lag over 6h fires after 15m, grows with the retries and clears when a success pushes 0
+  interval: "1m"
+  input_series:
+  - series: "knowledge_pack_lag_seconds{job=\"knowledge-pack\", repo=\"olympus-infra\", service_name=\"knowledge-pack\", otel_scope_name=\"olympus.knowledge-pack\"}"
+    values: "0 _x59 28800 _x14 29700 _x14 0 _x5"
+  - series: "knowledge_pack_lag_seconds{job=\"knowledge-pack\", repo=\"olympus-sdk\", service_name=\"knowledge-pack\", otel_scope_name=\"olympus.knowledge-pack\"}"
+    values: "0 _x59 3600 _x40"
+  alert_rule_test:
+  - eval_time: "50m"
+    alertname: KnowledgePackStale
+    exp_alerts: []
+  - eval_time: "70m"
+    alertname: KnowledgePackStale
+    exp_alerts: []
+  - eval_time: "80m"
+    alertname: KnowledgePackStale
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        repo: olympus-infra
+      exp_annotations:
+        summary: The code knowledge pack for olympus-infra trails its main by 8h 15m 0s.
+        description: "olympus-knowledge repos/olympus-infra/meta.json is more than 6h behind the commit the last pack run was asked for, and the runs since have failed. Find the failed run: `gh run list -R nwlnexus/olympus-sdk --workflow knowledge-fleet.yml` (knowledge.yml for olympus-sdk) and read the Generate step; exit 3 is a redaction refusal, 4 a validation failure, 5 a tool or clone failure. Runbook: docs/runbooks/2026-11-08-code-knowledge-layer.md (olympus-sdk)."
+  - eval_time: "95m"
+    alertname: KnowledgePackStale
+    exp_alerts: []
+- name: a repo not regenerated for over 8 days fires; one refreshed by the weekly run does not
+  interval: "1h"
+  input_series:
+  - series: "knowledge_pack_generated_timestamp_seconds{job=\"knowledge-pack\", repo=\"olympus-sdk\", service_name=\"knowledge-pack\", otel_scope_name=\"olympus.knowledge-pack\"}"
+    values: "0 _x207"
+  - series: "knowledge_pack_generated_timestamp_seconds{job=\"knowledge-pack\", repo=\"olympus-infra\", service_name=\"knowledge-pack\", otel_scope_name=\"olympus.knowledge-pack\"}"
+    values: "0 _x167 604800 _x40"
+  alert_rule_test:
+  - eval_time: "150h"
+    alertname: KnowledgePackWeeklyMissed
+    exp_alerts: []
+  - eval_time: "200h"
+    alertname: KnowledgePackWeeklyMissed
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        repo: olympus-sdk
+      exp_annotations:
+        summary: The code knowledge pack for olympus-sdk was last generated 8d 8h 0m 0s ago.
+        description: "No pack run has refreshed repos/olympus-sdk/meta.json in over 8 days although the weekly full regenerate (Monday 03:10 UTC, knowledge-fleet.yml) should. Check that the variable KNOWLEDGE_ENABLED is true, that the olympus-knowledge runner (`kubectl -n arc-runners get pods`) is up, and the last Monday run of knowledge-fleet.yml."
+- name: the third consecutive failing run fires, an ok run resets it
+  interval: "1m"
+  input_series:
+  - series: "knowledge_pack_inference_failing_streak{job=\"knowledge-pack\", repo=\"olympus-infra\", service_name=\"knowledge-pack\", otel_scope_name=\"olympus.knowledge-pack\"}"
+    values: "0 _x29 1 _x29 2 _x29 3 _x29 0 _x20"
+  - series: "knowledge_pack_inference_failing_streak{job=\"knowledge-pack\", repo=\"olympus-sdk\", service_name=\"knowledge-pack\", otel_scope_name=\"olympus.knowledge-pack\"}"
+    values: "0 _x29 1 _x29 0 _x100"
+  alert_rule_test:
+  - eval_time: "70m"
+    alertname: KnowledgeInferenceFailing
+    exp_alerts: []
+  - eval_time: "100m"
+    alertname: KnowledgeInferenceFailing
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        repo: olympus-infra
+      exp_annotations:
+        summary: Inference has failed for 3 consecutive code knowledge runs of olympus-infra.
+        description: "olympus-infra's last 3 pack runs that attempted inference ended stale or unavailable: LiteLLM (coder-heavy) and the Workers AI fallback both failed, so the inferred fields keep their previous values marked stale_inference. See the LiteLLM and InferenceBackend alerts, then the Generate step log (`inference: litellm failed ...`). After the providers are back, force a full regenerate (`gh workflow run knowledge-fleet.yml -R nwlnexus/olympus-sdk -f repo=all -f force=true`)."
+  - eval_time: "125m"
+    alertname: KnowledgeInferenceFailing
+    exp_alerts: []
+- name: two fallback runs of 13k neurons within 24h fire; the first ages out of the window after a day
+  interval: "1m"
+  input_series:
+  - series: "knowledge_pack_workers_ai_neurons_estimate{job=\"knowledge-pack\", repo=\"olympus-sdk\", service_name=\"knowledge-pack\", otel_scope_name=\"olympus.knowledge-pack\"}"
+    values: "_x60 13000 _x59 13000 _x1500"
+  alert_rule_test:
+  - eval_time: "90m"
+    alertname: KnowledgeWorkersAINeuronCeiling
+    exp_alerts: []
+  - eval_time: "2h"
+    alertname: KnowledgeWorkersAINeuronCeiling
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: The code knowledge fallback used about 26k Workers AI neurons in 24h.
+        description: "The pack job's Workers AI fallback is estimated at 26k neurons over the last 24h (ceiling 25,000). A fallback that runs all day means LiteLLM coder-heavy is down or failing every call: check LiteLLMDown, InferenceBackendDown and the A9, or pause generation (variable KNOWLEDGE_ENABLED=false). The Cloudflare dashboard (Workers AI) is the authoritative neuron count."
+  - eval_time: "25h30m"
+    alertname: KnowledgeWorkersAINeuronCeiling
+    exp_alerts: []
+- name: a facts.json over 96 KiB fires for that repo only and ages out after a week
+  interval: "1h"
+  input_series:
+  - series: "knowledge_pack_facts_bytes{job=\"knowledge-pack\", repo=\"olympus-sdk\", service_name=\"knowledge-pack\", otel_scope_name=\"olympus.knowledge-pack\"}"
+    values: "122880 _x300"
+  - series: "knowledge_pack_facts_bytes{job=\"knowledge-pack\", repo=\"olympus-infra\", service_name=\"knowledge-pack\", otel_scope_name=\"olympus.knowledge-pack\"}"
+    values: "20480 _x300"
+  alert_rule_test:
+  - eval_time: "1h"
+    alertname: KnowledgeFactsLarge
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        repo: olympus-sdk
+      exp_annotations:
+        summary: facts.json for olympus-sdk is 120KiB, above the 96 KiB target.
+        description: repos/olympus-sdk/facts.json passed the 96 KiB target (the generator also warns in meta.json). Technologies and external_systems carry most of the bytes; shorten evidence excerpts or cap evidence per row in packages/knowledge-gen rather than raising the target again (runbook section "facts.json size").
+  - eval_time: "200h"
+    alertname: KnowledgeFactsLarge
+    exp_alerts: []
