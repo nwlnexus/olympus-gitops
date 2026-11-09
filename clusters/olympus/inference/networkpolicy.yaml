@@ -3,7 +3,9 @@
 #   ingress 4000  from the memory workers (ns memory), Prometheus (scrape /metrics/), the
 #                 blackbox exporter (probe /health/readiness) and the #197 executor (olympus-kvm
 #                 runner pods: ns arc-runners, label olympus.io/ci-kvm; olympus-sdk#642, matching
-#                 egress in ../arc/networkpolicy.yaml). Other clients get a rule when they exist.
+#                 egress in ../arc/networkpolicy.yaml) and the code-knowledge job (olympus-knowledge runner
+#                 pods: label olympus.io/ci-knowledge; olympus-sdk#852, egress-litellm-knowledge there).
+#                 Other clients get a rule when they exist.
 #   egress        DNS (kube-system) and the two llama-server backends on the tailnet: the A9
 #                 100.89.177.55 on 8081-8082 and 8084-8085 (coder-medium, dedicated coder-heavy;
 #                 olympus-sdk#460), and data-hub 100.95.232.41 on 8082 alone (coder-light fallback;
@@ -71,6 +73,16 @@ spec:
           podSelector:
             matchLabels:
               olympus.io/ci-kvm: "true"
+      ports:
+        - protocol: TCP
+          port: 4000
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: arc-runners
+          podSelector:
+            matchLabels:
+              olympus.io/ci-knowledge: "true"
       ports:
         - protocol: TCP
           port: 4000

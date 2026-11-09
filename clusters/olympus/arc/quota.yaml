@@ -26,17 +26,17 @@ metadata:
 spec:
   hard:
     # = ci-runners-non-kvm + ci-runners-kvm (keep the sums in step when tuning).
-    pods: "16"                     # 4 runners + 8 gates + 2 arm64 runners + 2 KVM runners
-    requests.cpu: "16500m"
-    requests.memory: 33Gi
-    limits.cpu: "34"
-    limits.memory: 66Gi
-    requests.ephemeral-storage: 34Gi
-    limits.ephemeral-storage: 136Gi
+    pods: "17"                     # 4 runners + 8 gates + 2 arm64 runners + 1 knowledge runner + 2 KVM runners
+    requests.cpu: "18500m"
+    requests.memory: 37Gi
+    limits.cpu: "38"
+    limits.memory: 74Gi
+    requests.ephemeral-storage: 38Gi
+    limits.ephemeral-storage: 151Gi
     requests.olympus.io/kvm: "2"
     persistentvolumeclaims: "0"    # runners are stateless (emptyDir only)
     services: "0"
-    secrets: "34"                  # one JIT-config Secret per runner/gate/arm64/KVM pod + the synced app Secret
+    secrets: "36"                  # one JIT-config Secret per runner/gate/arm64/knowledge/KVM pod + the synced app Secret
 ---
 apiVersion: v1
 kind: ResourceQuota
@@ -56,17 +56,19 @@ spec:
   # limits, 4 / 15 GiB ephemeral): +4 CPU, +8Gi requests; +8 CPU, +14Gi limits. The
   # pool is shared, not per-set: the arm64 pods can only run on the arm64 VMs, but the
   # quota does not know that, so a busy arm64 pool leaves less for olympus-linux.
+  # olympus-knowledge (olympus-sdk#852) adds 1 pod with the olympus-linux shape (2 CPU / 4 GiB requests,
+  # 4 CPU / 8 GiB limits, 4 / 15 GiB ephemeral): +2 CPU, +4Gi requests; +4 CPU, +8Gi limits.
   scopeSelector:
     matchExpressions:
       - scopeName: PriorityClass
         operator: NotIn
         values: ["ci-runner-kvm"]
   hard:
-    pods: "14"                     # 4 runners + 8 gates + 2 arm64 runners (olympus-arm64, #694)
-    requests.cpu: "12500m"
-    requests.memory: 25Gi
-    limits.cpu: "28"
-    limits.memory: 50Gi
+    pods: "15"                     # 4 runners + 8 gates + 2 arm64 runners (olympus-arm64, #694) + 1 knowledge runner (#852)
+    requests.cpu: "14500m"
+    requests.memory: 29Gi
+    limits.cpu: "32"
+    limits.memory: 58Gi
     requests.olympus.io/kvm: "0"   # only olympus-kvm pods may hold /dev/kvm
 ---
 apiVersion: v1
@@ -100,7 +102,7 @@ metadata:
   namespace: arc-system
 spec:
   hard:
-    pods: "10"                     # controller + one listener per scale set (olympus-linux, olympus-gate, olympus-kvm, olympus-arm64)
+    pods: "10"                     # controller + one listener per scale set (olympus-linux, olympus-gate, olympus-kvm, olympus-arm64, olympus-knowledge)
     requests.cpu: "2"
     requests.memory: 2Gi
     limits.cpu: "4"

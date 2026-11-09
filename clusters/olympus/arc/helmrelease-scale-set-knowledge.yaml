@@ -1,0 +1,185 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  # The release name is also the runner scale set name, i.e. the `runs-on:` label.
+  # `olympus-knowledge`: the code-knowledge pack job (olympus-sdk .github/workflows/knowledge-pack.yml,
+  # olympus-sdk#852; spec 2026-11-08-code-knowledge-layer-design §4.4/§4.5, D3). A copy of olympus-linux
+  # with: one runner (fleet-wide serialization of LLM use), its own pod label `olympus.io/ci-knowledge`
+  # (selected by the additive NetworkPolicy egress-litellm-knowledge, the only path to LiteLLM:4000
+  # besides olympus-kvm), and a 2 h deadline. Same image, hardening, proxy env and node pool.
+  name: olympus-knowledge
+  namespace: arc-runners
+spec:
+  interval: 1h
+  # Chart pinned by digest through an OCIRepository (see helmrepository.yaml).
+  chartRef:
+    kind: OCIRepository
+    name: gha-runner-scale-set
+    namespace: arc-system
+  dependsOn:
+    - name: arc
+      namespace: arc-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    githubConfigUrl: https://github.com/nwlnexus
+    # Pre-defined Secret from externalsecret.yaml (GitHub App credentials).
+    githubConfigSecret: arc-github-app
+    runnerGroup: olympus-ci
+    minRunners: 0
+    # ONE runner: knowledge jobs queue fleet-wide, so at most one job calls coder-heavy at a time
+    # (spec D3). Also the drain switch (README.md, known issue #4715 applies).
+    maxRunners: 1
+    # Explicit controller service account (no cluster lookup at render time).
+    controllerServiceAccount:
+      namespace: arc-system
+      name: arc-gha-rs-controller
+    # containerMode intentionally unset ("none"): jobs run directly in the runner
+    # container. No docker-in-docker, nothing privileged. Jobs needing Docker stay
+    # on hosted runners (spec R6).
+    listenerTemplate:
+      spec:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          seccompProfile:
+            type: RuntimeDefault
+        containers:
+          - name: listener
+            resources:
+              # Requests from 7-day usage (p95 x 1.2), docs/sizing/2026-11-01-requests.md.
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                cpu: 250m
+                memory: 128Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: olympus.io/role
+                      operator: DoesNotExist
+    template:
+      metadata:
+        labels:
+          # NOT olympus.io/ci-runner: the olympus-linux topology spread selects on that label.
+          # This label is what networkpolicy.yaml (egress-litellm-knowledge) and
+          # ../inference/networkpolicy.yaml (ingress 4000) select.
+          olympus.io/ci-knowledge: "true"
+      spec:
+        # The runner container does not talk to the Kubernetes API in this mode;
+        # the chart's service account ("-no-permission") has no RBAC anyway.
+        automountServiceAccountToken: false
+        priorityClassName: ci-runner
+        # Hard wall-clock cap for the pod (olympus-sdk#390 review m1). A full knowledge run with inference
+        # is 5 to 15 min (spec §4.4) and knowledge-pack.yml times out at 45 min; 2 h is ample.
+        activeDeadlineSeconds: 7200
+        enableServiceLinks: false
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001          # `runner` user in the runner image (numeric: required by runAsNonRoot)
+          runAsGroup: 1001
+          fsGroup: 1001
+          seccompProfile:
+            type: RuntimeDefault
+        # Compute pool only: onode-030c31/0312ce/0314ac (olympus-sdk#567, owner decision
+        # 2026-10-28). `olympus.io/role DoesNotExist` keeps runners off the agent-services
+        # onodes (memory + inference); the hostname rule keeps them off naraka-01, which
+        # is an untainted general worker but has only 4 CPUs (a 4-CPU / 8 GiB runner
+        # would starve it; the scheduler would otherwise pick it for its free memory).
+        # A new general worker must be added here too (or switch to a pool label).
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: olympus.io/role
+                      operator: DoesNotExist
+                    - key: kubernetes.io/hostname
+                      operator: NotIn
+                      values: ["naraka-01"]
+        containers:
+          - name: runner
+            # Our runner image (Ubuntu 22.04 glibc baseline, CI toolchains, actions
+            # runner 2.338.0, user `runner` uid 1001, no sudo), pinned by digest.
+            # Public package; built by ci/runner/build.sh (olympus-sdk#388/#406).
+            # Bump procedure: README.md.
+            image: ghcr.io/nwlnexus/olympus-ci-runner@sha256:3173f04c4f9ae2a2b635f28bfa83a228e905021a6b1dc5818b7ef115d7100c16
+            command: ["/home/runner/run.sh"]
+            # Egress proxy (olympus-sdk#407, ../ci-egress/, README "Egress proxy"). Set explicitly on the
+            # runner container, not with the chart's `proxy:` value: that would also route the
+            # listener in arc-system through it, whose network policy has no path to the proxy.
+            # Phase 1 is log-only and direct egress still works, so a tool that ignores these keeps
+            # working. Both cases: curl reads only lowercase http_proxy, others prefer uppercase.
+            # NO_PROXY: loopback (QEMU guests are reached through hostfwd on 127.0.0.1), in-cluster
+            # names (incl. the LiteLLM Service this set calls, spec §4.4), 10.0.0.0/8 for clients
+            # that understand CIDR (curl 7.81 does not), and the pod's own IP.
+            env:
+              - name: POD_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.podIP
+              - name: HTTP_PROXY
+                value: http://egress-proxy.ci-egress.svc.cluster.local:3128
+              - name: HTTPS_PROXY
+                value: http://egress-proxy.ci-egress.svc.cluster.local:3128
+              - name: http_proxy
+                value: http://egress-proxy.ci-egress.svc.cluster.local:3128
+              - name: https_proxy
+                value: http://egress-proxy.ci-egress.svc.cluster.local:3128
+              - name: NO_PROXY
+                value: localhost,127.0.0.1,::1,0.0.0.0,.svc,.cluster.local,10.0.0.0/8,litellm.inference.svc,litellm.inference.svc.cluster.local,$(POD_IP)
+              - name: no_proxy
+                value: localhost,127.0.0.1,::1,0.0.0.0,.svc,.cluster.local,10.0.0.0/8,litellm.inference.svc,litellm.inference.svc.cluster.local,$(POD_IP)
+              # Node 24 ignores HTTP(S)_PROXY unless this is set; actions such as
+              # create-github-app-token refuse to run when a proxy env is set without it (#407).
+              - name: NODE_USE_ENV_PROXY
+                value: "1"
+              # No telemetry from CI tools (#407): with the egress allowlist these hosts are denied
+              # anyway; off at the source so the proxy log only shows real denials.
+              - name: WRANGLER_SEND_METRICS
+                value: "false"
+              - name: TURBO_TELEMETRY_DISABLED
+                value: "1"
+              - name: DO_NOT_TRACK
+                value: "1"
+            resources:
+              requests:
+                cpu: "2"
+                memory: 4Gi
+                ephemeral-storage: 4Gi
+              limits:
+                cpu: "4"
+                memory: 8Gi
+                ephemeral-storage: 15Gi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+              # readOnlyRootFilesystem is NOT set: the runner writes its config,
+              # _diag logs and tool caches under /home/runner and the root fs is
+              # discarded with the (ephemeral) pod anyway. The work dir and /tmp are
+              # emptyDirs with size limits so a job cannot fill the node disk.
+            volumeMounts:
+              - name: work
+                mountPath: /home/runner/_work
+              - name: tmp
+                mountPath: /tmp
+        volumes:
+          - name: work
+            emptyDir:
+              sizeLimit: 12Gi
+          - name: tmp
+            emptyDir:
+              sizeLimit: 2Gi

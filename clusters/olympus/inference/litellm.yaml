@@ -139,7 +139,7 @@ spec:
             # Secret litellm-client-keys (or litellm-executor-key for `executor`, #642: optional,
             # absent until the owner adds the 1Password field; then 401 for that client only).
             - name: LITELLM_CLIENT_SCOPES
-              value: '{"memory-workers": ["memory-extract"], "executor": ["coder-light", "coder-medium", "coder-heavy", "tier-light", "tier-medium", "tier-heavy"], "monitor": ["memory-extract", "coder-light", "coder-medium", "coder-heavy", "tier-light", "tier-medium", "tier-heavy"]}'
+              value: '{"memory-workers": ["memory-extract"], "executor": ["coder-light", "coder-medium", "coder-heavy", "tier-light", "tier-medium", "tier-heavy"], "knowledge": ["coder-heavy"], "monitor": ["memory-extract", "coder-light", "coder-medium", "coder-heavy", "tier-light", "tier-medium", "tier-heavy"]}'
             # client -> the only routes it may call (custom_auth.py). `monitor` (olympus-sdk#649,
             # the blackbox /v1/models probe) lists models and nothing else: it holds the aliases in
             # its scope so the list is complete, but cannot run inference.
@@ -149,7 +149,7 @@ spec:
             # starve other A9 clients. Counted per replica (no shared cache; 2 replicas), so the
             # cluster-wide ceiling is up to 2x these values.
             - name: LITELLM_CLIENT_LIMITS
-              value: '{"executor": {"rpm": 60, "parallel": 3}}'
+              value: '{"executor": {"rpm": 60, "parallel": 3}, "knowledge": {"rpm": 30, "parallel": 1}}'
             - name: LITELLM_MASTER_KEY
               valueFrom:
                 secretKeyRef:
@@ -210,8 +210,8 @@ spec:
         - name: config
           configMap:
             name: litellm-config
-        # One directory of key files from three Secrets (projected). litellm-executor-key and
-        # litellm-monitor-key are optional: pods start and keep serving the other clients while it does not exist.
+        # One directory of key files from four Secrets (projected). litellm-executor-key,
+        # litellm-monitor-key and litellm-knowledge-key (olympus-sdk#852) are optional: pods start and keep serving the other clients while it does not exist.
         - name: client-keys
           projected:
             sources:
@@ -222,6 +222,9 @@ spec:
                   optional: true
               - secret:
                   name: litellm-monitor-key
+                  optional: true
+              - secret:
+                  name: litellm-knowledge-key
                   optional: true
         - name: tmp
           emptyDir:
