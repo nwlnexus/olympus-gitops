@@ -33,3 +33,4 @@ configMapGenerator:
       - migrations/0013_graph_detach_repair.sql
       - migrations/0014_graph_retry_failed_audit.sql
       - migrations/0015_graph_forget_hardening.sql
+      - migrations/0016_knowledge_source.sql
