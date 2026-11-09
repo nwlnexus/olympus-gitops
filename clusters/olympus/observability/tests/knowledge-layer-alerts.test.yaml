@@ -111,7 +111,7 @@ tests:
         severity: warning
         repo: olympus-sdk
       exp_annotations:
-        summary: facts.json for olympus-sdk is 120KiB, above the 96 KiB target.
+        summary: facts.json for olympus-sdk is 120kiB, above the 96 KiB target.
         description: repos/olympus-sdk/facts.json passed the 96 KiB target (the generator also warns in meta.json). Technologies and external_systems carry most of the bytes; shorten evidence excerpts or cap evidence per row in packages/knowledge-gen rather than raising the target again (runbook section "facts.json size").
   - eval_time: "200h"
     alertname: KnowledgeFactsLarge
