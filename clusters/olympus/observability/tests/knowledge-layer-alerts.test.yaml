@@ -96,11 +96,11 @@ tests:
   - eval_time: "25h30m"
     alertname: KnowledgeWorkersAINeuronCeiling
     exp_alerts: []
-- name: a facts.json over 96 KiB fires for that repo only and ages out after a week
+- name: a facts.json over 144 KiB fires for that repo only and ages out after a week
   interval: "1h"
   input_series:
   - series: "knowledge_pack_facts_bytes{job=\"knowledge-pack\", repo=\"olympus-sdk\", service_name=\"knowledge-pack\", otel_scope_name=\"olympus.knowledge-pack\"}"
-    values: "122880 _x300"
+    values: "153600 _x300"
   - series: "knowledge_pack_facts_bytes{job=\"knowledge-pack\", repo=\"olympus-infra\", service_name=\"knowledge-pack\", otel_scope_name=\"olympus.knowledge-pack\"}"
     values: "20480 _x300"
   alert_rule_test:
@@ -111,8 +111,8 @@ tests:
         severity: warning
         repo: olympus-sdk
       exp_annotations:
-        summary: facts.json for olympus-sdk is 120kiB, above the 96 KiB target.
-        description: repos/olympus-sdk/facts.json passed the 96 KiB target (the generator also warns in meta.json). Technologies and external_systems carry most of the bytes; shorten evidence excerpts or cap evidence per row in packages/knowledge-gen rather than raising the target again (runbook section "facts.json size").
+        summary: facts.json for olympus-sdk is 150kiB, above the 144 KiB target.
+        description: repos/olympus-sdk/facts.json passed the 144 KiB target (the generator also warns in meta.json). Technologies, external_systems and tooling carry most of the bytes; shorten evidence excerpts or cap evidence per row or rows per kind in packages/knowledge-gen rather than raising the target again (runbook section "facts.json size").
   - eval_time: "200h"
     alertname: KnowledgeFactsLarge
     exp_alerts: []
