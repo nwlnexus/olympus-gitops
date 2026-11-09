@@ -18,6 +18,16 @@
 # kube-state-metrics' kube_cronjob_* series feed MemoryKnowledgeIndexerFailing, and the gateway's
 # memory_knowledge_* gauges (kubernetes-pods scrape) feed MemoryKnowledgeIndexStale
 # (../../observability/prometheus-helmrelease.yaml, group `memory`).
+# Second source (olympus-sdk#853, code-knowledge spec section 6, D9): the generated code pages of
+# nwlnexus/olympus-knowledge (repos/<repo>/pages/*.md), indexed as rows with source = 'code' (migration 0016).
+#   init  `app-token`  the gateway image as nobody: mints an olympus-arc App installation token narrowed to
+#                      olympus-knowledge, contents: read (Secret memory-knowledge-indexer-app: olympus-arc's CI key, never ARC's own key; mounted here only).
+#   init  `clone-code` alpine/git: clones olympus-knowledge --depth 1 over HTTPS with that token (GIT_ASKPASS,
+#                      never on argv), writes its HEAD to /work/knowledge-commit, deletes the token.
+#   main  `index`      runs the CLI twice: `--source wiki`, then `--source code`. Each run is its own
+#                      transaction and only touches its own source's rows.
+# A missing App Secret, a refused token, a missing or empty olympus-knowledge, or a checkout without pages is
+# logged and skips the code run; the wiki run is unaffected. Either run failing fails the Job (alerts as before).
 # Prerequisite: the 1Password item `second-brain-deploy-key` (see knowledge-indexer-externalsecret.yaml).
 # Until it exists the pod waits in Init (secret volume missing) and the Job fails at activeDeadlineSeconds.
 # Run once by hand: kubectl -n memory create job --from=cronjob/memory-knowledge-indexer knowledge-index-manual
@@ -114,6 +124,96 @@ spec:
                 - name: known-hosts
                   mountPath: /etc/knowledge
                   readOnly: true
+            - name: app-token
+              # Same digest as the index container below (bump together). No runAsUser: runs as the pod's
+              # nobody (65534) so the clone-code container (also nobody) can read the 0600 token file.
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:5c8ec8bb91046492b13420f39c2575e3bbe00458206c95319cdce44aa98c2c4f
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -u
+                  if [ ! -s /run/secrets/app/PRIVATE_KEY ]; then
+                    echo "olympus-knowledge: no App credentials (Secret memory-knowledge-indexer-app); code source skipped"
+                    exit 0
+                  fi
+                  # olympus-arc's installation on nwlnexus (not secret); moves to the item's installation-id field later.
+                  printf '%s' "$GITHUB_APP_INSTALLATION_ID" > /tmp/installation-id
+                  if ! node dist/knowledge/app-token-cli.js \
+                      --app-id-file /run/secrets/app/APP_ID \
+                      --installation-id-file /tmp/installation-id \
+                      --private-key-file /run/secrets/app/PRIVATE_KEY \
+                      --repo olympus-knowledge --out /work/code-token; then
+                    rm -f /work/code-token
+                    echo "olympus-knowledge: no installation token; code source skipped"
+                  fi
+                  exit 0
+              env:
+                - name: GITHUB_APP_INSTALLATION_ID
+                  value: "172916382"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
+                - name: app-secrets
+                  mountPath: /run/secrets/app
+                  readOnly: true
+            - name: clone-code
+              image: docker.io/alpine/git:v2.49.1@sha256:c0280cf9572316299b08544065d3bf35db65043d5e3963982ec50647d2746e26
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -u
+                  if [ ! -s /work/code-token ]; then
+                    echo "olympus-knowledge: no token; code source skipped"
+                    exit 0
+                  fi
+                  printf '#!/bin/sh\ncase "$1" in Username*) echo x-access-token ;; *) cat /work/code-token ;; esac\n' > /tmp/askpass
+                  chmod 700 /tmp/askpass
+                  if GIT_ASKPASS=/tmp/askpass GIT_TERMINAL_PROMPT=0 git clone --quiet --depth 1 \
+                      https://github.com/nwlnexus/olympus-knowledge.git /work/knowledge \
+                    && git -C /work/knowledge rev-parse --verify --quiet HEAD > /work/knowledge-commit.tmp; then
+                    mv /work/knowledge-commit.tmp /work/knowledge-commit
+                    echo "cloned olympus-knowledge at $(cat /work/knowledge-commit)"
+                  else
+                    rm -rf /work/knowledge /work/knowledge-commit.tmp
+                    echo "olympus-knowledge: clone failed or the repository is empty; code source skipped"
+                  fi
+                  rm -f /work/code-token /tmp/askpass
+                  exit 0
+              env:
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: tmp
+                  mountPath: /tmp
           # Spreads across the cluster, the arm64 Mac VMs included (owner decision 2026-11-01,
           # olympus-sdk#707; pinned to the agent-services onodes before, #567). No nodeSelector: the
           # agent-services toleration keeps onode-0636e4/062caa usable, the arm64 one opts in to the
@@ -130,16 +230,21 @@ spec:
           containers:
             - name: index
               # Same digest as the memory-gateway Deployment (gateway.yaml). Bump both together.
-              image: ghcr.io/nwlnexus/memory-gateway@sha256:a38c6e15ff9557da688c63efc54505c05bc2078bee9146bca0e82b00c58cdc38
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:5c8ec8bb91046492b13420f39c2575e3bbe00458206c95319cdce44aa98c2c4f
               imagePullPolicy: IfNotPresent
               command:
-                - node
-                - dist/knowledge/cli.js
-                - index
-                - --dir
-                - /work/repo
-                - --commit-file
-                - /work/commit
+                - /bin/sh
+                - -c
+                - |
+                  set -u
+                  rc=0
+                  node dist/knowledge/cli.js index --source wiki --dir /work/repo --commit-file /work/commit || rc=1
+                  if [ -s /work/knowledge-commit ] && ls /work/knowledge/repos/*/pages/*.md > /dev/null 2>&1; then
+                    node dist/knowledge/cli.js index --source code --dir /work/knowledge --commit-file /work/knowledge-commit || rc=1
+                  else
+                    echo "olympus-knowledge: no checkout or no pages; code source skipped (wiki index unaffected)" >&2
+                  fi
+                  exit "$rc"
               env:
                 - name: DATABASE_URL_FILE
                   value: /run/secrets/knowledge/DATABASE_URL
@@ -174,7 +279,8 @@ spec:
           volumes:
             - name: work
               emptyDir:
-                sizeLimit: 256Mi
+                # second-brain + olympus-knowledge (SBOMs included), both --depth 1.
+                sizeLimit: 512Mi
             - name: tmp
               emptyDir:
                 sizeLimit: 64Mi
@@ -185,3 +291,9 @@ spec:
             - name: known-hosts
               configMap:
                 name: memory-knowledge-indexer
+            - name: app-secrets
+              secret:
+                secretName: memory-knowledge-indexer-app
+                defaultMode: 0440
+                # Optional: without it the code source is skipped and the wiki run still happens.
+                optional: true
