@@ -80,7 +80,7 @@ spec:
             # purge failed every run with "connect ECONNREFUSED" (olympus-sdk#734, same race as #724).
             # Wait up to 120 s for a TCP connection from this pod; a postgres that stays down still fails.
             - name: wait-for-postgres
-              image: ghcr.io/nwlnexus/memory-gateway@sha256:5c8ec8bb91046492b13420f39c2575e3bbe00458206c95319cdce44aa98c2c4f
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:f5024ee717af31a50e1a0c6d8f6ebf32956d99ff521212528266ef088eb207f8
               imagePullPolicy: IfNotPresent
               command:
                 - node
@@ -114,7 +114,7 @@ spec:
           containers:
             - name: purge
               # Same digest as the memory-gateway Deployment (gateway.yaml) and the wait-for-postgres init container. Bump all together.
-              image: ghcr.io/nwlnexus/memory-gateway@sha256:5c8ec8bb91046492b13420f39c2575e3bbe00458206c95319cdce44aa98c2c4f
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:f5024ee717af31a50e1a0c6d8f6ebf32956d99ff521212528266ef088eb207f8
               imagePullPolicy: IfNotPresent
               command:
                 - node
