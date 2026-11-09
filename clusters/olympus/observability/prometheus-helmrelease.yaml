@@ -1110,14 +1110,15 @@ spec:
                 annotations:
                   summary: "The code knowledge fallback used about {{ $value | humanize }} Workers AI neurons in 24h."
                   description: "The pack job's Workers AI fallback is estimated at {{ $value | humanize }} neurons over the last 24h (ceiling 25,000). A fallback that runs all day means LiteLLM coder-heavy is down or failing every call: check LiteLLMDown, InferenceBackendDown and the A9, or pause generation (variable KNOWLEDGE_ENABLED=false). The Cloudflare dashboard (Workers AI) is the authoritative neuron count."
-              # CONTRACT.md BUDGETS.factsBytes (96 KiB, raised from 32 KiB by olympus-sdk#854: olympus-sdk measures 56 KiB
-              # deterministic, about 80 KiB inferred). Samples come from runs that wrote a tree, so a week of lookback.
+              # CONTRACT.md BUDGETS.factsBytes (144 KiB: 32 KiB, 96 KiB by olympus-sdk#854, 144 KiB by olympus-sdk#885 for
+              # the developer-tooling rows, about 50 KiB on olympus-sdk). Samples come from runs that wrote a tree, so a
+              # week of lookback.
               - alert: KnowledgeFactsLarge
-                expr: max by (repo) (last_over_time(knowledge_pack_facts_bytes{job="knowledge-pack"}[7d])) > 96 * 1024
+                expr: max by (repo) (last_over_time(knowledge_pack_facts_bytes{job="knowledge-pack"}[7d])) > 144 * 1024
                 labels: { severity: warning }
                 annotations:
-                  summary: "facts.json for {{ $labels.repo }} is {{ $value | humanize1024 }}B, above the 96 KiB target."
-                  description: "repos/{{ $labels.repo }}/facts.json passed the 96 KiB target (the generator also warns in meta.json). Technologies and external_systems carry most of the bytes; shorten evidence excerpts or cap evidence per row in packages/knowledge-gen rather than raising the target again (runbook section \"facts.json size\")."
+                  summary: "facts.json for {{ $labels.repo }} is {{ $value | humanize1024 }}B, above the 144 KiB target."
+                  description: "repos/{{ $labels.repo }}/facts.json passed the 144 KiB target (the generator also warns in meta.json). Technologies, external_systems and tooling carry most of the bytes; shorten evidence excerpts or cap evidence per row or rows per kind in packages/knowledge-gen rather than raising the target again (runbook section \"facts.json size\")."
     prometheus-pushgateway:
       enabled: false
     kube-state-metrics:

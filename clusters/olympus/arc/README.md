@@ -316,7 +316,7 @@ curl -sS -m 5 -k https://68.134.149.230:443                    # gateway WAN IP 
   `packages/knowledge-gen/CONTRACT.md` 5.1). Alerts (group `knowledge-layer`, all warning): `KnowledgePackStale` (a repo's
   pack trails its main by more than 6 h), `KnowledgePackWeeklyMissed` (no refresh for 8 days), `KnowledgeInferenceFailing`
   (three consecutive runs ended stale or unavailable), `KnowledgeWorkersAINeuronCeiling` (fallback above 25,000 estimated
-  neurons per 24 h) and `KnowledgeFactsLarge` (facts.json over 96 KiB). Unit tests
+  neurons per 24 h) and `KnowledgeFactsLarge` (facts.json over 144 KiB). Unit tests
   `../observability/tests/knowledge-layer-alerts.test.yaml`; runbook olympus-sdk
   `docs/runbooks/2026-11-08-code-knowledge-layer.md`.
 - **etcd.** k3s serves etcd's own metrics (`etcd_disk_wal_fsync_duration_seconds`) on
