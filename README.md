@@ -17,9 +17,10 @@ clusters/
 ## Hosts
 
 - **compute-hub** — the only gitops-managed cluster (k3s).
-- **data-hub** — the Mac Studio; a host only, not a cluster. The fleet's inference
-  node (Ollama behind LiteLLM) and macOS CI runner, reached by the cluster over
-  Tailscale. Nothing else from the old data tier is left (a temporary Postgres
+- **data-hub** — the Mac Studio; a host only, not a cluster. A fallback inference
+  node (a llama-server twin that only `coder-light` falls back to; primary inference
+  is the cluster LiteLLM routing to the A9 host) and macOS CI runner, reached by the
+  cluster over Tailscale. Nothing else from the old data tier is left (a temporary Postgres
   remains until WS9 of olympus-sdk#444). Formerly named `ai-hub`.
 
 ## Secrets
