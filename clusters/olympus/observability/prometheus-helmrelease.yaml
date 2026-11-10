@@ -352,6 +352,26 @@ spec:
       # The controller and one listener pod per scale set serve metrics on the container port named
       # `metrics` (8080; ../arc/helmrelease-controller.yaml `metrics:`). Allowed by
       # ../arc/networkpolicy-metrics.yaml (Prometheus -> arc-system 8080 only). No `namespace` target
+      # Embedded etcd of the k3s servers (olympus-sdk#908): k3s serves etcd's /metrics on <node-ip>:2381 with
+      # `etcd-expose-metrics: true` (olympus-infra roles/k3s, tasks/etcd-metrics.yml; a host nftables table there
+      # admits only the pod network and the cluster nodes to that port, which NetworkPolicy cannot do for a host
+      # port). One target per etcd member, found by the label k3s puts on every server; instance = node name.
+      - job_name: etcd
+        scrape_interval: 30s
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_node_label_node_role_kubernetes_io_etcd]
+            regex: "true"
+            action: keep
+          - source_labels: [__meta_kubernetes_node_address_InternalIP]
+            regex: (.+)
+            target_label: __address__
+            replacement: $1:2381
+          - source_labels: [__meta_kubernetes_node_name]
+            target_label: instance
+          - source_labels: [__meta_kubernetes_node_name]
+            target_label: node
       # label: the gha_* series carry their own `namespace` (the scale set's, arc-runners) and `name`
       # (the scale set) labels, which a target label would rename to exported_*.
       - job_name: arc-controller
@@ -1006,8 +1026,8 @@ spec:
                 annotations:
                   summary: "Root disk on {{ $labels.node }} will be full within 24h at the current rate."
                   description: "Linear prediction over the last 6h reaches zero free space within 24h (less than 40% free now). Find the writer (`du -xh / | sort -h`, container images, CI emptyDirs) before ClusterNodeRootDiskLow fires."
-              # Apiserver-side etcd request latency (etcd's own metrics are not exposed: k3s serves them on
-              # 127.0.0.1:2381 only). Non-list operations; their 7-day p99 peak was under 0.1s (2026-11-07).
+              # Apiserver-side etcd request latency (end to end, as the apiserver sees it). Non-list operations;
+              # their 7-day p99 peak was under 0.1s (2026-11-07). etcd's own disk latency: the two rules below.
               - alert: EtcdRequestLatencyHigh
                 expr: >-
                   histogram_quantile(0.99, sum by (le, instance) (rate(etcd_request_duration_seconds_bucket{job="kubernetes-api-servers", operation!~"list.*"}[5m]))) > 0.5
@@ -1016,6 +1036,26 @@ spec:
                 annotations:
                   summary: "etcd request p99 seen by the apiserver {{ $labels.instance }} is {{ $value | humanizeDuration }}."
                   description: "Non-list etcd requests from the apiserver take over 0.5s at p99 (normal: under 0.1s). Disk contention on the control-plane onodes is the usual cause; CI runs on the same disks. Compare with busy runners on the \"CI runners\" dashboard and drain CI (arc/README.md, Runbook) if they coincide."
+              # etcd's own disk latency, per member (scrape job `etcd`, olympus-sdk#908). etcd's guidance: WAL fsync p99
+              # under 10ms and backend commit p99 under 25ms on healthy disks; sustained values above these thresholds
+              # mean leader elections and slow writes are close. CI runners share the root disk with etcd on the
+              # control-plane nodes, so these are the metrics to check before and after any runner capacity change.
+              - alert: EtcdWalFsyncSlow
+                expr: >-
+                  histogram_quantile(0.99, sum by (le, instance) (rate(etcd_disk_wal_fsync_duration_seconds_bucket{job="etcd"}[5m]))) > 0.025
+                for: 10m
+                labels: { severity: warning }
+                annotations:
+                  summary: "etcd WAL fsync p99 on {{ $labels.instance }} is {{ $value | humanizeDuration }}."
+                  description: "WAL fsync p99 on {{ $labels.instance }} has been over 25ms for 10m (healthy: under 10ms). Every etcd write waits for this fsync, so slow fsyncs delay all writes and can cost leader elections. Usual cause: disk contention from CI runner pods on the same node (\"CI runners\" dashboard, `kubectl get pods -A -o wide --field-selector spec.nodeName={{ $labels.instance }}`). Drain CI if they coincide (arc/README.md, Runbook) and do not raise runner capacity while this fires."
+              - alert: EtcdBackendCommitSlow
+                expr: >-
+                  histogram_quantile(0.99, sum by (le, instance) (rate(etcd_disk_backend_commit_duration_seconds_bucket{job="etcd"}[5m]))) > 0.05
+                for: 10m
+                labels: { severity: warning }
+                annotations:
+                  summary: "etcd backend commit p99 on {{ $labels.instance }} is {{ $value | humanizeDuration }}."
+                  description: "Backend (bbolt) commit p99 on {{ $labels.instance }} has been over 50ms for 10m (healthy: under 25ms). Slow commits back up the apply loop and show as EtcdRequestLatencyHigh next. Check disk contention on that node first (CI runners, image pulls, `iostat -x 5` on the node), then the database size (`etcd_mvcc_db_total_size_in_bytes{job=\"etcd\"}`; defragment one member at a time if it is large). Do not raise runner capacity while this fires."
           - name: ci-runners-macos
             rules:
               # Native macOS JIT runners on data-hub, mmini-01 and mmini-02 (olympus-sdk#392; not ARC). Each Mac's

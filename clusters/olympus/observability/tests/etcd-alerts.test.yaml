@@ -1,0 +1,97 @@
+# Unit tests for the etcd disk latency alerts in the cluster-nodes group (olympus-sdk#908).
+# Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease first).
+# Histograms: per member, 100 observations a minute; the slow member puts them all above the threshold
+# bucket, the healthy one all in the lowest bucket.
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  - name: slow WAL fsync on one member fires after 10m; the healthy member stays quiet
+    interval: 1m
+    input_series:
+      - series: 'etcd_disk_wal_fsync_duration_seconds_bucket{job="etcd", instance="node-a", le="0.008"}'
+        values: "0+0x30"
+      - series: 'etcd_disk_wal_fsync_duration_seconds_bucket{job="etcd", instance="node-a", le="0.032"}'
+        values: "0+0x30"
+      - series: 'etcd_disk_wal_fsync_duration_seconds_bucket{job="etcd", instance="node-a", le="0.128"}'
+        values: "0+100x30"
+      - series: 'etcd_disk_wal_fsync_duration_seconds_bucket{job="etcd", instance="node-a", le="+Inf"}'
+        values: "0+100x30"
+      - series: 'etcd_disk_wal_fsync_duration_seconds_bucket{job="etcd", instance="node-b", le="0.008"}'
+        values: "0+100x30"
+      - series: 'etcd_disk_wal_fsync_duration_seconds_bucket{job="etcd", instance="node-b", le="0.032"}'
+        values: "0+100x30"
+      - series: 'etcd_disk_wal_fsync_duration_seconds_bucket{job="etcd", instance="node-b", le="0.128"}'
+        values: "0+100x30"
+      - series: 'etcd_disk_wal_fsync_duration_seconds_bucket{job="etcd", instance="node-b", le="+Inf"}'
+        values: "0+100x30"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: EtcdWalFsyncSlow
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: EtcdWalFsyncSlow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: node-a
+            exp_annotations:
+              summary: "etcd WAL fsync p99 on node-a is 127ms."
+              description: "WAL fsync p99 on node-a has been over 25ms for 10m (healthy: under 10ms). Every etcd write waits for this fsync, so slow fsyncs delay all writes and can cost leader elections. Usual cause: disk contention from CI runner pods on the same node (\"CI runners\" dashboard, `kubectl get pods -A -o wide --field-selector spec.nodeName=node-a`). Drain CI if they coincide (arc/README.md, Runbook) and do not raise runner capacity while this fires."
+
+  - name: fast WAL fsync never fires
+    interval: 1m
+    input_series:
+      - series: 'etcd_disk_wal_fsync_duration_seconds_bucket{job="etcd", instance="node-b", le="0.008"}'
+        values: "0+100x30"
+      - series: 'etcd_disk_wal_fsync_duration_seconds_bucket{job="etcd", instance="node-b", le="+Inf"}'
+        values: "0+100x30"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: EtcdWalFsyncSlow
+        exp_alerts: []
+
+  - name: slow backend commit on one member fires after 10m
+    interval: 1m
+    input_series:
+      - series: 'etcd_disk_backend_commit_duration_seconds_bucket{job="etcd", instance="node-a", le="0.016"}'
+        values: "0+0x30"
+      - series: 'etcd_disk_backend_commit_duration_seconds_bucket{job="etcd", instance="node-a", le="0.064"}'
+        values: "0+0x30"
+      - series: 'etcd_disk_backend_commit_duration_seconds_bucket{job="etcd", instance="node-a", le="0.256"}'
+        values: "0+100x30"
+      - series: 'etcd_disk_backend_commit_duration_seconds_bucket{job="etcd", instance="node-a", le="+Inf"}'
+        values: "0+100x30"
+      - series: 'etcd_disk_backend_commit_duration_seconds_bucket{job="etcd", instance="node-b", le="0.016"}'
+        values: "0+100x30"
+      - series: 'etcd_disk_backend_commit_duration_seconds_bucket{job="etcd", instance="node-b", le="+Inf"}'
+        values: "0+100x30"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: EtcdBackendCommitSlow
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: EtcdBackendCommitSlow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: node-a
+            exp_annotations:
+              summary: "etcd backend commit p99 on node-a is 254.1ms."
+              description: "Backend (bbolt) commit p99 on node-a has been over 50ms for 10m (healthy: under 25ms). Slow commits back up the apply loop and show as EtcdRequestLatencyHigh next. Check disk contention on that node first (CI runners, image pulls, `iostat -x 5` on the node), then the database size (`etcd_mvcc_db_total_size_in_bytes{job=\"etcd\"}`; defragment one member at a time if it is large). Do not raise runner capacity while this fires."
+
+  - name: commit latency between the healthy and alert thresholds stays quiet
+    interval: 1m
+    input_series:
+      # all observations in (0.016, 0.032]: p99 about 32ms, under the 50ms threshold
+      - series: 'etcd_disk_backend_commit_duration_seconds_bucket{job="etcd", instance="node-b", le="0.016"}'
+        values: "0+0x30"
+      - series: 'etcd_disk_backend_commit_duration_seconds_bucket{job="etcd", instance="node-b", le="0.032"}'
+        values: "0+100x30"
+      - series: 'etcd_disk_backend_commit_duration_seconds_bucket{job="etcd", instance="node-b", le="+Inf"}'
+        values: "0+100x30"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: EtcdBackendCommitSlow
+        exp_alerts: []
