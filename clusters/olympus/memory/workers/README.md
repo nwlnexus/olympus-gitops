@@ -1,7 +1,7 @@
 # memory-workers — deployment (olympus-sdk#453, epic #444)
 
 The queue workers of the memory gateway: they take `extract` and `embed` jobs from the Postgres queue
-(`memory.capture_queue`), call the cluster LiteLLM (`../../inference`: the A9 llama-server, no fallback) and write facts and embeddings back. Design:
+(`memory.capture_queue`), call the cluster LiteLLM for extraction (`../../inference`: the A9 llama-server, no fallback) and the in-cluster `../embedder` for embeddings, and write facts and embeddings back. Design:
 [`2026-10-21-memory-gateway-contract-design.md`](https://github.com/nwlnexus/olympus-sdk/blob/main/docs/superpowers/specs/2026-10-21-memory-gateway-contract-design.md)
 sections 3.4, 8 and 9. Code, configuration reference and image: `packages/memory-workers` in olympus-sdk
 (`README.md` there lists every setting), published as `ghcr.io/nwlnexus/memory-workers` by
@@ -34,7 +34,7 @@ Not here, on purpose:
 | claim loops x batch | 1 x 1 | 4 x 4 per pod (a batch is one `/embeddings` request) |
 | rollout | `Recreate` (never two extractors at once) | rolling, `maxUnavailable: 0`, `maxSurge: 1` |
 | requests / limit | 100m, 256Mi / 1Gi | 100m, 192Mi / 512Mi |
-| LiteLLM alias | `memory-extract` | `memory-embed` |
+| Model route | LiteLLM alias `memory-extract` | in-cluster `memory-embedder` (`MEMORY_EMBED_BASE_URL`), not LiteLLM; `memory-embed` is only the alias name recorded |
 
 Both: uid/gid 10001, Pod Security `restricted`, read-only root filesystem with an `emptyDir` on `/tmp`, all
 capabilities dropped, seccomp `RuntimeDefault`, no service account token. Port 9090 (`metrics`) serves

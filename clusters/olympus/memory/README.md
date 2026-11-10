@@ -1,7 +1,7 @@
 # memory — data stores for the memory platform
 
 Namespace `memory`. Implements nwlnexus/olympus-sdk#449 (epic #444, spec sections D3, D4
-and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0015, see below); the
+and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0016, see below); the
 gateway (#450, see `gateway/README.md`; deployed by its own Flux Kustomization), workers (#453, see
 `workers/README.md`) and the CPU embedding service (olympus-sdk#529, see `embedder/README.md`) have their
 own manifests and Flux Kustomizations.
@@ -59,7 +59,7 @@ the Postgres password later: change the 1Password field, then
 Migrations are plain SQL files in `migrations/`, named `NNNN_short_description.sql`
 (zero-padded, next free number), applied in filename order by `Job/memory-migrate`.
 
-1. Create `migrations/<next number>_<what>.sql` (the next free number is `0015`). It must be **idempotent** (`CREATE ... IF NOT EXISTS`,
+1. Create `migrations/<next number>_<what>.sql` (the next free number is `0017`). It must be **idempotent** (`CREATE ... IF NOT EXISTS`,
    `ADD COLUMN IF NOT EXISTS`, `DO $$ ... $$` guards), because it is run once per database but
    may be replayed by hand or after a restore. Do not put `BEGIN`/`COMMIT` in it: the runner
    wraps each file and its ledger row in one transaction, so a failing file leaves nothing behind.
@@ -133,6 +133,12 @@ cleanup (§14.10 step 4, below).
 |---|---|
 | `0006_graph_cleanup.sql` | removes what 0005 left inert (design §14.10 step 4, task P2): legacy `graph_forget` jobs (the graph of a still-forgotten fact is detached first through `graph_detach_fact`, as the old drain did), the stage `graph_forget` from the `capture_queue` stage and target CHECKs, `fact_graph_episode`, and `entity_name_lower_idx`. On the cluster it runs after 0013 (the runner skips applied versions and applies the rest in lexical order); on a fresh database between 0005 and 0007. Apply only after the gateway and worker images of olympus-gitops#230 (no `graph_forget`, purge without `fact_graph_episode`) are live |
 | `0014_graph_retry_failed_audit.sql` | the audit action `graph_retry_failed` of `memory-admin graph retry-failed` (one row per fact): 0011's list plus the new action. Not in 0006, because on a fresh database 0011 runs after 0006 and re-asserts the list; 0013 does not touch the list |
+
+### Migration 0016: knowledge source (olympus-sdk#853)
+
+| File | What |
+|---|---|
+| `0016_knowledge_source.sql` | adds `memory.knowledge_page.source` (default `wiki`) so the generated code pages (olympus-knowledge `repos/<repo>/pages/*.md`) sit next to the curated wiki; replaces the path CHECK with one that ties the source to the path prefix; no grant changes (the table-level grants of 0007 cover the column) |
 
 ### Migration 0015: graph forget and merge hardening (olympus-sdk#804, #807)
 
