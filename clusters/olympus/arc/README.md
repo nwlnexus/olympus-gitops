@@ -319,10 +319,28 @@ curl -sS -m 5 -k https://68.134.149.230:443                    # gateway WAN IP 
   neurons per 24 h) and `KnowledgeFactsLarge` (facts.json over 144 KiB). Unit tests
   `../observability/tests/knowledge-layer-alerts.test.yaml`; runbook olympus-sdk
   `docs/runbooks/2026-11-08-code-knowledge-layer.md`.
-- **etcd.** k3s serves etcd's own metrics (`etcd_disk_wal_fsync_duration_seconds`) on
-  `127.0.0.1:2381` only, so they are not scraped; `EtcdRequestLatencyHigh` uses the apiservers'
-  `etcd_request_duration_seconds` instead (non-list p99, 7-day peak under 0.1 s on 2026-11-07, alert at
-  0.5 s). Scraping etcd directly needs `etcd-expose-metrics: true` in the k3s config (olympus-infra).
+- **etcd.** Prometheus scrapes every server's embedded etcd (job `etcd`, `<node-ip>:2381`; the k3s config
+  sets `etcd-expose-metrics`, olympus-infra `roles/k3s/tasks/etcd-metrics.yml`, and a host firewall admits
+  only the pod network and the cluster nodes to that port; olympus-sdk#908). Alerts (group `cluster-nodes`,
+  warning): `EtcdWalFsyncSlow` (WAL fsync p99 over 25 ms for 10 min) and `EtcdBackendCommitSlow` (backend
+  commit p99 over 50 ms for 10 min); unit tests `../observability/tests/etcd-alerts.test.yaml`.
+  `EtcdRequestLatencyHigh` stays as the apiserver-side view (`etcd_request_duration_seconds`, non-list p99,
+  7-day peak under 0.1 s on 2026-11-07, alert at 0.5 s).
+
+### Capacity changes and etcd
+
+Every control-plane node runs CI runner pods next to an etcd member, on the same disk. Before raising
+`maxRunners` (or adding a scale set that lands on the control plane), compare etcd's own disk latency for
+a week before and after, per member:
+
+```promql
+histogram_quantile(0.99, sum by (le, instance) (rate(etcd_disk_wal_fsync_duration_seconds_bucket{job="etcd"}[5m])))
+histogram_quantile(0.99, sum by (le, instance) (rate(etcd_disk_backend_commit_duration_seconds_bucket{job="etcd"}[5m])))
+```
+
+Do not raise capacity while `EtcdWalFsyncSlow` or `EtcdBackendCommitSlow` fires, or when the p99s under CI
+load approach their thresholds (25 ms and 50 ms). Node disk I/O time was the stand-in before these metrics
+were scraped (the `olympus-linux` raise to 4).
 
 ## Runbook
 
