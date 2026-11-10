@@ -348,10 +348,6 @@ spec:
             target_label: instance
           - target_label: __address__
             replacement: blackbox-exporter.observability.svc:9115
-      # ARC, the CI runner scale sets on the cluster (olympus-sdk#392, epic #383; ../arc/README.md, "Monitoring").
-      # The controller and one listener pod per scale set serve metrics on the container port named
-      # `metrics` (8080; ../arc/helmrelease-controller.yaml `metrics:`). Allowed by
-      # ../arc/networkpolicy-metrics.yaml (Prometheus -> arc-system 8080 only). No `namespace` target
       # Embedded etcd of the k3s servers (olympus-sdk#908): k3s serves etcd's /metrics on <node-ip>:2381 with
       # `etcd-expose-metrics: true` (olympus-infra roles/k3s, tasks/etcd-metrics.yml; a host nftables table there
       # admits only the pod network and the cluster nodes to that port, which NetworkPolicy cannot do for a host
@@ -372,6 +368,10 @@ spec:
             target_label: instance
           - source_labels: [__meta_kubernetes_node_name]
             target_label: node
+      # ARC, the CI runner scale sets on the cluster (olympus-sdk#392, epic #383; ../arc/README.md, "Monitoring").
+      # The controller and one listener pod per scale set serve metrics on the container port named
+      # `metrics` (8080; ../arc/helmrelease-controller.yaml `metrics:`). Allowed by
+      # ../arc/networkpolicy-metrics.yaml (Prometheus -> arc-system 8080 only). No `namespace` target
       # label: the gha_* series carry their own `namespace` (the scale set's, arc-runners) and `name`
       # (the scale set) labels, which a target label would rename to exported_*.
       - job_name: arc-controller
