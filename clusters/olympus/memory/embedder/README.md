@@ -6,8 +6,8 @@ A small, boring CPU embedding service in namespace `memory`: HuggingFace
 `POST /v1/embeddings`. It replaces Ollama on data-hub for embeddings (Ollama's embedder stalls because of a
 scheduler lock bug, olympus-sdk#527), so the capture and recall path no longer depends on the GPU host.
 
-**Nothing consumes it yet.** The workers and the gateway switch to it with olympus-sdk#529 task 2; until then
-the Flux Kustomization only deploys and watches it.
+The gateway (`MEMORY_EMBED_BASE_URL` in `../gateway/gateway.yaml`) and the embed workers
+(`MEMORY_EMBED_BASE_URL` in `../workers/workers-config.env`) both call it.
 
 | File | What |
 |---|---|

@@ -20,38 +20,34 @@ Postgres needed no change for the gateway pods.
 
 `../kustomization.yaml` (the `memory` Flux Kustomization, which health-checks the two StatefulSets) does
 **not** include this directory. It is deployed by `../../flux-kustomizations/memory-gateway.yaml`
-(path `./clusters/olympus/memory/gateway`, `dependsOn: memory`), and that file is **not** listed in
-`../../kustomization.yaml`. Until it is, Flux does not apply any of the objects above, so merging cannot
-affect the stores, and an unpullable image or a missing 1Password item can only ever make the
-`memory-gateway` Kustomization (not `memory`) unhealthy.
+(path `./clusters/olympus/memory/gateway`, `dependsOn: memory`), which is listed in
+`../../kustomization.yaml`. Keeping it separate means an unpullable image or a missing 1Password item can only
+ever make the `memory-gateway` Kustomization (not `memory`) unhealthy.
 
-## Enabling (two edits, one PR, in this order)
+## Image digest
 
-1. **Replace the placeholder digest** in `gateway.yaml` (`image: ghcr.io/nwlnexus/memory-gateway@sha256:000...0`)
-   with the first digest the workflow publishes: the olympus-sdk `memory-gateway` run on `main` (after the
-   workflow PR merges, or a manual `workflow_dispatch`) prints it in the job summary, "Record image digest".
-2. **Register the Flux Kustomization**: add `  - flux-kustomizations/memory-gateway.yaml` to the end of
-   `clusters/olympus/kustomization.yaml`.
+`gateway.yaml` pins the image by digest (`image: ghcr.io/nwlnexus/memory-gateway@sha256:...`). A new build is
+rolled by replacing the digest (the olympus-sdk `memory-gateway` workflow prints it in the job summary, "Record
+image digest"); the deploy PRs are titled `deploy(memory): gateway sha-...`.
 
-Before step 2 the 1Password items must exist (otherwise the ExternalSecrets fail and the pods wait in
+The 1Password items the ExternalSecrets read must exist (otherwise the ExternalSecrets fail and the pods wait in
 `ContainerCreating`; nothing else is hurt):
 
-- `memory-stores` fields `gateway-db-password` (exists; the migrate Job already set the role's password from it);
-- `gh-pull-secret` fields `username` and `credential` (exists; also used by ingress-discovery), unless the
+- `memory-stores` fields `gateway-db-password` (the migrate Job also sets the role's password from it);
+- `gh-pull-secret` fields `username` and `credential` (also used by ingress-discovery), unless the
   GHCR package is made public, in which case drop `ghcr-pull-externalsecret.yaml` and the `imagePullSecrets` entry.
 
-To disable again: remove the line from `../../kustomization.yaml` (`prune: true` then deletes the objects).
+To disable: remove the line from `../../kustomization.yaml` (`prune: true` then deletes the objects).
 
-## Owner-supplied values (placeholders)
+## Cloudflare Access values
 
 | Value | Where | Status |
 |---|---|---|
-| Image digest | `gateway.yaml` (`image:`) | placeholder (64 zeros), see above |
 | `MEMORY_ACCESS_TEAM_DOMAIN` (`https://<team>.cloudflareaccess.com`) and `MEMORY_ACCESS_AUD` | set in the ConfigMap in `gateway.yaml` (team `nwlnexus`, application `memory`, 2026-11-04) | printed by olympus-infra `playbooks/push/cloudflare-access.yml`; set **both** (or neither), see "Public path" |
 
-With the two Access values unset the gateway starts, the Access-JWT path is disabled (a request carrying only
-an Access JWT is refused with 401) and gateway keys (`Authorization: Bearer mgw_...`) work, which is all
-tailnet mode (design 5.6) needs.
+Both are set, so the Access-JWT path is on and `/readyz` waits for the first JWKS fetch. With the two values
+unset the gateway would still start, a request carrying only an Access JWT would be refused with 401, and gateway
+keys (`Authorization: Bearer mgw_...`) would keep working, which is all tailnet mode (design 5.6) needs.
 
 ## Verification after enabling
 
