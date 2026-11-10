@@ -29,11 +29,11 @@ spec:
     # Raised from 0 to 3 on 2026-10-19 after every precondition in README.md was done
     # and verified (node IPv6 link-local DROP + sshd hardening on all four nodes,
     # kubelet reserves on the three onodes, UniFi policy node IPs -> Gateway ports
-    # 22/80/443/8443). The quota allows 4 pods; go to 4 only after observing etcd and
-    # node load (etcd_disk_wal_fsync_duration_seconds, see README.md).
+    # 22/80/443/8443). Raised from 3 to 4 on 2026-11-10 after a week of node load at 3 showed
+    # ample headroom. Keep it at 4: more lets two heavy jobs stack on one control-plane node.
     # Also the drain switch (README.md); known issue: raising it again from 0 can
     # leave queued jobs stuck until a new dispatch or a listener restart (#4715).
-    maxRunners: 3
+    maxRunners: 4
     # Explicit controller service account (no cluster lookup at render time).
     controllerServiceAccount:
       namespace: arc-system

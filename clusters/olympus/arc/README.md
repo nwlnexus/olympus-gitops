@@ -5,7 +5,7 @@ compute-hub. Design: `docs/superpowers/specs/2026-10-19-ci-runners-on-cluster-de
 in `nwlnexus/olympus-sdk`; epic `nwlnexus/olympus-sdk#383` (this directory implements #386, #387
 and, with `../kvm-device-plugin/`, #390).
 
-**Status: live.** `olympus-linux` runs with `maxRunners: 3` and `olympus-gate` with
+**Status: live.** `olympus-linux` runs with `maxRunners: 4` (3 from 2026-10-19, 4 since 2026-11-10) and `olympus-gate` with
 `maxRunners: 8` (since 2026-10-19, after the preconditions below). `olympus-kvm`
 (`maxRunners: 2`) runs nothing until a node carries the KVM label (KVM section).
 
@@ -37,7 +37,7 @@ image by digest, `activeDeadlineSeconds` so a stuck job cannot hold a slot for d
 
 | Scale set | For | Pods | Per pod (requests / limits) |
 |-----------|-----|------|------------------------------|
-| `olympus-linux` | CI jobs (lint, test, build) | max 3 (`maxRunners`; quota room for 4) | 2 CPU, 4 GiB / 4 CPU, 8 GiB; spread over the onodes via label `olympus.io/ci-runner`; deadline 3 h |
+| `olympus-linux` | CI jobs (lint, test, build) | max 4 (`maxRunners`; more would let two heavy jobs stack on one control-plane node) | 2 CPU, 4 GiB / 4 CPU, 8 GiB; spread over the onodes via label `olympus.io/ci-runner`; deadline 3 h |
 | `olympus-gate` | the CI gate workflow: a poller (bash, gh, jq) that waits up to 120 min for sibling workflows | max 8 | 50m, 128Mi, 256Mi ephemeral / 500m, 512Mi, 2Gi; label `olympus.io/ci-gate`, soft spread (maxSkew 2, ScheduleAnyway); deadline 150 min |
 | `olympus-arm64` | arm64 jobs on the Mac-mini VMs (nothing routes there yet; `arm64-runner-smoke.yml` is the first user) | max 2, one per VM | 2 CPU, 4 GiB, 4 GiB ephemeral / 4 CPU, 7 GiB, 15 GiB; label `olympus.io/ci-runner-arm64`, deadline 3 h |
 | `olympus-knowledge` | the code-knowledge pack job (olympus-sdk `knowledge-pack.yml`) | max 1 (fleet-wide serialization of LLM use) | as `olympus-linux`; label `olympus.io/ci-knowledge`, no spread; deadline 2 h |
