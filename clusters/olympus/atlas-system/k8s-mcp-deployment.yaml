@@ -123,8 +123,8 @@ spec:
               cpu: 500m
               memory: 256Mi
         - name: proxy
-          # Tag sha-0902593 (olympus-sdk main), multi-arch index (linux/amd64 + arm64).
-          image: ghcr.io/nwlnexus/k8s-mcp-proxy@sha256:e2cc59a90f95ae3857e123670f5d6cb47bb392ecd8fadf01d8577bc05d507baf
+          # Tag sha-0a6c127 (olympus-sdk main), multi-arch index (linux/amd64 + arm64).
+          image: ghcr.io/nwlnexus/k8s-mcp-proxy@sha256:34454474642edb2394f628a26bcbae94e26891c193bf1b04a2beaac16616012d
           ports:
             - name: http
               containerPort: 8080
