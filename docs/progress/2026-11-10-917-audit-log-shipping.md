@@ -47,6 +47,9 @@ Blast radius: no index (manifests only).
 | 2026-11-11 | `git diff origin/main -- clusters/olympus/otel-collector/helmrelease-logs.yaml \| wc -c` | 0 | `0` | 47ab073 |
 | 2026-11-11 | canary after re-stage and restart: read-only log summary | 0 | policy has 17 rules; 0 VIP lease lines since the restart; a request made as the agent identity is recorded | |
 | 2026-11-11 | rolling restart of onode-030c31, onode-0312ce, onode-062caa, onode-0636e4: `scripts/k3s-health-gate.sh` before and after each | 0 | `RESULT: PASS (22 checks)` at every step; after the last: etcd leader onode-0314ac, VIP lease onode-030c31 | |
+| 2026-11-11 | five servers, 3-minute steady-state sample (read-only) | 0 | 53, 18, 37, 4 and 2 lines per minute; all `Metadata`; about 250 MB per day cluster-wide | |
+| 2026-11-11 | claim-verifier on this PR at 58fdf8d | - | `VERDICT: PASS`; notes: rules missed impersonated identities and fired on access reviews | 58fdf8d |
+| 2026-11-11 | subagent at e3f45bc: `lokitool rules check` and `lint`; seeded local Loki matrix; yamllint; kustomize build + kubeconform | 0 | impersonation matched, access and token reviews excluded from the write rule, look-alike group not matched; `validate` green | e3f45bc |
 
 ## Decisions
 
@@ -56,6 +59,7 @@ Blast radius: no index (manifests only).
 - 2026-11-11: `disableWait` on the new HelmRelease, and merge this PR only after the audit directory is staged on all five servers. Why: with `type: Directory`, pods stay in ContainerCreating on a server without the directory, which would fail a Helm wait and trip the health gate's pod check during the rollout.
 - 2026-11-11: `K8sAuditLogSilent` left out; follow-up after rollout.
 - 2026-11-11: Two commit trailers were rewritten (force-with-lease) to the standard co-author line.
+- 2026-11-11: Audit volume (about 250 MB per day) is dominated by machine writes (a storage provisioner's endpoints election, the CI runner controller, metrics-server access reviews). Tune in a later policy change taken with the next planned server restart; not blocking.
 
 ## Blocked-on
 
