@@ -7,9 +7,14 @@
 #            rule names the container port. Kubelet probes come from the node and are not subject to
 #            NetworkPolicy on k3s.
 #   egress   DNS via CoreDNS; the Kubernetes API server (the server container, in-cluster config at
-#            https://kubernetes.default.svc); TCP 443 to the PUBLIC internet only (the proxy fetches the
-#            Access signing keys from https://<team>.cloudflareaccess.com/cdn-cgi/access/certs), never
-#            the cluster, the LAN, the tailnet or link-local. Nothing else.
+#            https://kubernetes.default.svc); TCP 443 to Cloudflare's published IPv4 ranges only (the
+#            proxy fetches the Access signing keys from https://<team>.cloudflareaccess.com/cdn-cgi/access/certs),
+#            the same list as the memory gateway (../memory/gateway/networkpolicy.yaml, olympus-sdk#932).
+#            NetworkPolicy cannot match a host name (k3s' kube-router has no FQDN policy), so the rule is the
+#            ranges the team domain is served from: list from https://api.cloudflare.com/client/v4/ips
+#            (etag 38f79d050aa027e3be3865e495dcc9bc, unchanged since 2026-11-04). If a range is ever added
+#            and the JWKS moves into it, calls answer 503 (fail closed) until both lists are updated.
+#            The cluster is IPv4-only, so there is no IPv6 rule. Nothing else.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -83,17 +88,23 @@ spec:
       ports:
         - protocol: TCP
           port: 443
-    # Access JWKS over HTTPS: public internet, minus every private/internal range.
+    # Access JWKS over HTTPS: Cloudflare's published IPv4 ranges (see the header).
     - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8
-              - 172.16.0.0/12
-              - 192.168.0.0/16
-              - 100.64.0.0/10
-              - 169.254.0.0/16
-              - 127.0.0.0/8
+        - ipBlock: {cidr: 173.245.48.0/20}
+        - ipBlock: {cidr: 103.21.244.0/22}
+        - ipBlock: {cidr: 103.22.200.0/22}
+        - ipBlock: {cidr: 103.31.4.0/22}
+        - ipBlock: {cidr: 141.101.64.0/18}
+        - ipBlock: {cidr: 108.162.192.0/18}
+        - ipBlock: {cidr: 190.93.240.0/20}
+        - ipBlock: {cidr: 188.114.96.0/20}
+        - ipBlock: {cidr: 197.234.240.0/22}
+        - ipBlock: {cidr: 198.41.128.0/17}
+        - ipBlock: {cidr: 162.158.0.0/15}
+        - ipBlock: {cidr: 104.16.0.0/13}
+        - ipBlock: {cidr: 104.24.0.0/14}
+        - ipBlock: {cidr: 172.64.0.0/13}
+        - ipBlock: {cidr: 131.0.72.0/22}
       ports:
         - protocol: TCP
           port: 443
