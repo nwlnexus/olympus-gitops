@@ -10,8 +10,11 @@
 # is set when the request was impersonated. The line filter (|~) only narrows the lines before parsing; the label filter
 # after `| json` decides. Both identities are read-only, so a write attempt or a Secret request is a signal.
 #
-# Not here yet: an "audit log silent" rule (no lines for 15m). It would fire until audit logging is live on
-# every server, so it is added after rollout.
+# Summaries name the requester and, for an impersonated request, the identity it acted as ("<user> as
+# <impersonated_user>"): RBAC evaluated the impersonated identity, so that is the agent to look at.
+#
+# K8sAuditLogSilent (olympus-sdk#932) fires when the stream has no line at all for 15m: shipping or API-server
+# audit logging broke. Added after audit logging was live on every server, so it could not fire during rollout.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -33,7 +36,7 @@ data:
             labels:
               severity: warning
             annotations:
-              summary: "{{ $labels.user }} got {{ $value }} forbidden (403) API responses in 10m."
+              summary: "{{ $labels.user }}{{ if $labels.impersonated_user }} as {{ $labels.impersonated_user }}{{ end }} got {{ $value }} forbidden (403) API responses in 10m."
               description: "An agent identity received more than 5 403 responses from the Kubernetes API in 10m. Loki: {service_name=\"k8s-audit\"} | json | user_username=\"{{ $labels.user }}\" | responseStatus_code=\"403\" shows verb, objectRef and requestURI."
           # Any Secret request (any response code) by an agent identity.
           - alert: K8sAuditAgentSecretAccess
@@ -43,17 +46,30 @@ data:
             labels:
               severity: critical
             annotations:
-              summary: "{{ $labels.user }} made {{ $value }} requests for Secrets in 5m."
+              summary: "{{ $labels.user }}{{ if $labels.impersonated_user }} as {{ $labels.impersonated_user }}{{ end }} made {{ $value }} requests for Secrets in 5m."
               description: "An agent identity requested Secrets from the Kubernetes API (allowed or not). Loki: {service_name=\"k8s-audit\"} | json | user_username=\"{{ $labels.user }}\" | objectRef_resource=\"secrets\" shows verb, namespace, name and response code."
           # Any write verb by an agent identity (allowed or not). Access and token reviews
           # (authorization.k8s.io, authentication.k8s.io) are creates that only ask a question, as
-          # `kubectl auth can-i` does, so they are left out.
+          # `kubectl auth can-i` does, so they are left out. The alternation is parenthesised: Loki did not
+          # anchor the bare form `a\.k8s\.io|b\.k8s\.io` (tested: it also excluded x.authentication.k8s.io and
+          # authentication.k8s.io.evil); the grouped form excludes exactly the two names (olympus-sdk#932).
           - alert: K8sAuditAgentWrite
             expr: |
-              sum by (user, impersonated_user, verb) (count_over_time({service_name="k8s-audit"} |~ `system:serviceaccount:atlas-system:k8s-mcp|olympus:agents-view` | json user="user.username", groups="user.groups", impersonated_user="impersonatedUser.username", impersonated_groups="impersonatedUser.groups", verb="verb", api_group="objectRef.apiGroup" | user="system:serviceaccount:atlas-system:k8s-mcp" or groups=~`.*"olympus:agents-view".*` or impersonated_user="system:serviceaccount:atlas-system:k8s-mcp" or impersonated_groups=~`.*"olympus:agents-view".*` | verb=~"create|update|patch|delete|deletecollection" | api_group!~`authorization\.k8s\.io|authentication\.k8s\.io` [5m])) > 0
+              sum by (user, impersonated_user, verb) (count_over_time({service_name="k8s-audit"} |~ `system:serviceaccount:atlas-system:k8s-mcp|olympus:agents-view` | json user="user.username", groups="user.groups", impersonated_user="impersonatedUser.username", impersonated_groups="impersonatedUser.groups", verb="verb", api_group="objectRef.apiGroup" | user="system:serviceaccount:atlas-system:k8s-mcp" or groups=~`.*"olympus:agents-view".*` or impersonated_user="system:serviceaccount:atlas-system:k8s-mcp" or impersonated_groups=~`.*"olympus:agents-view".*` | verb=~"create|update|patch|delete|deletecollection" | api_group!~`(authorization|authentication)\.k8s\.io` [5m])) > 0
             for: 0m
             labels:
               severity: critical
             annotations:
-              summary: "{{ $labels.user }} attempted {{ $value }} {{ $labels.verb }} requests in 5m."
+              summary: "{{ $labels.user }}{{ if $labels.impersonated_user }} as {{ $labels.impersonated_user }}{{ end }} attempted {{ $value }} {{ $labels.verb }} requests in 5m."
               description: "A read-only agent identity sent a write request to the Kubernetes API. Loki: {service_name=\"k8s-audit\"} | json | user_username=\"{{ $labels.user }}\" | verb=\"{{ $labels.verb }}\" shows the object and response code."
+          # No audit line at all for 15m: a server stopped writing the log, or the otel-audit collector stopped
+          # shipping it. absent_over_time returns 1 only when the selector matched nothing in the window.
+          - alert: K8sAuditLogSilent
+            expr: |
+              absent_over_time({service_name="k8s-audit"}[15m])
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "No Kubernetes API audit lines in Loki for 15m."
+              description: "The stream {service_name=\"k8s-audit\"} has been empty for 15m: check the otel-audit collector pods (namespace otel) and that the audit log grows on each k3s server (roles/k3s/README.md in olympus-infra). Agent-identity alerts cannot fire while it is silent."
