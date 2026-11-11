@@ -112,6 +112,13 @@ External Secrets resources). Not granted: `secrets`, `pods/exec`, `pods/attach`,
 `nodes/proxy`, `serviceaccounts/token`, or any write. The server's read-only mode and the proxy's allowlist
 are extra layers on top. The API server, and its audit log, see `system:serviceaccount:atlas-system:k8s-mcp`.
 
+The same ClusterRole is bound to group **`olympus:agents-view`** (ClusterRoleBinding
+`olympus-agents-view-group`): agent hosts on the tailnet use `kubectl` through the Tailscale operator's API-server
+proxy, which impersonates that group for them (tailnet policy grant to the agent hosts' tag; olympus-sdk#935). The
+host holds no Kubernetes credential. Set it up on a host with
+`tailscale configure kubeconfig <operator hostname>` (writes to `$KUBECONFIG`, else `~/.kube/config`), then check
+with `kubectl auth whoami` (group `olympus:agents-view`).
+
 The token is mounted only into the server container (the pod sets `automountServiceAccountToken: false`
 and declares the projected token volume itself); the proxy never sees it.
 
