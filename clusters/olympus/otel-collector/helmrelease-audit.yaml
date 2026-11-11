@@ -1,0 +1,193 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: otel-audit
+  namespace: otel
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: opentelemetry-collector
+      version: "0.158.0"
+      sourceRef:
+        kind: HelmRepository
+        name: open-telemetry
+        namespace: otel
+  # No Helm wait: pods on a server whose audit directory is not staged yet stay in ContainerCreating (see
+  # the hostPath below), and a wait would fail the release and roll it back. Pod health is the collector's
+  # own (kubectl -n otel get ds otel-audit-agent).
+  install:
+    disableWait: true
+    remediation:
+      retries: 3
+  upgrade:
+    disableWait: true
+    remediation:
+      retries: 3
+  # Kubernetes API audit log shipping (olympus-sdk#917). A collector of its own, separate from otel-logs, so
+  # the pod-log DaemonSet keeps its non-root user and its config: this one reads a single host file on the
+  # k3s servers and sends it to Loki under service.name=k8s-audit. No presets, no k8sattributes, no RBAC,
+  # no ServiceAccount token, no ports.
+  values:
+    mode: daemonset
+    fullnameOverride: otel-audit
+    # kube-apiserver runs on the k3s servers only; k3s labels them node-role.kubernetes.io/control-plane=true
+    # (the selector system-upgrade/server-plan.yaml uses).
+    nodeSelector:
+      node-role.kubernetes.io/control-plane: "true"
+    # The same tolerations as otel-logs: the agent-services role taint on two of the servers, and the arm64
+    # taint in case a server is an arm64 node (the image is multi-arch).
+    tolerations:
+      - key: olympus.io/role
+        operator: Equal
+        value: agent-services
+        effect: NoSchedule
+      - key: olympus.io/arch
+        operator: Equal
+        value: arm64
+        effect: NoSchedule
+    image:
+      repository: otel/opentelemetry-collector-contrib
+    serviceAccount:
+      create: true
+      automountServiceAccountToken: false
+    clusterRole:
+      create: false
+    # Root is required: the API server writes its audit log in /var/lib/rancher/k3s/server/logs, a directory
+    # owned by root with mode 0700, and the image's default user (10001) cannot enter it. Root as the owner
+    # needs no capability, so all are dropped; nothing else in this pod is privileged.
+    podSecurityContext:
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+      runAsNonRoot: false
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: [ALL]
+      seccompProfile:
+        type: RuntimeDefault
+    # Audit volume is small: the audit policy drops machine reads and records machine writes at Metadata, so
+    # expect a few lines per second per server at most. The chart sets GOMEMLIMIT to 80% of the limit; the
+    # memory_limiter below works on the same limit.
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    extraVolumes:
+      # type Directory: the kubelet never creates the path. On a server where audit logging is not staged yet
+      # the pod stays in ContainerCreating (FailedMount) and starts by itself once the directory exists.
+      - name: k3s-server-logs
+        hostPath:
+          path: /var/lib/rancher/k3s/server/logs
+          type: Directory
+      # Read offsets for the filelog receiver (file_storage), so a restart neither skips nor re-sends lines.
+      - name: checkpoints
+        hostPath:
+          path: /var/lib/otel-audit
+          type: DirectoryOrCreate
+    extraVolumeMounts:
+      - name: k3s-server-logs
+        mountPath: /var/lib/rancher/k3s/server/logs
+        readOnly: true
+      - name: checkpoints
+        mountPath: /var/lib/otel-audit
+    ports:
+      otlp: { enabled: false }
+      otlp-http: { enabled: false }
+      jaeger-compact: { enabled: false }
+      jaeger-thrift: { enabled: false }
+      jaeger-grpc: { enabled: false }
+      zipkin: { enabled: false }
+      metrics: { enabled: false }
+    config:
+      extensions:
+        file_storage:
+          directory: /var/lib/otel-audit
+      receivers:
+        jaeger: null
+        prometheus: null
+        zipkin: null
+        otlp: null
+        # One audit.k8s.io/v1 Event per line. Only the live file: the API server renames it to
+        # audit-<timestamp>.log on rotation, and the receiver's fingerprint tracking finishes the old file, so
+        # reading the backups too would re-ingest them.
+        filelog/k8s_audit:
+          include: [/var/lib/rancher/k3s/server/logs/audit.log]
+          start_at: end
+          storage: file_storage
+          include_file_name: false
+          include_file_path: false
+          retry_on_failure:
+            enabled: true
+          operators:
+            # Parse into a scratch attribute; the body stays the original JSON line for `| json` queries.
+            - type: json_parser
+              parse_from: body
+              parse_to: attributes.audit
+              on_error: send_quiet
+            # Event time from stageTimestamp; when absent or unparsable the timestamp stays unset and Loki uses
+            # the observed time.
+            - type: time_parser
+              parse_from: attributes.audit.stageTimestamp
+              layout_type: gotime
+              layout: "2006-01-02T15:04:05.999999999Z07:00"
+              on_error: send_quiet
+            # Only low-cardinality fields become attributes (Loki structured metadata). Username, groups,
+            # auditID and requestURI stay in the body.
+            - type: copy
+              from: attributes.audit.verb
+              to: attributes["k8s.audit.verb"]
+              on_error: send_quiet
+            - type: copy
+              from: attributes.audit.level
+              to: attributes["k8s.audit.level"]
+              on_error: send_quiet
+            - type: copy
+              from: attributes.audit.responseStatus.code
+              to: attributes["k8s.audit.response_code"]
+              on_error: send_quiet
+            - type: remove
+              field: attributes.audit
+              on_error: send_quiet
+      processors:
+        memory_limiter:
+          check_interval: 1s
+          limit_percentage: 80
+          spike_limit_percentage: 25
+        batch:
+          timeout: 5s
+          send_batch_size: 1024
+        resource:
+          attributes:
+            - key: service.name
+              value: k8s-audit
+              action: upsert
+            - key: k8s.cluster.name
+              value: olympus
+              action: upsert
+            - key: k8s.node.name
+              value: ${env:OTEL_K8S_NODE_NAME}
+              action: upsert
+      exporters:
+        # Same endpoint and DNS as otel-logs (default pod DNS; CoreDNS forwards the tailnet domain,
+        # tailscale-dns/), which already runs on these servers.
+        otlphttp/loki:
+          logs_endpoint: http://obs-loki.raptor-mimosa.ts.net:3100/otlp/v1/logs
+      service:
+        extensions: [health_check, file_storage]
+        telemetry:
+          metrics:
+            level: none
+        pipelines:
+          traces: null
+          metrics: null
+          logs:
+            receivers: [filelog/k8s_audit]
+            processors: [memory_limiter, resource, batch]
+            exporters: [otlphttp/loki]
