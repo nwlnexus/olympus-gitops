@@ -6,6 +6,7 @@ resources:
   - helmrelease.yaml
   - otlp-tailscale-service.yaml
   - helmrelease-logs.yaml
+  - helmrelease-audit.yaml
   - prometheus-community-helmrepository.yaml
   - node-exporter-helmrelease.yaml
   - kube-state-metrics-helmrelease.yaml
