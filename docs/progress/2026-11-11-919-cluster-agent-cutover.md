@@ -42,6 +42,7 @@ Blast radius: no index (manifests only).
 | 2026-11-11 | olympus-sdk release check after the merge | 0 | no new release tag (the PR touched no release-watched path) | |
 | 2026-11-11 | subagent: yamllint; `kustomize build` of every directory piped to kubeconform; root build diff vs origin/main | 0 | `failed=0`; root diff is only `+ Kustomization/flux-system/atlas-system`, `- Kustomization/flux-system/ingress-discovery`; `validate` green | baeb5ed |
 | 2026-11-11 | `gh api /orgs/nwlnexus/packages/container/<name>` for the new, old and gateway images | 0 | all three `visibility=private`, linked to the same source repository | |
+| 2026-11-11 | claim-verifier at 4f3ebc9 | - | `VERDICT: PASS` (render diff, RBAC against the code, Pod Security fields, secrets, NetworkPolicy, removal safety, CI); runtime items listed as unknown until reconcile | 4f3ebc9 |
 
 ## Decisions
 
