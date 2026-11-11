@@ -34,7 +34,7 @@ The 1Password items the ExternalSecrets read must exist (otherwise the ExternalS
 `ContainerCreating`; nothing else is hurt):
 
 - `memory-stores` fields `gateway-db-password` (the migrate Job also sets the role's password from it);
-- `gh-pull-secret` fields `username` and `credential` (also used by ingress-discovery), unless the
+- `gh-pull-secret` fields `username` and `credential` (also used by atlas-system), unless the
   GHCR package is made public, in which case drop `ghcr-pull-externalsecret.yaml` and the `imagePullSecrets` entry.
 
 To disable: remove the line from `../../kustomization.yaml` (`prune: true` then deletes the objects).

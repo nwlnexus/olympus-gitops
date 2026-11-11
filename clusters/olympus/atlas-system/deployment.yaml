@@ -1,0 +1,110 @@
+# atlas cluster agent (olympus-sdk#919; was ingress-discovery, #117). Two publishers behind one
+# leader election: the App Launcher (Traefik IngressRoutes) and cluster state (nodes, workloads,
+# Flux Kustomizations and HelmReleases), both POSTed to Hermes. Code and image: olympus-sdk
+# packages/cluster-agent.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas-cluster-agent
+  namespace: atlas-system
+  annotations:
+    # Roll the pod when the publish-token Secret changes (stakater reloader, ../reloader, which
+    # watches every namespace), so a token replaced in 1Password takes effect without a manual restart.
+    reloader.stakater.com/auto: "true"
+spec:
+  # Single replica. Safe to bump to 2 for HA: the agent is leader-elected (coordination.k8s.io
+  # Lease `atlas-cluster-agent-leader`, the default LEASE_NAME), so only the leader publishes;
+  # followers stay warm and report healthy.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: atlas-cluster-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: atlas-cluster-agent
+    spec:
+      serviceAccountName: atlas-cluster-agent
+      # arm64 opt-in (olympus-sdk#707): the image is a multi-arch index with linux/arm64, so it may
+      # also run on the Mac VMs (tainted olympus.io/arch=arm64:NoSchedule). No arch preference:
+      # requests + LeastAllocated scoring and the descheduler place it.
+      tolerations:
+        - key: olympus.io/arch
+          operator: Equal
+          value: arm64
+          effect: NoSchedule
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: atlas-cluster-agent
+          # Pinned by digest: the multi-arch INDEX digest (linux/amd64 + linux/arm64) of tag 79fd279
+          # (the short olympus-sdk commit sha the workflow pushes). A tag pin would follow a re-push;
+          # the digest cannot. The kubelet picks the entry for the node's arch.
+          image: ghcr.io/nwlnexus/atlas-cluster-agent@sha256:4d92524aa569f1d19a1dca7cc44bf558bc6a2aadb7c4bc97942ea099d13f4b79
+          ports:
+            - name: health
+              containerPort: 8080
+          env:
+            # Hermes is a Cloudflare Worker (NOT in-cluster). HERMES_URL is the full GraphQL
+            # endpoint; both publishers POST their mutation directly to it (no path is appended).
+            - name: HERMES_URL
+              value: "https://api.nwlnexus.net/graphql"
+            # Bearer token for both publishers. From the ExternalSecret-managed Secret; never logged.
+            - name: HERMES_PUBLISH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: atlas-cluster-agent-credentials
+                  key: hermes-publish-token
+            # Leader-election lease lives in THIS namespace (downward API).
+            - name: LEASE_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # Stable per-pod leader identity (downward API → pod name).
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HEALTH_PORT
+              value: "8080"
+            # Read by the tracing subscriber (NOT Config::from_env).
+            - name: RUST_LOG
+              value: "info"
+          # GET /healthz → 200 whenever the process is alive (followers included: health is NOT
+          # gated on leadership).
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            # The launcher-only predecessor measured p95 1m / 9Mi (docs/sizing/2026-11-01-requests.md,
+            # requests 10m / 32Mi). This agent also holds reflector stores for every node, Deployment,
+            # StatefulSet, DaemonSet, Flux Kustomization and HelmRelease, and hashes a snapshot of them
+            # on each change, so requests and limits are raised until a week of usage is measured.
+            requests:
+              cpu: 20m
+              memory: 48Mi
+            limits:
+              cpu: 300m
+              memory: 192Mi

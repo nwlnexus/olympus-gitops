@@ -1,0 +1,27 @@
+# atlas-system namespace and the atlas cluster agent (olympus-sdk#919). Owns the namespace, so
+# later atlas components can depend on this Kustomization. Nothing depends on it today, so a failed
+# health check (e.g. image pull) marks only this Kustomization not Ready.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: atlas-system
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/atlas-system
+  prune: true
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    # ExternalSecrets (publish token + ghcr-pull) resolve via the
+    # onepassword-connect ClusterSecretStore created by external-secrets-config.
+    - name: external-secrets-config
+    # The launcher watches traefik.io IngressRoutes, so the Traefik CRDs come first.
+    - name: traefik-config
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: atlas-cluster-agent
+      namespace: atlas-system
