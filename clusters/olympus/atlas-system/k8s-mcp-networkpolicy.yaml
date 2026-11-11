@@ -1,0 +1,99 @@
+# Network rules for the k8s-mcp pods (olympus-sdk#916). The namespace is default-deny
+# (networkpolicy.yaml); NetworkPolicies are additive, so these only open what is listed.
+#
+#   ingress  the proxy port (8080) from the cloudflared pods only (ns cloudflared,
+#            ../cloudflared/deployment.yaml), the same selector as the memory gateway's public path.
+#            kube-proxy DNATs Service port 80 to the pod's 8080 before the policy is evaluated, so the
+#            rule names the container port. Kubelet probes come from the node and are not subject to
+#            NetworkPolicy on k3s.
+#   egress   DNS via CoreDNS; the Kubernetes API server (the server container, in-cluster config at
+#            https://kubernetes.default.svc); TCP 443 to the PUBLIC internet only (the proxy fetches the
+#            Access signing keys from https://<team>.cloudflareaccess.com/cdn-cgi/access/certs), never
+#            the cluster, the LAN, the tailnet or link-local. Nothing else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-k8s-mcp-ingress
+  namespace: atlas-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: k8s-mcp
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cloudflared
+          podSelector:
+            matchLabels:
+              app: cloudflared
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-k8s-mcp-egress
+  namespace: atlas-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: k8s-mcp
+  policyTypes:
+    - Egress
+  egress:
+    # DNS via CoreDNS only (the kube-dns Service DNATs to these pods).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Kubernetes API server: the same block as the cluster agent (networkpolicy.yaml). kube-proxy
+    # DNATs 10.43.0.1:443 to the API servers' :6443 before the policy is evaluated, so the node
+    # endpoints are what matters; the VIP and the Service IP are listed too.
+    - to:
+        - ipBlock:
+            cidr: 192.168.253.7/32   # onode-030c31
+        - ipBlock:
+            cidr: 192.168.253.8/32   # onode-0312ce
+        - ipBlock:
+            cidr: 192.168.253.9/32   # onode-0314ac
+        - ipBlock:
+            cidr: 192.168.253.11/32  # onode-0636e4
+        - ipBlock:
+            cidr: 192.168.253.12/32  # onode-062caa
+        - ipBlock:
+            cidr: 192.168.253.2/32   # kube-vip control-plane VIP
+      ports:
+        - protocol: TCP
+          port: 6443
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.1/32       # kubernetes.default Service
+      ports:
+        - protocol: TCP
+          port: 443
+    # Access JWKS over HTTPS: public internet, minus every private/internal range.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 443

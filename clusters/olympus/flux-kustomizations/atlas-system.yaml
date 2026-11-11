@@ -25,3 +25,11 @@ spec:
       kind: Deployment
       name: atlas-cluster-agent
       namespace: atlas-system
+    # The read-only Kubernetes MCP backend (olympus-sdk#916). Health checks run after every object is
+    # applied, so an unready k8s-mcp marks this Kustomization not Ready but never holds back the cluster
+    # agent's objects. The proxy accepts the ACCESS_AUD placeholder at start (it answers 401 to every MCP
+    # request until the real value is set), so the placeholder alone does not make the pods unready.
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: k8s-mcp
+      namespace: atlas-system

@@ -7,3 +7,9 @@ resources:
   - externalsecret.yaml
   - ghcr-pull-externalsecret.yaml
   - deployment.yaml
+  # Read-only Kubernetes MCP backend (olympus-sdk#916).
+  - k8s-mcp-rbac.yaml
+  - k8s-mcp-configmap.yaml
+  - k8s-mcp-deployment.yaml
+  - k8s-mcp-service.yaml
+  - k8s-mcp-networkpolicy.yaml

@@ -1,0 +1,21 @@
+# ClusterIP Service for the read-only Kubernetes MCP backend (olympus-sdk#916): the cloudflared tunnel's
+# target, http://k8s-mcp.atlas-system.svc.cluster.local:80, behind its own Cloudflare Access application.
+# Only the proxy's port is exposed; the server's loopback port is not. No IngressRoute, no external-dns
+# annotation and no tailnet Service: the tunnel is the only way in (k8s-mcp-networkpolicy.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-mcp
+  namespace: atlas-system
+  labels:
+    app.kubernetes.io/name: k8s-mcp
+    app.kubernetes.io/part-of: atlas
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: k8s-mcp
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

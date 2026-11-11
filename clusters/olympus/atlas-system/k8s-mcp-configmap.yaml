@@ -1,0 +1,122 @@
+# Configuration of the read-only Kubernetes MCP backend (olympus-sdk#916). Non-secret: the proxy holds
+# no credential (the Access signing keys come from the public JWKS) and the server uses the pod's
+# ServiceAccount. Reloader (`reloader.stakater.com/auto` on the Deployment) rolls the pods when either
+# ConfigMap changes.
+#
+# k8s-mcp-server: containers/kubernetes-mcp-server v0.0.69 config, copied from olympus-sdk
+# packages/k8s-mcp-proxy/deploy/kubernetes-mcp-server.toml (keys unchanged). Mounted at
+# /etc/kubernetes-mcp-server/config.toml (the image's MCP_CONFIG_PATH, also passed as --config).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-mcp-server
+  namespace: atlas-system
+  labels:
+    app.kubernetes.io/name: k8s-mcp
+    app.kubernetes.io/part-of: atlas
+data:
+  config.toml: |
+    # Reference configuration for containers/kubernetes-mcp-server v0.0.69, the upstream behind k8s-mcp-proxy (#916).
+    #
+    # Image: quay.io/containers/kubernetes_mcp_server@sha256:1da9d62ad0c008a6cadcf2718c86c2e2d18753ca1d9f1f3313068980794b24f2
+    #        (v0.0.69 multi-arch index: linux/amd64, arm64, ppc64le, s390x; unsigned: no cosign signature or attestation)
+    # Run:   kubernetes-mcp-server --config /etc/kubernetes-mcp-server/config.toml
+    #
+    # The olympus-gitops manifests copy this file into a ConfigMap. Key names were checked against pkg/config/config.go
+    # at tag v0.0.69, and this file (with `kubeconfig` pointing at a dummy file instead of the in-cluster line) was run
+    # locally: it starts without an API server and lists exactly the 10 tools in packages/k8s-mcp-proxy/README.md.
+    #
+    # Upstream documents read_only and denied_resources as best-effort. The ClusterRole `olympus-agents-view` is the
+    # boundary; this file and the proxy's ALLOWED_TOOLS are the second and third layers.
+
+    # ── Listener ─────────────────────────────────────────────────────────────────
+    # Streamable HTTP at /mcp (pkg/http/http.go:50,158). Loopback only: the proxy in the same pod is the only client,
+    # and the Service exposes the proxy's port, never this one. /healthz, /stats and /metrics share this port, so they
+    # are loopback-only as well (no metrics_port is set).
+    port = "8081"
+    bind_address = "127.0.0.1"
+    # Keep the go-sdk DNS-rebinding guard on. The proxy sends `Host: 127.0.0.1:8081`, so it never needs disabling.
+    disable_localhost_protection = false
+    # No Mcp-Session-Id, no list_changed notifications; every POST stands alone.
+    stateless = true
+
+    # ── Cluster access ───────────────────────────────────────────────────────────
+    # The pod's ServiceAccount (system:serviceaccount:atlas-system:k8s-mcp), bound to olympus-agents-view.
+    cluster_provider_strategy = "in-cluster"
+    # Never forward a caller's Authorization (or kubernetes-authorization) header to the API server: the request
+    # always uses the ServiceAccount (pkg/kubernetes/token_exchange.go:34-36 clears it; pkg/kubernetes/manager.go:184-196
+    # then falls back to the in-cluster credentials). The proxy strips both headers before they get here anyway.
+    cluster_auth_mode = "kubeconfig"
+    # Access does OAuth at the edge and the proxy verifies its token; this server does no OAuth.
+    require_oauth = false
+
+    # ── Tools ────────────────────────────────────────────────────────────────────
+    # core only: the config toolset (configuration_view) and helm (reads release Secrets) stay off.
+    toolsets = ["core"]
+    # Unregisters every tool without readOnlyHint=true (pods_exec, pods_run, pods_delete, resources_create_or_update,
+    # resources_delete, resources_scale at v0.0.69).
+    read_only = true
+    # Second layer: named explicitly so a future upstream re-annotation cannot bring them back, plus the read tools we
+    # do not want: nodes_log and nodes_stats_summary go through the kubelet via nodes/proxy (pkg/kubernetes/nodes.go:28,59),
+    # projects_list is OpenShift-only.
+    disabled_tools = [
+      "nodes_log",
+      "nodes_stats_summary",
+      "projects_list",
+      "pods_exec",
+      "pods_run",
+      "pods_delete",
+      "resources_create_or_update",
+      "resources_delete",
+      "resources_scale",
+    ]
+
+    # ── Bounds ───────────────────────────────────────────────────────────────────
+    # Concurrent tools/call handlers in this process (JSON-RPC -32030 above it).
+    max_in_flight = 8
+    # Bytes read from one API response (upstream default 4 MiB) and bytes in one tool result (default 16 MiB).
+    max_backend_response_bytes = 1048576
+    max_result_bytes = 1048576
+    list_output = "table"
+    log_level = 2
+
+    [http]
+    read_header_timeout = "10s"
+    # The proxy already refuses bodies over 1 MiB (MAX_BODY_BYTES).
+    max_body_bytes = 1048576
+    # rate_limit_rps is per MCP session and skipped when there is no session id (pkg/mcp/middleware.go:434-440), which is
+    # always the case in stateless mode. The proxy's per-identity limit is the one that applies.
+
+    # ── Denied resources (tables last: in TOML every key after a [table] header belongs to that table) ──
+    # Refused in the client's round tripper before any request is sent (pkg/kubernetes/accesscontrol_round_tripper.go:181-184,
+    # isAllowed at :276); covers resources_get and resources_list for core/v1 Secret.
+    [[denied_resources]]
+    group = ""
+    version = "v1"
+    kind = "Secret"
+---
+# k8s-mcp-proxy environment (olympus-sdk packages/k8s-mcp-proxy/README.md, "Environment"). Unset values
+# keep the README defaults: RATE_LIMIT_PER_MIN 60 (per identity, per replica: the limit is in memory,
+# so with 2 replicas a caller can reach up to 2x across both), REQUEST_TIMEOUT_MS 55000,
+# MAX_BODY_BYTES 1048576, MAX_LOG_TAIL 500, DEFAULT_LOG_TAIL 100, LOG_LEVEL info.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-mcp-proxy
+  namespace: atlas-system
+  labels:
+    app.kubernetes.io/name: k8s-mcp
+    app.kubernetes.io/part-of: atlas
+data:
+  PORT: "8080"
+  # The server in the same pod; the proxy refuses any non-loopback upstream.
+  UPSTREAM_URL: "http://127.0.0.1:8081"
+  # Deny by default: only these tools may be called or listed (all read-only at v0.0.69).
+  ALLOWED_TOOLS: "pods_list,pods_list_in_namespace,pods_get,pods_log,pods_top,resources_list,resources_get,events_list,namespaces_list,nodes_top"
+  # Same team domain as the memory gateway (../memory/gateway/gateway.yaml): JWKS origin and exact `iss`.
+  ACCESS_TEAM_DOMAIN: "https://nwlnexus.cloudflareaccess.com"
+  # AUD tag of this backend's own Access application, printed by the olympus-infra Access playbook
+  # (not a secret, as with the memory gateway). Until the placeholder is replaced the proxy starts and
+  # /healthz answers, but no Access token carries this audience, so every MCP request gets 401: the
+  # backend fails closed.
+  ACCESS_AUD: "REPLACE_WITH_ACCESS_AUD"

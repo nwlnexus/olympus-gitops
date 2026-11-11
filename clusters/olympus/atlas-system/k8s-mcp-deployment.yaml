@@ -1,0 +1,208 @@
+# Read-only Kubernetes MCP backend (olympus-sdk#916). One pod, two containers:
+#
+#   server  containers/kubernetes-mcp-server v0.0.69: read-only MCP tools over the Kubernetes API, as
+#           ServiceAccount k8s-mcp (ClusterRole olympus-agents-view). Listens on 127.0.0.1:8081 only.
+#   proxy   k8s-mcp-proxy (olympus-sdk packages/k8s-mcp-proxy): verifies the Cloudflare Access token,
+#           rate-limits per caller, allows only ALLOWED_TOOLS, bounds log tails and request time, and
+#           logs one line per call with the caller's identity. Port 8080, the only port on the Service.
+#
+# Both are stateless (stateless Streamable HTTP, no session; the proxy's rate limit is in memory, so
+# it applies per replica), hence 2 replicas behind a PodDisruptionBudget.
+#
+# Kubernetes API token: mounted into the server container ONLY. The pod sets
+# automountServiceAccountToken: false and declares the same projected volume the kubelet would
+# auto-inject (token, ca.crt from ConfigMap kube-root-ca.crt, namespace), mounted into the server at
+# the standard path /var/run/secrets/kubernetes.io/serviceaccount, where client-go's in-cluster config
+# reads it. KUBERNETES_SERVICE_HOST/PORT are injected by the kubelet regardless of the token setting.
+# The proxy container, which faces callers, never sees the token.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-mcp
+  namespace: atlas-system
+  labels:
+    app.kubernetes.io/name: k8s-mcp
+    app.kubernetes.io/part-of: atlas
+  annotations:
+    # stakater reloader (../reloader): roll the pods when either ConfigMap changes.
+    reloader.stakater.com/auto: "true"
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: k8s-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: k8s-mcp
+        app.kubernetes.io/part-of: atlas
+    spec:
+      serviceAccountName: k8s-mcp
+      automountServiceAccountToken: false
+      # Both images are multi-arch indexes with linux/arm64, so the pods may also run on the Mac VMs
+      # (same opt-in as the cluster agent, olympus-sdk#707).
+      tolerations:
+        - key: olympus.io/arch
+          operator: Equal
+          value: arm64
+          effect: NoSchedule
+      # Spread the two replicas by node, soft (ScheduleAnyway): never leaves a replica Pending.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: k8s-mcp
+      imagePullSecrets:
+        # ghcr.io/nwlnexus/k8s-mcp-proxy is private; the quay.io image is public.
+        - name: ghcr-pull
+      # Pod Security `restricted` (enforced by the namespace). Each container sets its image's uid.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: server
+          # v0.0.69, multi-arch index. Unsigned upstream (no cosign signature or attestation), so it is
+          # pinned by digest.
+          image: quay.io/containers/kubernetes_mcp_server@sha256:1da9d62ad0c008a6cadcf2718c86c2e2d18753ca1d9f1f3313068980794b24f2
+          # The image's ENTRYPOINT is /app/kubernetes-mcp-server; --config is its config-file flag. The
+          # mounted file replaces the image's default /etc/kubernetes-mcp-server/config.toml.
+          args:
+            - --config
+            - /etc/kubernetes-mcp-server/config.toml
+          # No container port: it binds 127.0.0.1:8081, reachable only from the proxy in this pod.
+          # Probes: a tcpSocket or httpGet probe is sent from the node to the pod IP and would fail
+          # against a loopback listener, so they exec curl (the UBI minimal base ships /usr/bin/curl)
+          # against /healthz on loopback. Readiness keeps a pod out of the Service until its server
+          # answers, not just its proxy.
+          readinessProbe:
+            exec:
+              command: ["/usr/bin/curl", "-fsS", "-o", "/dev/null", "-m", "2", "http://127.0.0.1:8081/healthz"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["/usr/bin/curl", "-fsS", "-o", "/dev/null", "-m", "2", "http://127.0.0.1:8081/healthz"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            # uid/gid 65532: the image's USER.
+            runAsUser: 65532
+            runAsGroup: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            # The server writes nothing at runtime (in-cluster config, in-memory discovery, logs to
+            # stderr), so no writable volume.
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: server-config
+              mountPath: /etc/kubernetes-mcp-server
+              readOnly: true
+            - name: kube-api-access
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+        - name: proxy
+          # Tag sha-0902593 (olympus-sdk main), multi-arch index (linux/amd64 + arm64).
+          image: ghcr.io/nwlnexus/k8s-mcp-proxy@sha256:e2cc59a90f95ae3857e123670f5d6cb47bb392ecd8fadf01d8577bc05d507baf
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: k8s-mcp-proxy
+          # GET /healthz: 200 without authentication and without an upstream call.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            # uid/gid 10001: the image's USER.
+            runAsUser: 10001
+            runAsGroup: 10001
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            # The proxy writes nothing (its image contract), so no volume.
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 192Mi
+      volumes:
+        - name: server-config
+          configMap:
+            name: k8s-mcp-server
+        # The volume the kubelet would auto-inject, declared here so it is mounted in one container.
+        - name: kube-api-access
+          projected:
+            # 0644, the auto-injected volume's mode: the two containers run as different uids, so the
+            # kubelet does not chown the token to one of them and the server (uid 65532) reads it as
+            # "other".
+            defaultMode: 420
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        apiVersion: v1
+                        fieldPath: metadata.namespace
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: k8s-mcp
+  namespace: atlas-system
+  labels:
+    app.kubernetes.io/name: k8s-mcp
+    app.kubernetes.io/part-of: atlas
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: k8s-mcp
