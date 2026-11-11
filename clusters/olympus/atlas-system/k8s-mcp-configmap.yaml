@@ -116,7 +116,6 @@ data:
   # Same team domain as the memory gateway (../memory/gateway/gateway.yaml): JWKS origin and exact `iss`.
   ACCESS_TEAM_DOMAIN: "https://nwlnexus.cloudflareaccess.com"
   # AUD tag of this backend's own Access application, printed by the olympus-infra Access playbook
-  # (not a secret, as with the memory gateway). Until the placeholder is replaced the proxy starts and
-  # /healthz answers, but no Access token carries this audience, so every MCP request gets 401: the
-  # backend fails closed.
-  ACCESS_AUD: "REPLACE_WITH_ACCESS_AUD"
+  # (not a secret, as with the memory gateway). Only tokens issued for that application carry this
+  # audience; every other request gets 401.
+  ACCESS_AUD: "0ffc635f7a4e22b15d971ab63dc6036f2f7cee153604eaef0cc8c93584e91570"
