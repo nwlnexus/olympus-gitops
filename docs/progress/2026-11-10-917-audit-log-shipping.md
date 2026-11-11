@@ -17,7 +17,7 @@
 | # | Check (command) | Expected result | Last result | Commit |
 | --- | --- | --- | --- | --- |
 | 1 | `gh pr checks <pr>` in olympus-infra and olympus-gitops | all pass | olympus-infra#136: PASS, merged `2cc8d5a` | |
-| 2 | on each server: `sudo test -s /var/lib/rancher/k3s/server/logs/audit.log && echo ok` | `ok`, modification time recent | not run (staging blocked, see Blocked-on) | |
+| 2 | on each server: `sudo test -s /var/lib/rancher/k3s/server/logs/audit.log && echo ok` | `ok`, modification time recent | PASS: all five servers restarted 2026-11-11 02:28 to 02:35 UTC, log non-empty on each, `/readyz` ok, no audit or policy error in the journal | |
 | 3 | LogQL on the audit stream after a ServiceAccount read | at least one entry | not run | |
 | 4 | Loki ruler lists the rule group | present, no error | not run | |
 
@@ -28,7 +28,7 @@ Blast radius: no index (manifests only).
 | # | Step | Model | Tier | State |
 | --- | --- | --- | --- | --- |
 | 1 | olympus-infra role, play, policy (PR #136) | opus + fable review | subagent | done |
-| 2 | Stage on the canary, then the other servers; restarts | owner | — | doing (canary staged and restarted by the owner; policy fix olympus-infra#138 merged, canary to be re-staged and restarted) |
+| 2 | Stage on the canary, then the other servers; restarts | owner | — | done (owner staged all five; canary restarted by the owner; the other four restarted by the session with the owner's explicit approval, health gate before and after each) |
 | 3 | Audit-only collector `otel-audit` on the servers; Loki rules | opus | subagent | done (9fca7a0, 47ab073) |
 | 4 | Review, verifier, merge | fable, opus | main + subagent | todo |
 | 5 | Verify checks 2 to 4; close | fable | main | todo |
@@ -45,6 +45,8 @@ Blast radius: no index (manifests only).
 | 2026-11-11 | olympus-infra#138 (drop the two VIP election Leases by name), claim-verifier PASS, merged | 0 | `c0f4a91` | |
 | 2026-11-11 | subagent: `helm template` chart 0.158.0 of `otel-audit`; local otelcol-contrib 0.155.0 + Loki 3.7.9 end to end; `lokitool rules check`/`lint`; yamllint; kustomize build + kubeconform | 0 | DaemonSet only (no RBAC, no Service); 14 lines in, 14 in Loki across a collector restart; 3 rules fire for the right users only; `validate` green on the PR | 47ab073 |
 | 2026-11-11 | `git diff origin/main -- clusters/olympus/otel-collector/helmrelease-logs.yaml \| wc -c` | 0 | `0` | 47ab073 |
+| 2026-11-11 | canary after re-stage and restart: read-only log summary | 0 | policy has 17 rules; 0 VIP lease lines since the restart; a request made as the agent identity is recorded | |
+| 2026-11-11 | rolling restart of onode-030c31, onode-0312ce, onode-062caa, onode-0636e4: `scripts/k3s-health-gate.sh` before and after each | 0 | `RESULT: PASS (22 checks)` at every step; after the last: etcd leader onode-0314ac, VIP lease onode-030c31 | |
 
 ## Decisions
 
@@ -57,10 +59,9 @@ Blast radius: no index (manifests only).
 
 ## Blocked-on
 
-- Staging and restarts are run by the owner (the session's real run of the push play was denied by the auto-mode classifier, rule `Protected-Scope IaC Apply`). Waiting: canary re-stage and restart with the fixed policy; then the other four servers.
+- none
 
 ## Next
 
-1. After the canary restart: health gate, re-sample the audit log (VIP lease lines gone).
-2. Owner stages and restarts the other four servers, one at a time, VIP holder last.
-3. Then: claim-verifier on this PR, remove this file, ready, automerge; check the DaemonSet, Loki stream and ruler (checks 2 to 4).
+1. claim-verifier on this PR; remove this file; ready; automerge.
+2. After Flux reconciles: DaemonSet 5/5, collector logs clean, audit stream in Loki (check 3), ruler lists the group (check 4); measure volume; close #917.
