@@ -12,6 +12,7 @@ resources:
   - grafana-ingressroute.yaml
   - loki-helmrelease.yaml
   - loki-rules-ci-egress.yaml
+  - loki-rules-k8s-audit.yaml
   - tempo-helmrelease.yaml
   - tempo-tailscale-service.yaml
   - loki-tailscale-service.yaml
