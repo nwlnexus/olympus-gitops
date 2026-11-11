@@ -126,9 +126,8 @@ the public internet (the Access signing keys).
 
 `ACCESS_TEAM_DOMAIN` is the same team domain as the memory gateway. `ACCESS_AUD` in `k8s-mcp-configmap.yaml`
 is the AUD tag of this backend's Access application, printed by the olympus-infra Access playbook; it is not a
-secret. Until the placeholder `REPLACE_WITH_ACCESS_AUD` is replaced with that value, the pods run and are
-Ready, but every MCP request gets 401 (fail closed). To set or change it, edit the value in this repository;
-Reloader restarts the pods.
+secret. Only tokens issued for that application carry this audience; every other request gets 401. To change
+it, edit the value in this repository; Reloader restarts the pods.
 
 ### Clients
 
