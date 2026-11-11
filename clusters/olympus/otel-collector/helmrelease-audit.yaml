@@ -126,6 +126,16 @@ spec:
           retry_on_failure:
             enabled: true
           operators:
+            # Not shipped (olympus-sdk#932): Flux's server-side dry-run applies (requestURI with dryRun=All by
+            # the kustomize and helm controllers): its drift check on every object at every reconcile, the
+            # largest machine source left once the policy drops status writes. A dry run changes nothing, the
+            # real apply that follows a change has no dryRun and is shipped, and the line stays in the servers'
+            # own audit.log. Matched on
+            # the raw line, before parsing: the k8s JSON writes user.username first in "user" and escapes & as
+            # \u0026. A `filter` expression that errors drops the line, so it reads only `body`, always a
+            # string here; a regex never errors. Every other identity's dry runs (the agents' included) ship.
+            - type: filter
+              expr: 'body matches `"user":\{"username":"system:serviceaccount:flux-system:(kustomize|helm)-controller"` and body matches `"requestURI":"[^"]*(\?|\\u0026)dryRun=All(\\u0026|")`'
             # Parse into a scratch attribute; the body stays the original JSON line for `| json` queries.
             - type: json_parser
               parse_from: body

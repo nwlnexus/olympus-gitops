@@ -126,8 +126,9 @@ and declares the projected token volume itself); the proxy never sees it.
 
 ClusterIP Service `k8s-mcp` port 80 to the proxy's 8080: the tunnel target
 `http://k8s-mcp.atlas-system.svc.cluster.local:80`. No IngressRoute, external-dns record or tailnet Service.
-Ingress to 8080 only from the `cloudflared` pods. Egress: CoreDNS, the Kubernetes API server, and TCP 443 on
-the public internet (the Access signing keys).
+Ingress to 8080 only from the `cloudflared` pods. Egress: CoreDNS, the Kubernetes API server, and TCP 443 to
+Cloudflare's published IPv4 ranges (the Access signing keys; the same list as the memory gateway, so update
+both together).
 
 ### Access audience
 
