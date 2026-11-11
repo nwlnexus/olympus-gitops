@@ -1,0 +1,12 @@
+# atlas-system: in-cluster components of the atlas platform (olympus-sdk#919). Today: the cluster
+# agent (deployment.yaml). Pod Security `restricted` is enforced: the agent runs as uid 65532,
+# non-root, no privilege escalation, all capabilities dropped, seccomp RuntimeDefault and a
+# read-only root filesystem.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: atlas-system
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

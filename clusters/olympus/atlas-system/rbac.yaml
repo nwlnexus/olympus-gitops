@@ -1,0 +1,76 @@
+# RBAC for the atlas cluster agent (olympus-sdk#919). Rules lifted as written from the agent's
+# package docs: packages/cluster-agent/docs/RBAC.md (olympus-sdk).
+#
+#   - ClusterRole (cluster-wide, read-only): get/list/watch on nodes, the three workload kinds,
+#     Flux Kustomizations and HelmReleases, and Traefik IngressRoutes.
+#   - Role (namespaced to atlas-system): get/create/update on coordination.k8s.io/leases for
+#     leader election. NO delete (release is a CAS-guarded update), NO patch.
+#
+# No access to Secrets, ConfigMaps or Pods, and no write to any application resource. The server
+# version (GET /version) is readable through the built-in system:public-info-viewer ClusterRole.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: atlas-cluster-agent
+  namespace: atlas-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: atlas-cluster-agent
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources: ["kustomizations"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["traefik.io"]
+    resources: ["ingressroutes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: atlas-cluster-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: atlas-cluster-agent
+subjects:
+  - kind: ServiceAccount
+    name: atlas-cluster-agent
+    namespace: atlas-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: atlas-cluster-agent-leader
+  namespace: atlas-system
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    # get (read for CAS), create (first claim), update (replace = renew/release).
+    # `patch`/`delete` are deliberately NOT granted.
+    verbs: ["get", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: atlas-cluster-agent-leader
+  namespace: atlas-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: atlas-cluster-agent-leader
+subjects:
+  - kind: ServiceAccount
+    name: atlas-cluster-agent
+    namespace: atlas-system
