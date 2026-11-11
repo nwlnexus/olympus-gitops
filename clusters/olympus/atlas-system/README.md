@@ -16,8 +16,8 @@ olympus-sdk#919). One leader-elected Deployment with two publishers, both POSTin
 - **cluster state**: watches nodes, Deployments, StatefulSets, DaemonSets and Flux Kustomizations and
   HelmReleases, and publishes a summary of them (no Pods, Secrets or ConfigMaps).
 
-- Image: `ghcr.io/nwlnexus/atlas-cluster-agent@sha256:4d92524aa569f1d19a1dca7cc44bf558bc6a2aadb7c4bc97942ea099d13f4b79`
-  (tag `79fd279`; multi-arch index, linux/amd64 + linux/arm64)
+- Image: `ghcr.io/nwlnexus/atlas-cluster-agent@sha256:e7f4ead7ed84d2fae7290439f5f2805aeb8fe94088099c5438dae58a652428e8`
+  (tag `eb03a38`; multi-arch index, linux/amd64 + linux/arm64)
 - Replicas: 1 (leader-elected via Lease `atlas-cluster-agent-leader`; safe to bump to 2 for HA)
 - Health: `GET /healthz` on port 8080 (liveness + readiness; not gated on leadership)
 - Flux: Kustomization `atlas-system` (`../flux-kustomizations/atlas-system.yaml`), health-checked on

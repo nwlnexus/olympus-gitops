@@ -42,10 +42,10 @@ spec:
           type: RuntimeDefault
       containers:
         - name: atlas-cluster-agent
-          # Pinned by digest: the multi-arch INDEX digest (linux/amd64 + linux/arm64) of tag 79fd279
+          # Pinned by digest: the multi-arch INDEX digest (linux/amd64 + linux/arm64) of tag eb03a38
           # (the short olympus-sdk commit sha the workflow pushes). A tag pin would follow a re-push;
           # the digest cannot. The kubelet picks the entry for the node's arch.
-          image: ghcr.io/nwlnexus/atlas-cluster-agent@sha256:4d92524aa569f1d19a1dca7cc44bf558bc6a2aadb7c4bc97942ea099d13f4b79
+          image: ghcr.io/nwlnexus/atlas-cluster-agent@sha256:e7f4ead7ed84d2fae7290439f5f2805aeb8fe94088099c5438dae58a652428e8
           ports:
             - name: health
               containerPort: 8080
