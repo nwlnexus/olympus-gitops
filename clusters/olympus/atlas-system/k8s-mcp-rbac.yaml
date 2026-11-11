@@ -1,0 +1,116 @@
+# RBAC for the read-only Kubernetes MCP backend (olympus-sdk#916). The ClusterRole is the security
+# boundary of every tool the backend offers: the server's read_only mode, its disabled_tools and
+# denied_resources, and the proxy's ALLOWED_TOOLS are extra layers on top of it.
+#
+#   - ClusterRole `olympus-agents-view`: get/list/watch only, on an explicit list of resources. No
+#     wildcard in any apiGroups, resources or verbs field.
+#   - ServiceAccount `k8s-mcp`: the identity the API server and its audit log see
+#     (system:serviceaccount:atlas-system:k8s-mcp; the audit policy always logs it). Callers are
+#     identified in the proxy's log and the Access log, never by the API server.
+#
+# Deliberately NOT granted (any of these would let a caller read a credential or change the cluster):
+#   - secrets                      (values of every credential in the cluster)
+#   - pods/exec, pods/attach       (a shell or stdin/stdout in a running container)
+#   - pods/portforward             (a tunnel into any pod)
+#   - nodes/proxy                  (the kubelet API: exec, logs and stats of every pod on a node)
+#   - serviceaccounts/token        (minting tokens for other identities)
+#   - serviceaccounts, roles, rolebindings, clusterroles, clusterrolebindings (not needed to debug)
+#   - any write verb: create, update, patch, delete, deletecollection, impersonate, bind, escalate
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8s-mcp
+  namespace: atlas-system
+  labels:
+    app.kubernetes.io/name: k8s-mcp
+    app.kubernetes.io/part-of: atlas
+# The token is mounted by the Deployment into the server container only (k8s-mcp-deployment.yaml).
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: olympus-agents-view
+  labels:
+    app.kubernetes.io/part-of: atlas
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - services
+      - endpoints
+      - configmaps
+      - events
+      - nodes
+      - namespaces
+      - persistentvolumes
+      - persistentvolumeclaims
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  # pods_top and nodes_top (metrics-server, bundled with k3s).
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list", "watch"]
+  # Flux.
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources: ["kustomizations"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["gitrepositories", "helmrepositories", "helmcharts", "ocirepositories"]
+    verbs: ["get", "list", "watch"]
+  # Traefik.
+  - apiGroups: ["traefik.io"]
+    resources: ["ingressroutes", "middlewares"]
+    verbs: ["get", "list", "watch"]
+  # cert-manager. These objects name the Secret a certificate is written to (spec.secretName) and the
+  # issuer's credential Secret by reference; the key material lives only in those Secrets.
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates", "clusterissuers", "issuers"]
+    verbs: ["get", "list", "watch"]
+  # External Secrets. An ExternalSecret holds where a value comes from (store, remote key and
+  # property) and the target Secret's name and template; a ClusterSecretStore holds the provider's
+  # address and a secretRef (name and key) to its own credential. The synced values are written only
+  # to the target Secrets, which this role cannot read. (The operator's test-only `fake` provider can
+  # hold literal values in a store's spec; no store in this repository uses it, and every store and
+  # ExternalSecret here is committed to this public repository anyway.)
+  - apiGroups: ["external-secrets.io"]
+    resources: ["externalsecrets", "clustersecretstores"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-mcp-olympus-agents-view
+  labels:
+    app.kubernetes.io/name: k8s-mcp
+    app.kubernetes.io/part-of: atlas
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: olympus-agents-view
+subjects:
+  - kind: ServiceAccount
+    name: k8s-mcp
+    namespace: atlas-system

@@ -1,6 +1,7 @@
 # atlas-system
 
-Namespace for the in-cluster components of the atlas platform. Code and images ship from
+Namespace for the in-cluster components of the atlas platform: the cluster agent and the read-only
+Kubernetes MCP backend (`k8s-mcp`). Code and images ship from
 **olympus-sdk**; this directory is manifests only. Further components may be added here: each
 brings its own manifests and NetworkPolicy allow rules (the namespace is default-deny).
 
@@ -77,3 +78,59 @@ launcher.olympus.io/display-name: "Grafana"  # optional (default: humanized name
 launcher.olympus.io/group: "Observability"   # optional
 launcher.olympus.io/icon: "gauge"            # optional lucide icon name
 ```
+
+## k8s-mcp (read-only Kubernetes MCP backend)
+
+A read-only MCP server for the cluster (olympus-sdk#916; proxy code in olympus-sdk
+`packages/k8s-mcp-proxy`), reached from outside only through the cloudflared tunnel and its own
+Cloudflare Access application, as the memory gateway is.
+
+```text
+client -> Cloudflare Access -> cloudflared -> Service k8s-mcp :80 -> proxy :8080 -> server 127.0.0.1:8081 -> API server
+```
+
+Deployment `k8s-mcp`, 2 replicas (PodDisruptionBudget `maxUnavailable: 1`), two containers per pod:
+
+- **server**: `containers/kubernetes-mcp-server` v0.0.69 (`quay.io`, pinned by digest; unsigned upstream),
+  run with `--config /etc/kubernetes-mcp-server/config.toml` from ConfigMap `k8s-mcp-server`: stateless
+  Streamable HTTP on loopback only, in-cluster credentials, `read_only`, write/exec/kubelet tools disabled,
+  Secrets denied. Probes exec `curl` against its loopback `/healthz`.
+- **proxy**: `ghcr.io/nwlnexus/k8s-mcp-proxy` (pinned by digest, pulled with `ghcr-pull`), env from
+  ConfigMap `k8s-mcp-proxy`. Verifies the Access token (401 otherwise), rate-limits per identity (in memory,
+  so per replica), passes only the tools in `ALLOWED_TOOLS`, bounds log tails and request time, and logs one
+  line per call with the caller's identity. Probes: `GET /healthz` on 8080.
+
+Both containers run non-root (server uid 65532, proxy uid 10001) with a read-only root filesystem, no
+privilege escalation, all capabilities dropped and seccomp `RuntimeDefault`.
+
+### Boundary (`k8s-mcp-rbac.yaml`)
+
+ClusterRole **`olympus-agents-view`**, bound to ServiceAccount `k8s-mcp`, is the limit of everything the
+backend can read: `get`/`list`/`watch` on an explicit list of resources (workloads, pods and their logs,
+services, config maps, events, nodes, storage, networking, metrics, and the Flux, Traefik, cert-manager and
+External Secrets resources). Not granted: `secrets`, `pods/exec`, `pods/attach`, `pods/portforward`,
+`nodes/proxy`, `serviceaccounts/token`, or any write. The server's read-only mode and the proxy's allowlist
+are extra layers on top. The API server, and its audit log, see `system:serviceaccount:atlas-system:k8s-mcp`.
+
+The token is mounted only into the server container (the pod sets `automountServiceAccountToken: false`
+and declares the projected token volume itself); the proxy never sees it.
+
+### Network (`k8s-mcp-networkpolicy.yaml`, `k8s-mcp-service.yaml`)
+
+ClusterIP Service `k8s-mcp` port 80 to the proxy's 8080: the tunnel target
+`http://k8s-mcp.atlas-system.svc.cluster.local:80`. No IngressRoute, external-dns record or tailnet Service.
+Ingress to 8080 only from the `cloudflared` pods. Egress: CoreDNS, the Kubernetes API server, and TCP 443 on
+the public internet (the Access signing keys).
+
+### Access audience
+
+`ACCESS_TEAM_DOMAIN` is the same team domain as the memory gateway. `ACCESS_AUD` in `k8s-mcp-configmap.yaml`
+is the AUD tag of this backend's Access application, printed by the olympus-infra Access playbook; it is not a
+secret. Until the placeholder `REPLACE_WITH_ACCESS_AUD` is replaced with that value, the pods run and are
+Ready, but every MCP request gets 401 (fail closed). To set or change it, edit the value in this repository;
+Reloader restarts the pods.
+
+### Clients
+
+No MCP client entry on any host is configured here, intentionally: hosts get one only once the
+personal/work guard covers these tools (olympus-sdk#929).
