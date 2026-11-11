@@ -24,10 +24,11 @@ Stream: `{service_name="k8s-audit"}` (labels `service_name`, `k8s_cluster_name`)
 per line: `k8s_node_name`, `k8s_audit_verb`, `k8s_audit_level`, `k8s_audit_response_code`. Everything
 else (user, groups, object, request URI, audit ID) is in the JSON body; use `| json`.
 
-All requests by the Kubernetes MCP ServiceAccount:
+All requests by the Kubernetes MCP ServiceAccount, made directly or by impersonating it
+(`impersonatedUser` is the identity RBAC evaluated):
 
 ```logql
-{service_name="k8s-audit"} | json | user_username="system:serviceaccount:atlas-system:k8s-mcp"
+{service_name="k8s-audit"} | json | user_username="system:serviceaccount:atlas-system:k8s-mcp" or impersonatedUser_username="system:serviceaccount:atlas-system:k8s-mcp"
 ```
 
 All forbidden (403) responses:
@@ -42,7 +43,7 @@ All Secret requests:
 {service_name="k8s-audit"} | json | objectRef_resource="secrets"
 ```
 
-Group membership (`user.groups`) is an array, so extract it as JSON text and match it with its quotes:
+Group membership (`user.groups`, `impersonatedUser.groups`) is an array, so extract it as JSON text and match it with its quotes:
 
 ```logql
 {service_name="k8s-audit"} | json groups="user.groups" | groups=~`.*"olympus:agents-view".*`

@@ -4,8 +4,10 @@
 # Loki ruler (loki-helmrelease.yaml, rulerConfig), which sends to the Prometheus Alertmanager.
 #
 # Every rule selects the agent identities: the ServiceAccount system:serviceaccount:atlas-system:k8s-mcp,
-# or any user in the group olympus:agents-view. user.groups is an array, so it is extracted as JSON text and
-# matched with its quotes. The line filter (|~) only narrows the lines before parsing; the label filter
+# or any user in the group olympus:agents-view, either as the requester (user.*) or as the identity it
+# impersonated (impersonatedUser.*, which is what RBAC evaluated). The groups are arrays, so they are
+# extracted as JSON text and matched with their quotes. The user label is the requester; impersonated_user
+# is set when the request was impersonated. The line filter (|~) only narrows the lines before parsing; the label filter
 # after `| json` decides. Both identities are read-only, so a write attempt or a Secret request is a signal.
 #
 # Not here yet: an "audit log silent" rule (no lines for 15m). It would fire until audit logging is live on
@@ -26,7 +28,7 @@ data:
           # probing agent).
           - alert: K8sAuditAgentForbidden
             expr: |
-              sum by (user) (count_over_time({service_name="k8s-audit"} |~ `system:serviceaccount:atlas-system:k8s-mcp|olympus:agents-view` | json user="user.username", groups="user.groups", code="responseStatus.code" | user="system:serviceaccount:atlas-system:k8s-mcp" or groups=~`.*"olympus:agents-view".*` | code="403" [10m])) > 5
+              sum by (user, impersonated_user) (count_over_time({service_name="k8s-audit"} |~ `system:serviceaccount:atlas-system:k8s-mcp|olympus:agents-view` | json user="user.username", groups="user.groups", impersonated_user="impersonatedUser.username", impersonated_groups="impersonatedUser.groups", code="responseStatus.code" | user="system:serviceaccount:atlas-system:k8s-mcp" or groups=~`.*"olympus:agents-view".*` or impersonated_user="system:serviceaccount:atlas-system:k8s-mcp" or impersonated_groups=~`.*"olympus:agents-view".*` | code="403" [10m])) > 5
             for: 0m
             labels:
               severity: warning
@@ -36,17 +38,19 @@ data:
           # Any Secret request (any response code) by an agent identity.
           - alert: K8sAuditAgentSecretAccess
             expr: |
-              sum by (user) (count_over_time({service_name="k8s-audit"} |~ `system:serviceaccount:atlas-system:k8s-mcp|olympus:agents-view` | json user="user.username", groups="user.groups", resource="objectRef.resource" | user="system:serviceaccount:atlas-system:k8s-mcp" or groups=~`.*"olympus:agents-view".*` | resource="secrets" [5m])) > 0
+              sum by (user, impersonated_user) (count_over_time({service_name="k8s-audit"} |~ `system:serviceaccount:atlas-system:k8s-mcp|olympus:agents-view` | json user="user.username", groups="user.groups", impersonated_user="impersonatedUser.username", impersonated_groups="impersonatedUser.groups", resource="objectRef.resource" | user="system:serviceaccount:atlas-system:k8s-mcp" or groups=~`.*"olympus:agents-view".*` or impersonated_user="system:serviceaccount:atlas-system:k8s-mcp" or impersonated_groups=~`.*"olympus:agents-view".*` | resource="secrets" [5m])) > 0
             for: 0m
             labels:
               severity: critical
             annotations:
               summary: "{{ $labels.user }} made {{ $value }} requests for Secrets in 5m."
               description: "An agent identity requested Secrets from the Kubernetes API (allowed or not). Loki: {service_name=\"k8s-audit\"} | json | user_username=\"{{ $labels.user }}\" | objectRef_resource=\"secrets\" shows verb, namespace, name and response code."
-          # Any write verb by an agent identity (allowed or not).
+          # Any write verb by an agent identity (allowed or not). Access and token reviews
+          # (authorization.k8s.io, authentication.k8s.io) are creates that only ask a question, as
+          # `kubectl auth can-i` does, so they are left out.
           - alert: K8sAuditAgentWrite
             expr: |
-              sum by (user, verb) (count_over_time({service_name="k8s-audit"} |~ `system:serviceaccount:atlas-system:k8s-mcp|olympus:agents-view` | json user="user.username", groups="user.groups", verb="verb" | user="system:serviceaccount:atlas-system:k8s-mcp" or groups=~`.*"olympus:agents-view".*` | verb=~"create|update|patch|delete|deletecollection" [5m])) > 0
+              sum by (user, impersonated_user, verb) (count_over_time({service_name="k8s-audit"} |~ `system:serviceaccount:atlas-system:k8s-mcp|olympus:agents-view` | json user="user.username", groups="user.groups", impersonated_user="impersonatedUser.username", impersonated_groups="impersonatedUser.groups", verb="verb", api_group="objectRef.apiGroup" | user="system:serviceaccount:atlas-system:k8s-mcp" or groups=~`.*"olympus:agents-view".*` or impersonated_user="system:serviceaccount:atlas-system:k8s-mcp" or impersonated_groups=~`.*"olympus:agents-view".*` | verb=~"create|update|patch|delete|deletecollection" | api_group!~`authorization\.k8s\.io|authentication\.k8s\.io` [5m])) > 0
             for: 0m
             labels:
               severity: critical
