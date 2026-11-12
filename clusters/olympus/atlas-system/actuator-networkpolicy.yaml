@@ -1,0 +1,84 @@
+# Network rules for the atlas cluster actuator pods (olympus-sdk#922). The pods come in a later change; the
+# policy is in place first. The namespace is default-deny (networkpolicy.yaml); NetworkPolicies are additive,
+# so this only opens what is listed.
+#
+#   ingress  none. Nothing calls the actuator (it polls Hermes); kubelet probes come from the node and are
+#            not subject to NetworkPolicy on k3s.
+#   egress   DNS via CoreDNS; the Kubernetes API server (the same block as the cluster agent,
+#            networkpolicy.yaml); TCP 443 to Cloudflare's published IPv4 ranges only, where Hermes is served
+#            (a Cloudflare Worker). Narrower than the read agent's "any public address": the actuator talks
+#            to Hermes and nothing else. NetworkPolicy cannot match a host name (k3s' kube-router has no
+#            FQDN policy), so the rule is the ranges, the same list as k8s-mcp (k8s-mcp-networkpolicy.yaml,
+#            from https://api.cloudflare.com/client/v4/ips). If a range is added and Hermes moves into it,
+#            polls fail (closed) until the list is updated. The cluster is IPv4-only, so there is no IPv6 rule.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cluster-actuator-egress
+  namespace: atlas-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: atlas-cluster-actuator
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    # DNS via CoreDNS only (the kube-dns Service DNATs to these pods).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Kubernetes API server: the same block as the cluster agent (networkpolicy.yaml). kube-proxy DNATs
+    # 10.43.0.1:443 to the API servers' :6443 before the policy is evaluated, so the node endpoints are what
+    # matters; the VIP and the Service IP are listed too.
+    - to:
+        - ipBlock:
+            cidr: 192.168.253.7/32   # onode-030c31
+        - ipBlock:
+            cidr: 192.168.253.8/32   # onode-0312ce
+        - ipBlock:
+            cidr: 192.168.253.9/32   # onode-0314ac
+        - ipBlock:
+            cidr: 192.168.253.11/32  # onode-0636e4
+        - ipBlock:
+            cidr: 192.168.253.12/32  # onode-062caa
+        - ipBlock:
+            cidr: 192.168.253.2/32   # kube-vip control-plane VIP
+      ports:
+        - protocol: TCP
+          port: 6443
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.1/32       # kubernetes.default Service
+      ports:
+        - protocol: TCP
+          port: 443
+    # Hermes over HTTPS: Cloudflare's published IPv4 ranges (see the header).
+    - to:
+        - ipBlock: {cidr: 173.245.48.0/20}
+        - ipBlock: {cidr: 103.21.244.0/22}
+        - ipBlock: {cidr: 103.22.200.0/22}
+        - ipBlock: {cidr: 103.31.4.0/22}
+        - ipBlock: {cidr: 141.101.64.0/18}
+        - ipBlock: {cidr: 108.162.192.0/18}
+        - ipBlock: {cidr: 190.93.240.0/20}
+        - ipBlock: {cidr: 188.114.96.0/20}
+        - ipBlock: {cidr: 197.234.240.0/22}
+        - ipBlock: {cidr: 198.41.128.0/17}
+        - ipBlock: {cidr: 162.158.0.0/15}
+        - ipBlock: {cidr: 104.16.0.0/13}
+        - ipBlock: {cidr: 104.24.0.0/14}
+        - ipBlock: {cidr: 172.64.0.0/13}
+        - ipBlock: {cidr: 131.0.72.0/22}
+      ports:
+        - protocol: TCP
+          port: 443

@@ -1,0 +1,19 @@
+# Replay set of the atlas cluster actuator (olympus-sdk#922). The actuator records each command id here
+# (key = command id, value = its expiry) with a resourceVersion-guarded replace before it acts, and
+# never acts on an id it has seen. Its Role grants get/update on this one object and no `create`, so Flux
+# creates it.
+#
+# `ssa: IfNotPresent`: Flux creates the ConfigMap when it is missing and otherwise leaves it alone, so a
+# reconcile never resets the recorded ids. It is still pruned if removed from this directory. While it is
+# missing the actuator fails every command closed (`dedupe_unavailable`) and executes nothing.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: atlas-cluster-actuator-dedupe
+  namespace: atlas-system
+  labels:
+    app.kubernetes.io/name: atlas-cluster-actuator
+    app.kubernetes.io/part-of: atlas
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: IfNotPresent
+data: {}

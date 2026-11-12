@@ -1,0 +1,89 @@
+# Identity and RBAC for the atlas cluster actuator (olympus-sdk#922). Rules lifted as written from the
+# agent's package docs: packages/cluster-agent/docs/RBAC.md, section "Actuator" (olympus-sdk).
+#
+#   - ServiceAccount `atlas-cluster-actuator`: separate from the read agent's, so the agent never gets
+#     `patch` and the actuator never gets `list`/`watch`.
+#   - ClusterRole (cluster-wide): get/patch on exactly the three workload kinds and Flux Kustomizations
+#     and HelmReleases. NO list, watch, create, update, delete, and no subresources (no scale, no status).
+#   - Role (namespaced to atlas-system): get/update on the one ConfigMap `atlas-cluster-actuator-dedupe`
+#     (the replay set, actuator-configmaps.yaml). NO create: Flux creates the ConfigMap.
+#
+# RBAC alone would let this identity patch any field of the five kinds. The ValidatingAdmissionPolicy in
+# actuator-admission.yaml narrows that to three fields and refuses workloads in kube-system, flux-system
+# and atlas-system.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: atlas-cluster-actuator
+  namespace: atlas-system
+  labels:
+    app.kubernetes.io/name: atlas-cluster-actuator
+    app.kubernetes.io/part-of: atlas
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: atlas-cluster-actuator
+  labels:
+    app.kubernetes.io/name: atlas-cluster-actuator
+    app.kubernetes.io/part-of: atlas
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources: ["kustomizations"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: atlas-cluster-actuator
+  labels:
+    app.kubernetes.io/name: atlas-cluster-actuator
+    app.kubernetes.io/part-of: atlas
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: atlas-cluster-actuator
+subjects:
+  - kind: ServiceAccount
+    name: atlas-cluster-actuator
+    namespace: atlas-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: atlas-cluster-actuator-dedupe
+  namespace: atlas-system
+  labels:
+    app.kubernetes.io/name: atlas-cluster-actuator
+    app.kubernetes.io/part-of: atlas
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["atlas-cluster-actuator-dedupe"]
+    # get (read for CAS), update (resourceVersion-guarded replace). `create`, `patch` and `delete`
+    # are deliberately NOT granted.
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: atlas-cluster-actuator-dedupe
+  namespace: atlas-system
+  labels:
+    app.kubernetes.io/name: atlas-cluster-actuator
+    app.kubernetes.io/part-of: atlas
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: atlas-cluster-actuator-dedupe
+subjects:
+  - kind: ServiceAccount
+    name: atlas-cluster-actuator
+    namespace: atlas-system
