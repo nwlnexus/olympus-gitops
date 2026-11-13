@@ -1,0 +1,31 @@
+# Loki ruler alerts for the atlas cluster actuator (olympus-sdk#957; ../atlas-system/actuator-deployment.yaml).
+# Picked up by the loki-sc-rules sidecar (label loki_rule) and evaluated by the Loki ruler
+# (loki-helmrelease.yaml, rulerConfig), which sends to the Prometheus Alertmanager.
+#
+# The actuator logs one JSON line per event; the line filter matches the message text inside it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-atlas-cluster-actuator
+  namespace: observability
+  labels:
+    loki_rule: ""
+data:
+  atlas-cluster-actuator.yaml: |
+    groups:
+      - name: atlas-cluster-actuator
+        rules:
+          # Hermes refuses the actuator token (revoked, missing cluster:actuate, or not cluster-bound): no
+          # cluster command runs. The actuator backs off 60 s per poll and logs this warning on the first
+          # refused poll and every 10th after it (every 10 minutes), so the 15m window keeps the alert active
+          # while the token is refused and it resolves about 15m after a poll succeeds. The message prefix is
+          # pinned in olympus-sdk packages/cluster-agent/src/actuator/mod.rs (TOKEN_REFUSED_LOG).
+          - alert: AtlasClusterActuatorTokenRefused
+            expr: |
+              sum(count_over_time({k8s_namespace_name="atlas-system", k8s_container_name="atlas-cluster-actuator"} |= "hermes refused the actuator token" [15m])) > 0
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Hermes refuses the atlas cluster actuator's token; cluster commands are not running."
+              description: "The actuator logged that Hermes refused its token {{ $value }} times in 15m (revoked, missing cluster:actuate, or not cluster-bound). Commands queued in IRIS expire undelivered. Loki: {k8s_namespace_name=\"atlas-system\", k8s_container_name=\"atlas-cluster-actuator\"} |= \"hermes refused\". If the token was revoked on purpose (kill switch), silence this; otherwise issue a new actuator token (issueClusterToken, role ACTUATOR) and update the 1Password item behind atlas-cluster-actuator-credentials."

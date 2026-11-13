@@ -13,6 +13,7 @@ resources:
   - loki-helmrelease.yaml
   - loki-rules-ci-egress.yaml
   - loki-rules-k8s-audit.yaml
+  - loki-rules-atlas-cluster-actuator.yaml
   - tempo-helmrelease.yaml
   - tempo-tailscale-service.yaml
   - loki-tailscale-service.yaml
