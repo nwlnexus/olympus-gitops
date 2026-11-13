@@ -180,7 +180,18 @@ RBAC alone would let this identity patch any field of the five kinds. The `Valid
 - admits an update only if nothing changed except `metadata.annotations["reconcile.fluxcd.io/requestedAt"]`
   and `spec.suspend` (Flux kinds) or `spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"]`
   (workloads). Server-maintained fields (`managedFields`, `resourceVersion`, `generation`, `status`) are
-  ignored in the comparison.
+  ignored in that comparison;
+- refuses `spec.suspend` becoming `true` on the root Kustomizations `flux-system/flux-system` and
+  `flux-system/atlas-system` (olympus-sdk#956): suspending either would freeze GitOps and the gitops kill
+  switch below. Hermes and the actuator refuse it too (`refused_target`); reconcile and resume stay allowed;
+- bounds `metadata.managedFields` (olympus-sdk#956): another field manager's entry may only lose the
+  actuator's own field (the API server moves that field to the actuator on its patch, e.g. a `requestedAt`
+  set by `flux reconcile` belongs to manager `flux` until then), entries are matched on everything but
+  `fieldsV1` (so no new, renamed, re-timed or dropped entry), and the actuator's own entry is an `Update` of
+  the main resource holding only its three fields. A compromised pod therefore cannot forge
+  `kustomize-controller` ownership (which would make Flux's next apply drop fields) or erase ownership marks.
+  Accepted residual: the `.` marker of a node on the actuator's own paths may be dropped from another
+  manager's entry.
 
 ### Network (`actuator-networkpolicy.yaml`)
 
@@ -189,5 +200,16 @@ No ingress. Egress: CoreDNS, the Kubernetes API server, and TCP 443 to Cloudflar
 
 ### Kill switches
 
-Revoke the actuator token in IRIS (the actuator gets 401 and backs off), or scale its Deployment to 0 here.
-The admission policy and RBAC stay in place regardless.
+In this order (olympus-sdk#956):
+
+1. **Revoke the capabilities** in IRIS (`cluster:flux-reconcile`, `cluster:flux-suspend`,
+   `cluster:rollout-restart`, and `command:execute` if needed): Hermes refuses new commands from the next
+   request on, so nothing new is signed.
+2. **Revoke the actuator token** in IRIS: the actuator gets 401 and backs off, so frames already queued are
+   never claimed. This path does not depend on Flux or on the pod.
+3. **Scale the Deployment to 0** here (`replicas: 0` in `actuator-deployment.yaml`, merged and applied by the
+   `atlas-system` Kustomization). An admin can do it at once with `kubectl -n atlas-system scale deploy
+   atlas-cluster-actuator --replicas 0`; Flux reverts that until the gitops change lands.
+
+The admission policy and RBAC stay in place regardless, and the policy keeps the actuator from suspending
+the `flux-system` and `atlas-system` Kustomizations, so step 3 cannot be blocked from the actuator's side.

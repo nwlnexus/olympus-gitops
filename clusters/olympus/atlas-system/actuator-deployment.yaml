@@ -40,8 +40,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: atlas-cluster-actuator
-          # Multi-arch index digest of tag a2f7d51 (olympus-sdk#952, actuator mode).
-          image: ghcr.io/nwlnexus/atlas-cluster-agent@sha256:f2edbcd5b143e958bb5283bdb91e1cad4c2faa0bb25fe4d0ac9fed5c6799bae9
+          # Multi-arch index digest of tag 8a79d43 (olympus-sdk#961: refused_target for the root Kustomizations).
+          image: ghcr.io/nwlnexus/atlas-cluster-agent@sha256:2d929d21d0f138c34adec5ca0432028bb533c1692dafb229887a7dbb78389dfa
           ports:
             - name: health
               containerPort: 8080

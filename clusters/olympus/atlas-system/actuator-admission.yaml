@@ -14,12 +14,30 @@
 #                       spec.suspend                                             (flux-suspend/-resume)
 #       workload kinds: spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"] (rollout-restart)
 #     The allowed annotation may be added or changed, never removed; no other annotation may change.
+#   - denies spec.suspend becoming true on the root Kustomizations flux-system/flux-system and
+#     flux-system/atlas-system (olympus-sdk#956): suspending either would freeze GitOps and the gitops kill
+#     switch. Hermes and the actuator refuse it too (refused_target); reconcile and resume stay allowed;
+#   - bounds metadata.managedFields (olympus-sdk#956): an entry of another field manager may only lose the
+#     actuator's own field (the API server transfers that field to the actuator on its patch: a requestedAt
+#     set by `flux reconcile` belongs to manager `flux` until then), and the actuator's own entry may only
+#     hold its fields. So no new manager, no forged or altered entry of another manager (e.g.
+#     kustomize-controller), no field added to the actuator's entry beyond its own.
 #
-# Ignored in the comparison because the API server itself changes them on every update, so they differ
-# between oldObject and object for any legitimate patch: metadata.managedFields (the actuator's field
-# manager entry), metadata.resourceVersion, metadata.generation (bumped when spec changes) and status
-# (reset to the stored status on a main-resource update; status is only writable through the status
-# subresource, which is denied above).
+# Ignored in the field comparison because the API server itself changes them on every update, so they
+# differ between oldObject and object for any legitimate patch: metadata.managedFields (checked by its own
+# rule above), metadata.resourceVersion, metadata.generation (bumped when spec changes) and status (reset
+# to the stored status on a main-resource update; status is only writable through the status subresource,
+# which is denied above).
+#
+# managedFields rule, precisely. Entries are matched across oldObject and object on every key but fieldsV1
+# (manager, operation, apiVersion, subresource, time, fieldsType). For an entry of another manager the new
+# fieldsV1 must equal the old one except that, along the actuator's field paths only, the actuator's leaf
+# (f:reconcile.fluxcd.io/requestedAt, f:suspend, f:kubectl.kubernetes.io/restartedAt) and the "." node
+# marker may be gone, and a node left empty may be gone; such an entry may vanish only when nothing else
+# was in it. An unmatched new entry of another manager is denied. Every atlas-cluster-actuator entry must
+# be an Update of the main resource whose fieldsV1 holds nothing but those paths. Accepted residual: the
+# actuator may drop the "." marker of a node on its own paths from another manager's entry (an ownership
+# mark of the map itself, not of a value).
 #
 # The comparisons iterate the keys of `object` and `oldObject` (dyn() makes them maps for CEL), so a field
 # added in a future API version is covered without editing this file. failurePolicy Fail: if an expression
@@ -72,8 +90,17 @@ spec:
       expression: '"annotations" in variables.newMeta ? variables.newMeta.annotations : {}'
     - name: annoOld
       expression: '"annotations" in variables.oldMeta ? variables.oldMeta.annotations : {}'
+    # The API server bumps this annotation itself when a DaemonSet's pod template changes (the
+    # DaemonSet update strategy), so a restart of a DaemonSet carries it. Allowed on DaemonSets only,
+    # and only as an increment of exactly 1 (validation dsGeneration below).
+    - name: isDaemonSet
+      expression: 'request.resource.resource == "daemonsets"'
+    - name: dsGenKey
+      expression: '"deprecated.daemonset.template.generation"'
     - name: allowedAnno
-      expression: 'variables.isWorkload ? [] : ["reconcile.fluxcd.io/requestedAt"]'
+      expression: >-
+        variables.isWorkload ? (variables.isDaemonSet ? [variables.dsGenKey] : []) :
+        ["reconcile.fluxcd.io/requestedAt"]
     - name: specNew
       expression: '"spec" in variables.newObj ? variables.newObj.spec : {}'
     - name: specOld
@@ -90,7 +117,54 @@ spec:
       expression: '"annotations" in variables.tplMetaNew ? variables.tplMetaNew.annotations : {}'
     - name: tplAnnoOld
       expression: '"annotations" in variables.tplMetaOld ? variables.tplMetaOld.annotations : {}'
+    # The two root Kustomizations (olympus-sdk#956), by name.
+    - name: isRootKustomization
+      expression: >-
+        request.resource.resource == "kustomizations" && request.namespace == "flux-system" &&
+        request.name in ["flux-system", "atlas-system"]
+    # managedFields (olympus-sdk#956). Entries are matched on every key but fieldsV1.
+    - name: mfNew
+      expression: '"managedFields" in variables.newMeta ? variables.newMeta.managedFields : []'
+    - name: mfOld
+      expression: '"managedFields" in variables.oldMeta ? variables.oldMeta.managedFields : []'
+    # One {f: new fieldsV1, g: old fieldsV1} pair per entry to check; the managedFields rule requires each f
+    # to be its g with only the actuator's paths removed. (1) every new entry of another manager against its
+    # one old match (the rule requires exactly one); (2) every old entry of another manager against its new
+    # match, or against {} when it is gone (the rule allows at most one); (3) every actuator entry against
+    # {} (it may hold only the actuator's paths).
+    - name: fieldsPairs
+      expression: >-
+        variables.mfNew.filter(e, e.manager != "atlas-cluster-actuator").map(e,
+          {"f": dyn("fieldsV1" in e ? e.fieldsV1 : {}),
+           "g": (variables.mfOld.filter(o, o.all(k, k == "fieldsV1" || (k in e && e[k] == o[k])) && e.all(k, k == "fieldsV1" || k in o)).map(o, dyn("fieldsV1" in o ? o.fieldsV1 : {})) + [dyn({})])[0]}) +
+        variables.mfOld.filter(o, o.manager != "atlas-cluster-actuator").map(o,
+          {"f": (variables.mfNew.filter(e, o.all(k, k == "fieldsV1" || (k in e && e[k] == o[k])) && e.all(k, k == "fieldsV1" || k in o)).map(e, dyn("fieldsV1" in e ? e.fieldsV1 : {})) + [dyn({})])[0],
+           "g": dyn("fieldsV1" in o ? o.fieldsV1 : {})}) +
+        variables.mfNew.filter(e, e.manager == "atlas-cluster-actuator").map(e,
+          {"f": dyn({}), "g": dyn("fieldsV1" in e ? e.fieldsV1 : {})})
+    # The same pairs one level down, along the actuator's paths only.
+    - name: mfMeta
+      expression: 'variables.fieldsPairs.map(p, {"f": dyn("f:metadata" in p.f ? p.f["f:metadata"] : {}), "g": dyn("f:metadata" in p.g ? p.g["f:metadata"] : {})})'
+    - name: mfAnno
+      expression: 'variables.mfMeta.map(p, {"f": dyn("f:annotations" in p.f ? p.f["f:annotations"] : {}), "g": dyn("f:annotations" in p.g ? p.g["f:annotations"] : {})})'
+    - name: mfSpec
+      expression: 'variables.fieldsPairs.map(p, {"f": dyn("f:spec" in p.f ? p.f["f:spec"] : {}), "g": dyn("f:spec" in p.g ? p.g["f:spec"] : {})})'
+    - name: mfTpl
+      expression: 'variables.mfSpec.map(p, {"f": dyn("f:template" in p.f ? p.f["f:template"] : {}), "g": dyn("f:template" in p.g ? p.g["f:template"] : {})})'
+    - name: mfTplMeta
+      expression: 'variables.mfTpl.map(p, {"f": dyn("f:metadata" in p.f ? p.f["f:metadata"] : {}), "g": dyn("f:metadata" in p.g ? p.g["f:metadata"] : {})})'
+    - name: mfTplAnno
+      expression: 'variables.mfTplMeta.map(p, {"f": dyn("f:annotations" in p.f ? p.f["f:annotations"] : {}), "g": dyn("f:annotations" in p.g ? p.g["f:annotations"] : {})})'
   validations:
+    # A DaemonSet's template generation may only move up by one (set by the API server on a restart).
+    - expression: >-
+        !variables.isMainUpdate || !variables.isDaemonSet ||
+        !(variables.dsGenKey in variables.annoNew) ||
+        ((variables.dsGenKey in variables.annoOld) && variables.annoNew[variables.dsGenKey] == variables.annoOld[variables.dsGenKey]) ||
+        ((variables.dsGenKey in variables.annoOld) &&
+         int(variables.annoNew[variables.dsGenKey]) == int(variables.annoOld[variables.dsGenKey]) + 1)
+      reason: Forbidden
+      message: "atlas-cluster-actuator may only see deprecated.daemonset.template.generation increase by one"
     - expression: 'variables.isMainUpdate'
       reason: Forbidden
       message: "atlas-cluster-actuator may only update (patch) the main resource: no create, delete or subresource writes"
@@ -133,6 +207,39 @@ spec:
          variables.tplAnnoOld.all(k, k in variables.tplAnnoNew))
       reason: Forbidden
       message: "atlas-cluster-actuator may only set spec.template.metadata.annotations[kubectl.kubernetes.io/restartedAt] on workloads"
+    # Root Kustomizations: spec.suspend may not become true (olympus-sdk#956). Already true stays admitted, so
+    # a reconcile or resume of a suspended root still works.
+    - expression: >-
+        !variables.isMainUpdate || !variables.isRootKustomization ||
+        !("suspend" in variables.specNew && variables.specNew.suspend == true) ||
+        ("suspend" in variables.specOld && variables.specOld.suspend == true)
+      reason: Forbidden
+      message: "atlas-cluster-actuator may not suspend the root Kustomizations flux-system/flux-system and flux-system/atlas-system"
+    # managedFields (olympus-sdk#956): each new entry of another manager matches exactly one old entry and each
+    # old one at most one new entry (on every key but fieldsV1); every actuator entry is an Update of the
+    # main resource; and on every level of the actuator's paths each pair's new node equals its old node but
+    # for the dropped keys named there (see the header).
+    - expression: >-
+        !variables.isMainUpdate ||
+        (variables.mfNew.all(e, e.manager == "atlas-cluster-actuator" ||
+            variables.mfOld.exists_one(o, o.all(k, k == "fieldsV1" || (k in e && e[k] == o[k])) && e.all(k, k == "fieldsV1" || k in o))) &&
+         variables.mfOld.all(o, o.manager == "atlas-cluster-actuator" ||
+            !variables.mfNew.exists(e, o.all(k, k == "fieldsV1" || (k in e && e[k] == o[k])) && e.all(k, k == "fieldsV1" || k in o)) ||
+            variables.mfNew.exists_one(e, o.all(k, k == "fieldsV1" || (k in e && e[k] == o[k])) && e.all(k, k == "fieldsV1" || k in o))) &&
+         variables.mfNew.all(e, e.manager != "atlas-cluster-actuator" ||
+            (e.operation == "Update" && (!("subresource" in e) || e.subresource == ""))) &&
+         (variables.isWorkload
+          ? (variables.fieldsPairs.all(p, p.f.all(k, k in p.g && (k in ["f:spec"] || p.f[k] == p.g[k])) && p.g.all(k, k in p.f || k in ["f:spec"])) &&
+            variables.mfSpec.all(p, p.f.all(k, k in p.g && (k in ["f:template"] || p.f[k] == p.g[k])) && p.g.all(k, k in p.f || k in ["f:template", "."])) &&
+            variables.mfTpl.all(p, p.f.all(k, k in p.g && (k in ["f:metadata"] || p.f[k] == p.g[k])) && p.g.all(k, k in p.f || k in ["f:metadata", "."])) &&
+            variables.mfTplMeta.all(p, p.f.all(k, k in p.g && (k in ["f:annotations"] || p.f[k] == p.g[k])) && p.g.all(k, k in p.f || k in ["f:annotations", "."])) &&
+            variables.mfTplAnno.all(p, p.f.all(k, k in p.g && p.f[k] == p.g[k]) && p.g.all(k, k in p.f || k in [".", "f:kubectl.kubernetes.io/restartedAt"])))
+          : (variables.fieldsPairs.all(p, p.f.all(k, k in p.g && (k in ["f:metadata", "f:spec"] || p.f[k] == p.g[k])) && p.g.all(k, k in p.f || k in ["f:metadata", "f:spec"])) &&
+            variables.mfMeta.all(p, p.f.all(k, k in p.g && (k in ["f:annotations"] || p.f[k] == p.g[k])) && p.g.all(k, k in p.f || k in ["f:annotations", "."])) &&
+            variables.mfAnno.all(p, p.f.all(k, k in p.g && p.f[k] == p.g[k]) && p.g.all(k, k in p.f || k in [".", "f:reconcile.fluxcd.io/requestedAt"])) &&
+            variables.mfSpec.all(p, p.f.all(k, k in p.g && p.f[k] == p.g[k]) && p.g.all(k, k in p.f || k in [".", "f:suspend"])))))
+      reason: Forbidden
+      message: "atlas-cluster-actuator may not add or change metadata.managedFields entries beyond its own fields"
 ---
 # Enforce (Deny) for every namespace. No paramKind, no matchResources: the policy's own matchConstraints
 # and matchConditions scope it.
