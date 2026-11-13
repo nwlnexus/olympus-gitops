@@ -1,0 +1,99 @@
+# atlas cluster actuator (olympus-sdk#922): the cluster agent image in actuator mode. It polls
+# Hermes for signed cluster commands (Flux reconcile, suspend, resume; rollout restart), verifies
+# each frame against this cluster's id, records the command id in the dedupe ConfigMap, then makes
+# one merge patch. RBAC (actuator-rbac.yaml) and the admission policy (actuator-admission.yaml)
+# limit what it can change; egress is actuator-networkpolicy.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas-cluster-actuator
+  namespace: atlas-system
+  annotations:
+    # Roll the pod when the credentials Secret changes (stakater reloader).
+    reloader.stakater.com/auto: "true"
+spec:
+  # Exactly one: commands are claimed by the poll and deduplicated, but one actuator keeps the
+  # audit trail simple. Recreate so two never overlap during a rollout.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: atlas-cluster-actuator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: atlas-cluster-actuator
+    spec:
+      serviceAccountName: atlas-cluster-actuator
+      tolerations:
+        - key: olympus.io/arch
+          operator: Equal
+          value: arm64
+          effect: NoSchedule
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: atlas-cluster-actuator
+          # Multi-arch index digest of tag a2f7d51 (olympus-sdk#952, actuator mode).
+          image: ghcr.io/nwlnexus/atlas-cluster-agent@sha256:f2edbcd5b143e958bb5283bdb91e1cad4c2faa0bb25fe4d0ac9fed5c6799bae9
+          ports:
+            - name: health
+              containerPort: 8080
+          env:
+            - name: AGENT_MODE
+              value: "actuator"
+            # Full GraphQL endpoint (the Hermes Worker; not in-cluster).
+            - name: HERMES_URL
+              value: "https://api.nwlnexus.net/graphql"
+            - name: HERMES_ACTUATOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: atlas-cluster-actuator-credentials
+                  key: hermes-actuator-token
+            - name: CLUSTER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: atlas-cluster-actuator-credentials
+                  key: cluster-id
+            # The dedupe ConfigMap lives in this namespace.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: HEALTH_PORT
+              value: "8080"
+            - name: RUST_LOG
+              value: "info"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 24Mi
+            limits:
+              cpu: 200m
+              memory: 96Mi

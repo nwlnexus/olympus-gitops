@@ -149,8 +149,11 @@ for signed cluster commands, verifies each against the pinned command key and th
 carries out one of four verbs with a fixed merge patch: `flux-reconcile`, `flux-suspend`, `flux-resume` and
 `rollout-restart`. It never runs `kubectl` or a shell.
 
-This directory holds its identity, RBAC, replay set, admission policy and egress rules. Its Deployment and
-the ExternalSecret for its token come in a later change, so today the identity exists with no pod.
+This directory holds its identity, RBAC, replay set, admission policy, egress rules, its credentials
+(`actuator-externalsecret.yaml`: 1Password item `atlas-cluster-actuator`, fields `hermes-actuator-token` and
+`cluster-id`) and its Deployment (`actuator-deployment.yaml`: one replica, `Recreate`, `AGENT_MODE=actuator`).
+Hermes refuses every command until people hold the cluster action capabilities, so a running actuator with
+nothing granted only polls.
 
 ### RBAC (`actuator-rbac.yaml`)
 
