@@ -40,8 +40,9 @@ spec:
           type: RuntimeDefault
       containers:
         - name: atlas-cluster-actuator
-          # Multi-arch index digest of tag 8a79d43 (olympus-sdk#961: refused_target for the root Kustomizations).
-          image: ghcr.io/nwlnexus/atlas-cluster-agent@sha256:2d929d21d0f138c34adec5ca0432028bb533c1692dafb229887a7dbb78389dfa
+          # Multi-arch index digest of tag 970c5db (olympus-sdk#957: stored outcomes re-reported on
+          # replay, repeated token-refused warning; includes #956).
+          image: ghcr.io/nwlnexus/atlas-cluster-agent@sha256:6669a4a7b471d6b02561e3920fa87d486fad341872ca63fcd28214ee39d3077b
           ports:
             - name: health
               containerPort: 8080
