@@ -90,8 +90,17 @@ spec:
       expression: '"annotations" in variables.newMeta ? variables.newMeta.annotations : {}'
     - name: annoOld
       expression: '"annotations" in variables.oldMeta ? variables.oldMeta.annotations : {}'
+    # The API server bumps this annotation itself when a DaemonSet's pod template changes (the
+    # DaemonSet update strategy), so a restart of a DaemonSet carries it. Allowed on DaemonSets only,
+    # and only as an increment of exactly 1 (validation dsGeneration below).
+    - name: isDaemonSet
+      expression: 'request.resource.resource == "daemonsets"'
+    - name: dsGenKey
+      expression: '"deprecated.daemonset.template.generation"'
     - name: allowedAnno
-      expression: 'variables.isWorkload ? [] : ["reconcile.fluxcd.io/requestedAt"]'
+      expression: >-
+        variables.isWorkload ? (variables.isDaemonSet ? [variables.dsGenKey] : []) :
+        ["reconcile.fluxcd.io/requestedAt"]
     - name: specNew
       expression: '"spec" in variables.newObj ? variables.newObj.spec : {}'
     - name: specOld
@@ -147,6 +156,15 @@ spec:
     - name: mfTplAnno
       expression: 'variables.mfTplMeta.map(p, {"f": dyn("f:annotations" in p.f ? p.f["f:annotations"] : {}), "g": dyn("f:annotations" in p.g ? p.g["f:annotations"] : {})})'
   validations:
+    # A DaemonSet's template generation may only move up by one (set by the API server on a restart).
+    - expression: >-
+        !variables.isMainUpdate || !variables.isDaemonSet ||
+        !(variables.dsGenKey in variables.annoNew) ||
+        ((variables.dsGenKey in variables.annoOld) && variables.annoNew[variables.dsGenKey] == variables.annoOld[variables.dsGenKey]) ||
+        ((variables.dsGenKey in variables.annoOld) &&
+         int(variables.annoNew[variables.dsGenKey]) == int(variables.annoOld[variables.dsGenKey]) + 1)
+      reason: Forbidden
+      message: "atlas-cluster-actuator may only see deprecated.daemonset.template.generation increase by one"
     - expression: 'variables.isMainUpdate'
       reason: Forbidden
       message: "atlas-cluster-actuator may only update (patch) the main resource: no create, delete or subresource writes"
