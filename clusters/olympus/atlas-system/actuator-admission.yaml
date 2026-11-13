@@ -1,0 +1,148 @@
+# Admission policy for the atlas cluster actuator (olympus-sdk#922). The third layer after the signed,
+# closed command set (checked in Hermes and again in the actuator) and RBAC (actuator-rbac.yaml): it bounds
+# what this one identity can change even if its token or pod is compromised.
+#
+# Matched only for user system:serviceaccount:atlas-system:atlas-cluster-actuator (matchConditions), on the
+# five kinds its ClusterRole names, main resource and every subresource. For that identity it:
+#   - denies CREATE, DELETE and any write to a subresource (scale, status): only UPDATE of the main
+#     resource (a merge patch arrives as an UPDATE) is admitted;
+#   - denies every write to a Deployment, StatefulSet or DaemonSet in kube-system, flux-system or
+#     atlas-system, so it can never restart itself, Flux or the cluster's system workloads. Flux objects
+#     are not namespace-restricted: the Kustomizations live in flux-system;
+#   - admits an UPDATE only if the new object equals the old one everywhere except
+#       Flux kinds:     metadata.annotations["reconcile.fluxcd.io/requestedAt"]  (flux-reconcile)
+#                       spec.suspend                                             (flux-suspend/-resume)
+#       workload kinds: spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"] (rollout-restart)
+#     The allowed annotation may be added or changed, never removed; no other annotation may change.
+#
+# Ignored in the comparison because the API server itself changes them on every update, so they differ
+# between oldObject and object for any legitimate patch: metadata.managedFields (the actuator's field
+# manager entry), metadata.resourceVersion, metadata.generation (bumped when spec changes) and status
+# (reset to the stored status on a main-resource update; status is only writable through the status
+# subresource, which is denied above).
+#
+# The comparisons iterate the keys of `object` and `oldObject` (dyn() makes them maps for CEL), so a field
+# added in a future API version is covered without editing this file. failurePolicy Fail: if an expression
+# cannot be evaluated, the request is denied. reason Forbidden: the API answers 403 (the default would be
+# 422), which the actuator reports as `denied: <message>`.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: atlas-cluster-actuator-fields
+  labels:
+    app.kubernetes.io/name: atlas-cluster-actuator
+    app.kubernetes.io/part-of: atlas
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["deployments", "deployments/*", "statefulsets", "statefulsets/*", "daemonsets", "daemonsets/*"]
+      - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["kustomizations", "kustomizations/*"]
+      - apiGroups: ["helm.toolkit.fluxcd.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["helmreleases", "helmreleases/*"]
+  matchConditions:
+    - name: actuator-only
+      expression: 'request.userInfo.username == "system:serviceaccount:atlas-system:atlas-cluster-actuator"'
+  variables:
+    - name: isWorkload
+      expression: 'request.resource.group == "apps"'
+    - name: refusedNamespaces
+      expression: '["kube-system", "flux-system", "atlas-system"]'
+    # An UPDATE of the main resource. request.subResource is absent (not "") when there is none.
+    - name: isMainUpdate
+      expression: 'request.operation == "UPDATE" && (!has(request.subResource) || request.subResource == "")'
+    # Only read under isMainUpdate: object and oldObject are both set for an UPDATE.
+    - name: newObj
+      expression: 'dyn(object)'
+    - name: oldObj
+      expression: 'dyn(oldObject)'
+    - name: newMeta
+      expression: 'variables.newObj.metadata'
+    - name: oldMeta
+      expression: 'variables.oldObj.metadata'
+    - name: annoNew
+      expression: '"annotations" in variables.newMeta ? variables.newMeta.annotations : {}'
+    - name: annoOld
+      expression: '"annotations" in variables.oldMeta ? variables.oldMeta.annotations : {}'
+    - name: allowedAnno
+      expression: 'variables.isWorkload ? [] : ["reconcile.fluxcd.io/requestedAt"]'
+    - name: specNew
+      expression: '"spec" in variables.newObj ? variables.newObj.spec : {}'
+    - name: specOld
+      expression: '"spec" in variables.oldObj ? variables.oldObj.spec : {}'
+    - name: tplNew
+      expression: '"template" in variables.specNew ? variables.specNew.template : {}'
+    - name: tplOld
+      expression: '"template" in variables.specOld ? variables.specOld.template : {}'
+    - name: tplMetaNew
+      expression: '"metadata" in variables.tplNew ? variables.tplNew.metadata : {}'
+    - name: tplMetaOld
+      expression: '"metadata" in variables.tplOld ? variables.tplOld.metadata : {}'
+    - name: tplAnnoNew
+      expression: '"annotations" in variables.tplMetaNew ? variables.tplMetaNew.annotations : {}'
+    - name: tplAnnoOld
+      expression: '"annotations" in variables.tplMetaOld ? variables.tplMetaOld.annotations : {}'
+  validations:
+    - expression: 'variables.isMainUpdate'
+      reason: Forbidden
+      message: "atlas-cluster-actuator may only update (patch) the main resource: no create, delete or subresource writes"
+    - expression: '!variables.isWorkload || !(request.namespace in variables.refusedNamespaces)'
+      reason: Forbidden
+      message: "atlas-cluster-actuator may not change workloads in kube-system, flux-system or atlas-system"
+    # Top level: everything but metadata, spec and status is unchanged.
+    - expression: >-
+        !variables.isMainUpdate ||
+        (variables.newObj.all(k, k in ["metadata", "spec", "status"] || (k in variables.oldObj && variables.newObj[k] == variables.oldObj[k])) &&
+         variables.oldObj.all(k, k in ["metadata", "spec", "status"] || k in variables.newObj))
+      reason: Forbidden
+      message: "atlas-cluster-actuator may not change top-level fields"
+    # metadata: unchanged except the server-maintained fields and, on Flux kinds, the requestedAt annotation.
+    - expression: >-
+        !variables.isMainUpdate ||
+        (variables.newMeta.all(k, k in ["managedFields", "resourceVersion", "generation", "annotations"] || (k in variables.oldMeta && variables.newMeta[k] == variables.oldMeta[k])) &&
+         variables.oldMeta.all(k, k in ["managedFields", "resourceVersion", "generation", "annotations"] || k in variables.newMeta) &&
+         variables.annoNew.all(k, k in variables.allowedAnno || (k in variables.annoOld && variables.annoNew[k] == variables.annoOld[k])) &&
+         variables.annoOld.all(k, k in variables.annoNew))
+      reason: Forbidden
+      message: "atlas-cluster-actuator may only set metadata.annotations[reconcile.fluxcd.io/requestedAt], on Flux objects"
+    # Flux spec: unchanged except spec.suspend.
+    - expression: >-
+        !variables.isMainUpdate || variables.isWorkload ||
+        (variables.specNew.all(k, k == "suspend" || (k in variables.specOld && variables.specNew[k] == variables.specOld[k])) &&
+         variables.specOld.all(k, k == "suspend" || k in variables.specNew))
+      reason: Forbidden
+      message: "atlas-cluster-actuator may only set spec.suspend on Flux objects"
+    # Workload spec: unchanged except spec.template.metadata.annotations[kubectl.kubernetes.io/restartedAt].
+    - expression: >-
+        !variables.isMainUpdate || !variables.isWorkload ||
+        (variables.specNew.all(k, k == "template" || (k in variables.specOld && variables.specNew[k] == variables.specOld[k])) &&
+         variables.specOld.all(k, k == "template" || k in variables.specNew) &&
+         variables.tplNew.all(k, k == "metadata" || (k in variables.tplOld && variables.tplNew[k] == variables.tplOld[k])) &&
+         variables.tplOld.all(k, k == "metadata" || k in variables.tplNew) &&
+         variables.tplMetaNew.all(k, k == "annotations" || (k in variables.tplMetaOld && variables.tplMetaNew[k] == variables.tplMetaOld[k])) &&
+         variables.tplMetaOld.all(k, k == "annotations" || k in variables.tplMetaNew) &&
+         variables.tplAnnoNew.all(k, k == "kubectl.kubernetes.io/restartedAt" || (k in variables.tplAnnoOld && variables.tplAnnoNew[k] == variables.tplAnnoOld[k])) &&
+         variables.tplAnnoOld.all(k, k in variables.tplAnnoNew))
+      reason: Forbidden
+      message: "atlas-cluster-actuator may only set spec.template.metadata.annotations[kubectl.kubernetes.io/restartedAt] on workloads"
+---
+# Enforce (Deny) for every namespace. No paramKind, no matchResources: the policy's own matchConstraints
+# and matchConditions scope it.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: atlas-cluster-actuator-fields
+  labels:
+    app.kubernetes.io/name: atlas-cluster-actuator
+    app.kubernetes.io/part-of: atlas
+spec:
+  policyName: atlas-cluster-actuator-fields
+  validationActions: ["Deny"]

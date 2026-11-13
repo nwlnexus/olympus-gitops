@@ -1,6 +1,6 @@
 # atlas-system
 
-Namespace for the in-cluster components of the atlas platform: the cluster agent and the read-only
+Namespace for the in-cluster components of the atlas platform: the cluster agent, the cluster actuator and the read-only
 Kubernetes MCP backend (`k8s-mcp`). Code and images ship from
 **olympus-sdk**; this directory is manifests only. Further components may be added here: each
 brings its own manifests and NetworkPolicy allow rules (the namespace is default-deny).
@@ -141,3 +141,50 @@ it, edit the value in this repository; Reloader restarts the pods.
 
 No MCP client entry on any host is configured here, intentionally: hosts get one only once the
 personal/work guard covers these tools (olympus-sdk#929).
+
+## atlas-cluster-actuator (signed cluster actions)
+
+The write side of the cluster agent (olympus-sdk#922; same image, `AGENT_MODE=actuator`). It polls Hermes
+for signed cluster commands, verifies each against the pinned command key and this cluster's identity, and
+carries out one of four verbs with a fixed merge patch: `flux-reconcile`, `flux-suspend`, `flux-resume` and
+`rollout-restart`. It never runs `kubectl` or a shell.
+
+This directory holds its identity, RBAC, replay set, admission policy and egress rules. Its Deployment and
+the ExternalSecret for its token come in a later change, so today the identity exists with no pod.
+
+### RBAC (`actuator-rbac.yaml`)
+
+ServiceAccount `atlas-cluster-actuator`, separate from the read agent's. A ClusterRole with `get` and
+`patch` only, on `apps` `deployments`/`statefulsets`/`daemonsets`, Flux `kustomizations` and
+`helmreleases`; no `list`, `watch`, `create`, `update`, `delete` and no subresources. A Role in
+`atlas-system` with `get` and `update` on the single ConfigMap `atlas-cluster-actuator-dedupe`
+(`resourceNames`), no `create`.
+
+### Replay set (`actuator-configmaps.yaml`)
+
+ConfigMap `atlas-cluster-actuator-dedupe`, created empty by Flux with `kustomize.toolkit.fluxcd.io/ssa:
+IfNotPresent`, so Flux never resets it. The actuator records each command id in it before it acts and never
+acts on an id it has seen. If the ConfigMap is missing, every command fails closed.
+
+### Admission policy (`actuator-admission.yaml`)
+
+RBAC alone would let this identity patch any field of the five kinds. The `ValidatingAdmissionPolicy`
+`atlas-cluster-actuator-fields` (binding `Deny`, `failurePolicy: Fail`) applies only to
+`system:serviceaccount:atlas-system:atlas-cluster-actuator` and:
+
+- admits only UPDATE of the main resource (no create, delete or subresource write);
+- refuses any workload write in `kube-system`, `flux-system` and `atlas-system`;
+- admits an update only if nothing changed except `metadata.annotations["reconcile.fluxcd.io/requestedAt"]`
+  and `spec.suspend` (Flux kinds) or `spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"]`
+  (workloads). Server-maintained fields (`managedFields`, `resourceVersion`, `generation`, `status`) are
+  ignored in the comparison.
+
+### Network (`actuator-networkpolicy.yaml`)
+
+No ingress. Egress: CoreDNS, the Kubernetes API server, and TCP 443 to Cloudflare's published IPv4 ranges
+(Hermes is a Cloudflare Worker; the same list as k8s-mcp, so update both together).
+
+### Kill switches
+
+Revoke the actuator token in IRIS (the actuator gets 401 and backs off), or scale its Deployment to 0 here.
+The admission policy and RBAC stay in place regardless.

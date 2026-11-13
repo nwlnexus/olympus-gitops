@@ -13,3 +13,9 @@ resources:
   - k8s-mcp-deployment.yaml
   - k8s-mcp-service.yaml
   - k8s-mcp-networkpolicy.yaml
+  # Cluster actuator identity, RBAC, replay set, admission policy and egress (olympus-sdk#922).
+  # The Deployment and its ExternalSecret come in a later change.
+  - actuator-rbac.yaml
+  - actuator-configmaps.yaml
+  - actuator-admission.yaml
+  - actuator-networkpolicy.yaml
