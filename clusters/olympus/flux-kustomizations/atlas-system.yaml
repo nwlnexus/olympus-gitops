@@ -33,3 +33,10 @@ spec:
       kind: Deployment
       name: k8s-mcp
       namespace: atlas-system
+    # The cluster actuator (olympus-sdk#922, #957): a failed rollout (image pull, crash loop, failing
+    # /healthz) marks this Kustomization not Ready. Like k8s-mcp, it is checked after every object is
+    # applied, so it never holds back the cluster agent's objects.
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: atlas-cluster-actuator
+      namespace: atlas-system
