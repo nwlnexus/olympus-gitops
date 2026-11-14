@@ -1,3 +1,4 @@
+# trigger demo for olympus-sdk#964 (throwaway, never merged)
 # Admission policy for the atlas cluster actuator (olympus-sdk#922). The third layer after the signed,
 # closed command set (checked in Hermes and again in the actuator) and RBAC (actuator-rbac.yaml): it bounds
 # what this one identity can change even if its token or pod is compromised.
