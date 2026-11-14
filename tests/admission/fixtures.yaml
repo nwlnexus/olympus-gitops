@@ -1,0 +1,245 @@
+# Fixture objects for the admission test bed (olympus-sdk#964). run.sh applies this file with server-side
+# apply under field manager `kustomize-controller`, the way Flux applies the real objects, so every spec
+# field belongs to that manager. Shapes follow the live objects closely enough for the policy (the policy
+# compares fields generically, so values do not matter); nothing here is deployed anywhere.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: flux-system
+  namespace: flux-system
+  labels:
+    kustomize.toolkit.fluxcd.io/name: flux-system
+    kustomize.toolkit.fluxcd.io/namespace: flux-system
+spec:
+  interval: 10m0s
+  path: ./clusters/olympus
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: atlas-system
+  namespace: flux-system
+  labels:
+    kustomize.toolkit.fluxcd.io/name: flux-system
+    kustomize.toolkit.fluxcd.io/namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/atlas-system
+  prune: true
+  wait: true
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: whoami
+  namespace: flux-system
+  labels:
+    kustomize.toolkit.fluxcd.io/name: flux-system
+    kustomize.toolkit.fluxcd.io/namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/whoami
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    - name: cert-manager-config
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: cert-manager
+  namespace: flux-system
+  labels:
+    kustomize.toolkit.fluxcd.io/name: flux-system
+    kustomize.toolkit.fluxcd.io/namespace: flux-system
+spec:
+  interval: 10m
+  path: ./clusters/olympus/cert-manager
+  prune: true
+  wait: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  dependsOn:
+    - name: external-secrets
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: olympus-gate
+  namespace: arc-runners
+  labels:
+    kustomize.toolkit.fluxcd.io/name: arc
+    kustomize.toolkit.fluxcd.io/namespace: flux-system
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: gha-runner-scale-set
+    namespace: arc-system
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    githubConfigUrl: https://github.com/example
+    minRunners: 0
+    maxRunners: 8
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whoami
+  namespace: whoami
+  labels:
+    app: whoami
+    kustomize.toolkit.fluxcd.io/name: whoami
+    kustomize.toolkit.fluxcd.io/namespace: flux-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: whoami
+  template:
+    metadata:
+      labels:
+        app: whoami
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.10
+          ports:
+            - containerPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels:
+    k8s-app: kube-dns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: kube-dns
+  template:
+    metadata:
+      labels:
+        k8s-app: kube-dns
+    spec:
+      containers:
+        - name: coredns
+          image: rancher/mirrored-coredns-coredns:1.12.0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-dns
+  namespace: external-dns
+  labels:
+    app.kubernetes.io/name: external-dns
+    kustomize.toolkit.fluxcd.io/name: external-dns
+    kustomize.toolkit.fluxcd.io/namespace: flux-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: external-dns
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: external-dns
+    spec:
+      containers:
+        - name: external-dns
+          image: registry.k8s.io/external-dns/external-dns:v0.15.0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas-cluster-actuator
+  namespace: atlas-system
+  labels:
+    app.kubernetes.io/name: atlas-cluster-actuator
+    kustomize.toolkit.fluxcd.io/name: atlas-system
+    kustomize.toolkit.fluxcd.io/namespace: flux-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: atlas-cluster-actuator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: atlas-cluster-actuator
+    spec:
+      serviceAccountName: atlas-cluster-actuator
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: actuator
+          image: ghcr.io/example/atlas-cluster-agent:test
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kustomize-controller
+  namespace: flux-system
+  labels:
+    app: kustomize-controller
+    kustomize.toolkit.fluxcd.io/name: flux-system
+    kustomize.toolkit.fluxcd.io/namespace: flux-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kustomize-controller
+  template:
+    metadata:
+      labels:
+        app: kustomize-controller
+    spec:
+      containers:
+        - name: manager
+          image: ghcr.io/fluxcd/kustomize-controller:v1.6.0
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: otel
+  labels:
+    app.kubernetes.io/name: node-exporter
+    kustomize.toolkit.fluxcd.io/name: otel
+    kustomize.toolkit.fluxcd.io/namespace: flux-system
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: node-exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: node-exporter
+    spec:
+      containers:
+        - name: node-exporter
+          image: quay.io/prometheus/node-exporter:v1.9.0
