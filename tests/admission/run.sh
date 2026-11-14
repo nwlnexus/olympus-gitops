@@ -32,14 +32,18 @@ if [ -z "${ADMISSION_TEST_IN_NIX:-}" ]; then
     "$np#kubernetes" "$np#etcd" "$np#openssl" "$np#gawk" -c bash "${BASH_SOURCE[0]}" "$@"
 fi
 
-# Never talk to a real cluster: no inherited kubeconfig, and every kubectl call passes --kubeconfig and
-# --cache-dir inside the temp dir, so nothing under ~/.kube is read or written.
-unset KUBECONFIG
-
 SA=system:serviceaccount:atlas-system:atlas-cluster-actuator
 atlas=$repo/clusters/olympus/atlas-system
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/admission-test.XXXXXX")
 pids=()
+
+# Never touch a real cluster or the user's kubectl setup: no inherited kubeconfig, kuberc off, HOME moved
+# into the temp dir (nix is not used past this point), and every kubectl call passes its own --kubeconfig
+# and --cache-dir there. So the user's ~/.kube is never opened, read or written.
+unset KUBECONFIG
+export KUBERC=off
+export HOME=$tmp/home
+mkdir -p "$HOME"
 cleanup() {
   # Stop in reverse start order (the API server before etcd, or its shutdown can hang), 10 s each.
   local i p

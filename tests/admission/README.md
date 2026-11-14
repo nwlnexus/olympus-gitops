@@ -22,8 +22,8 @@ line per row and exits 1 if any row fails.
    is a static token in `system:masters`, and the service-account keys are generated. It also starts
    kube-controller-manager with only the `validatingadmissionpolicy-status-controller`, which writes
    the policy's type-checking status. The temp dir, with its kubeconfig and kubectl cache, is removed
-   on exit. `KUBECONFIG` is unset, and every kubectl call passes its own `--kubeconfig`, so
-   `~/.kube` is never read or written.
+   on exit. `KUBECONFIG` is unset, `KUBERC=off`, `HOME` points into the temp dir, and every kubectl
+   call passes its own `--kubeconfig`, so the user's `~/.kube` is never opened, read or written.
 2. Applies the Flux CRDs, taken from `clusters/olympus/flux-system/gotk-components.yaml`. Then it
    applies, as committed: the `atlas-system` namespace, `actuator-rbac.yaml`, `actuator-configmaps.yaml`
    and the policy with its binding. It waits until the policy status shows the policy was type-checked.
