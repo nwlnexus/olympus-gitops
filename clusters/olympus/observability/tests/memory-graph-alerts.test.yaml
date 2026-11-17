@@ -122,35 +122,185 @@ tests:
         alertname: MemoryGraphExtractionFailing
         exp_alerts: []
 
-  # --- MemorySupersessionReviewBacklog: > 200 pending, for 7d ----------------------------------------------------
-  - name: supersession backlog above 200 for a week fires
+  # --- MemorySupersessionHumanQueueStale: oldest human-queue item > 7d, for 1h ------------------------------------
+  # The gauge is the item's age in seconds; the series below climbs 60 s per minute from 6d 23h.
+  - name: a human-queue item older than 7 days fires after 1h
     interval: 1m
     input_series:
-      - series: 'memory_graph_suggestions_pending{pod="memory-gateway-a"}'
-        values: "250x10300"
-      - series: 'memory_graph_suggestions_pending{pod="memory-gateway-b"}'
-        values: "250x10300"
+      - series: 'memory_graph_suggestions_human_oldest_seconds{pod="memory-gateway-a"}'
+        values: "601200+60x300"
+      - series: 'memory_graph_suggestions_human_oldest_seconds{pod="memory-gateway-b"}'
+        values: "601200+60x300"
     alert_rule_test:
-      - eval_time: 160h
-        alertname: MemorySupersessionReviewBacklog
+      - eval_time: 20m
+        alertname: MemorySupersessionHumanQueueStale
         exp_alerts: []
-      - eval_time: 170h
-        alertname: MemorySupersessionReviewBacklog
+      - eval_time: 150m
+        alertname: MemorySupersessionHumanQueueStale
         exp_alerts:
           - exp_labels:
               severity: warning
             exp_annotations:
-              summary: "More than 200 supersession suggestions have waited for review for a week."
-              description: "250 suggestions are pending. Suggestions nobody reviews lose their value: `kubectl -n memory exec deploy/memory-gateway -- node dist/admin/cli.js supersession list`, then `supersession accept|reject <id> --apply`."
+              summary: "A supersession suggestion has waited for a person for more than 7 days."
+              description: "The oldest suggestion left for review is 7d 1h 30m 0s old. Open the review page in IRIS, or list them with `kubectl -n memory exec deploy/memory-gateway -- node dist/admin/cli.js supersession list`, then accept or reject each with `--apply`."
 
-  - name: supersession backlog of 200 or fewer stays silent
+  - name: a human queue younger than 7 days stays silent
     interval: 1m
     input_series:
-      - series: 'memory_graph_suggestions_pending'
-        values: "200x10300"
+      - series: 'memory_graph_suggestions_human_oldest_seconds'
+        values: "500000x300"
     alert_rule_test:
-      - eval_time: 170h
-        alertname: MemorySupersessionReviewBacklog
+      - eval_time: 4h
+        alertname: MemorySupersessionHumanQueueStale
+        exp_alerts: []
+
+  - name: an empty human queue (0) and a missing gauge stay silent
+    interval: 1m
+    input_series:
+      - series: 'memory_graph_suggestions_human_oldest_seconds'
+        values: "0x300"
+    alert_rule_test:
+      - eval_time: 4h
+        alertname: MemorySupersessionHumanQueueStale
+        exp_alerts: []
+      - eval_time: 4h
+        alertname: MemorySupersessionJudgeStalled
+        exp_alerts: []
+
+  # --- MemorySupersessionJudgeStalled: oldest unjudged > 24h, for 1h ----------------------------------------------
+  - name: an unjudged suggestion older than 24h fires after 1h
+    interval: 1m
+    input_series:
+      - series: 'memory_graph_suggestions_unjudged_oldest_seconds{pod="memory-gateway-a"}'
+        values: "90000+60x300"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: MemorySupersessionJudgeStalled
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: MemorySupersessionJudgeStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The supersession judge has not read the oldest suggestion for more than 24h."
+              description: "The oldest unjudged suggestion is 1d 2h 30m 0s old. The judge is off, paused or failing: check `memory-admin worker pause` (a pause on scope llm holds it) and the worker logs (`kubectl -n memory logs deploy/memory-worker-extract`)."
+
+  - name: an unjudged backlog under 24h stays silent
+    interval: 1m
+    input_series:
+      - series: 'memory_graph_suggestions_unjudged_oldest_seconds'
+        values: "80000x300"
+    alert_rule_test:
+      - eval_time: 4h
+        alertname: MemorySupersessionJudgeStalled
+        exp_alerts: []
+
+  # --- MemorySupersessionJudgeErrors: error share > 20 % over 6h, for 30m ----------------------------------------
+  - name: judge error share above 20 percent fires after 30m
+    interval: 1m
+    input_series:
+      - series: 'memory_worker_supersession_judged_total{verdict="error", applied="false"}'
+        values: "0+3x600"
+      - series: 'memory_worker_supersession_judged_total{verdict="reject", applied="true"}'
+        values: "0+5x600"
+      - series: 'memory_worker_supersession_judged_total{verdict="unsure", applied="false"}'
+        values: "0+2x600"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MemorySupersessionJudgeErrors
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: MemorySupersessionJudgeErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "More than 20% of supersession judge answers were errors over 6h."
+              description: "30% of judge answers were unusable. Errors leave the suggestion for a person. A model, endpoint or prompt change is the likely cause: check the worker logs (`kubectl -n memory logs deploy/memory-worker-extract`) and the inference backend."
+
+  - name: judge error share at or below 20 percent stays silent
+    interval: 1m
+    input_series:
+      - series: 'memory_worker_supersession_judged_total{verdict="error", applied="false"}'
+        values: "0+1x600"
+      - series: 'memory_worker_supersession_judged_total{verdict="reject", applied="true"}'
+        values: "0+9x600"
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: MemorySupersessionJudgeErrors
+        exp_alerts: []
+
+  - name: no judged answers at all (zero denominator) stays silent
+    interval: 1m
+    input_series:
+      - series: 'memory_worker_supersession_judged_total{verdict="error", applied="false"}'
+        values: "0x600"
+      - series: 'memory_worker_supersession_judged_total{verdict="reject", applied="true"}'
+        values: "0x600"
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: MemorySupersessionJudgeErrors
+        exp_alerts: []
+
+  # --- MemorySupersessionJudgeBreaker: accepts in 24h >= 5, for 5m ------------------------------------------------
+  - name: five judge accepts in 24h fire after 5m
+    interval: 1m
+    input_series:
+      - series: 'memory_graph_supersession_judge_accepts_24h{pod="memory-gateway-a"}'
+        values: "5x60"
+      - series: 'memory_graph_supersession_judge_accepts_24h{pod="memory-gateway-b"}'
+        values: "5x60"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: MemorySupersessionJudgeBreaker
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: MemorySupersessionJudgeBreaker
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The supersession judge hit its daily auto-accept limit."
+              description: "5 suggestions were accepted by the judge in 24h, so further auto-accepts are held for a person. Check the latest accepts with `memory-admin supersession list --state accepted` and undo a wrong one with `undo-judge`."
+
+  - name: four judge accepts in 24h stay silent
+    interval: 1m
+    input_series:
+      - series: 'memory_graph_supersession_judge_accepts_24h'
+        values: "4x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: MemorySupersessionJudgeBreaker
+        exp_alerts: []
+
+  # --- MemorySupersessionNoisy: > 50 new suggestions in 24h, for 1h (info) -----------------------------------------
+  - name: more than 50 new suggestions in a day fires after 1h
+    interval: 1m
+    input_series:
+      - series: 'memory_worker_graph_suggestions_total{pod="memory-worker-extract-a"}'
+        values: "0+1x1500"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: MemorySupersessionNoisy
+        exp_alerts: []
+      - eval_time: 5h
+        alertname: MemorySupersessionNoisy
+        exp_alerts:
+          - exp_labels:
+              severity: info
+            exp_annotations:
+              summary: "More than 50 new supersession suggestions in 24h."
+              description: "300 suggestions were created in 24h, well above the usual rate. A big rise means the extractor or its prompt changed; compare with the last model or prompt change."
+
+  - name: a quiet day of suggestions stays silent
+    interval: 1m
+    input_series:
+      - series: 'memory_worker_graph_suggestions_total{pod="memory-worker-extract-a"}'
+        values: "0+1x20 20x1480"
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: MemorySupersessionNoisy
         exp_alerts: []
 
   # --- MemoryWorkerPausedLong: any scope paused, for 24h ----------------------------------------------------------
