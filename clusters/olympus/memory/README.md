@@ -1,7 +1,7 @@
 # memory — data stores for the memory platform
 
 Namespace `memory`. Implements nwlnexus/olympus-sdk#449 (epic #444, spec sections D3, D4
-and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0016, see below); the
+and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0017, see below); the
 gateway (#450, see `gateway/README.md`; deployed by its own Flux Kustomization), workers (#453, see
 `workers/README.md`) and the CPU embedding service (olympus-sdk#529, see `embedder/README.md`) have their
 own manifests and Flux Kustomizations.
@@ -133,6 +133,12 @@ cleanup (§14.10 step 4, below).
 |---|---|
 | `0006_graph_cleanup.sql` | removes what 0005 left inert (design §14.10 step 4, task P2): legacy `graph_forget` jobs (the graph of a still-forgotten fact is detached first through `graph_detach_fact`, as the old drain did), the stage `graph_forget` from the `capture_queue` stage and target CHECKs, `fact_graph_episode`, and `entity_name_lower_idx`. On the cluster it runs after 0013 (the runner skips applied versions and applies the rest in lexical order); on a fresh database between 0005 and 0007. Apply only after the gateway and worker images of olympus-gitops#230 (no `graph_forget`, purge without `fact_graph_episode`) are live |
 | `0014_graph_retry_failed_audit.sql` | the audit action `graph_retry_failed` of `memory-admin graph retry-failed` (one row per fact): 0011's list plus the new action. Not in 0006, because on a fresh database 0011 runs after 0006 and re-asserts the list; 0013 does not touch the list |
+
+### Migration 0017: supersession noise (olympus-sdk#967)
+
+| File | What |
+|---|---|
+| `0017_graph_supersession_noise.sql` | `CREATE OR REPLACE` of `graph_repair_invalidated` and `graph_merge_entities` of 0015 (same signatures and grants) plus the internal helper `graph_single_valued_target`: only the lifecycle values of `HAS_STATUS` (live, retired, read-only, decommissioned, dropped, not built) take part in its single-valued rule, so an older free-text status neither invalidates nor is invalidated; a merge proposes no suggestion whose older fact is an `event` or has a `valid_to` in the past, and at most one per invalidated edge (the most recent older fact that can still be superseded against the most recent live newer fact). Edges are invalidated as before. Functions only, `lock_timeout` 5 s: safe while the gateway and workers write; order against the images does not matter (the workers image of olympus-sdk#967 applies the same rules on its side and needs no new column or function) |
 
 ### Migration 0016: knowledge source (olympus-sdk#853)
 
