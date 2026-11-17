@@ -127,7 +127,7 @@ spec:
             - name: app-token
               # Same digest as the index container below (bump together). No runAsUser: runs as the pod's
               # nobody (65534) so the clone-code container (also nobody) can read the 0600 token file.
-              image: ghcr.io/nwlnexus/memory-gateway@sha256:061a3de502c105c39f3f0feb376440c87c76a45f368451459985b76a41c7bf05
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:1b88e1a9920725ae20c059a2bcfdf46c4f472f39160fafaa5c82c2c4c3a1f4a0
               imagePullPolicy: IfNotPresent
               command:
                 - /bin/sh
@@ -230,7 +230,7 @@ spec:
           containers:
             - name: index
               # Same digest as the memory-gateway Deployment (gateway.yaml). Bump both together.
-              image: ghcr.io/nwlnexus/memory-gateway@sha256:061a3de502c105c39f3f0feb376440c87c76a45f368451459985b76a41c7bf05
+              image: ghcr.io/nwlnexus/memory-gateway@sha256:1b88e1a9920725ae20c059a2bcfdf46c4f472f39160fafaa5c82c2c4c3a1f4a0
               imagePullPolicy: IfNotPresent
               command:
                 - /bin/sh
