@@ -82,22 +82,59 @@ spec:
           smtp_auth_username: resend
           smtp_auth_password_file: /etc/alertmanager/secrets/api_key
           smtp_require_tls: true
+        # Noise review 2026-11-16: about 80% of the mail in the 10 days after delivery came back was warnings
+        # resending every 4h, their RESOLVED twins, and one node outage sent as 18 e-mails. Criticals keep the
+        # 4h repeat and RESOLVED mail; warnings send once a day and no RESOLVED (Grafana's alert list shows
+        # when one cleared).
         route:
-          receiver: email
+          receiver: email-warning
           group_by: [alertname, cluster]
           group_wait: 30s
           group_interval: 5m
-          repeat_interval: 4h
+          repeat_interval: 24h
           routes:
             # Watchdog always fires; sink it (reserve for a future dead-man's-switch).
             - matchers:
                 - 'alertname="Watchdog"'
               receiver: 'null'
+            - matchers:
+                - 'severity="critical"'
+              receiver: email
+              repeat_interval: 4h
+            # A review backlog changes over weeks; a weekly reminder is enough.
+            - matchers:
+                - 'alertname="MemorySupersessionReviewBacklog"'
+              receiver: email-warning
+              repeat_interval: 168h
+        # While a node is NotReady, the scrape targets and host services on it fail as a consequence: the node
+        # alert is the one to act on. TargetDown carries no node label, so any NotReady node mutes all of it
+        # (a homelab trade-off: a second, unrelated target outage during a node outage shows only in Grafana).
+        # data-hub-vm runs on the data-hub Mac, so its NotReady also mutes the Mac's own service alerts.
+        inhibit_rules:
+          - source_matchers:
+              - 'alertname="KubeNodeNotReady"'
+            target_matchers:
+              - 'alertname="TargetDown"'
+          - source_matchers:
+              - 'alertname="KubeNodeNotReady"'
+              - 'node="data-hub-vm"'
+            target_matchers:
+              - 'alertname=~"DataHub.+"'
+          - source_matchers:
+              - 'alertname="KubeNodeNotReady"'
+              - 'node="data-hub-vm"'
+            target_matchers:
+              - 'alertname=~"MacCIRunner.+"'
+              - 'host_name="data-hub"'
         receivers:
           - name: email
             email_configs:
               - to: nigel.williamslucas@gmail.com
                 send_resolved: true
+          - name: email-warning
+            email_configs:
+              - to: nigel.williamslucas@gmail.com
+                send_resolved: false
           - name: 'null'
     # data-hub host probes via blackbox-exporter (observability/blackbox-exporter).
     # data-hub is a Mac Studio host, not a cluster; addresses are its tailnet IP
@@ -491,15 +528,8 @@ spec:
                   summary: "llama-server {{ $labels.instance }} has a request in flight but is not decoding."
                   description: "llamacpp:requests_processing has been above 0 with no decode progress for 15m on {{ $labels.instance }}. The server is wedged; the data-hub watchdog should have restarted it. Check the llama-server launchd job and log on data-hub."
               # Restarts on either host: llamacpp:n_decode_total is a monotonic counter that resets
-              # to 0 when the process restarts (crash, watchdog kill, deploy). The 15m window outlasts
-              # the 30s scrape so a single restart is always seen; the alert clears 15m later.
-              - alert: InferenceInstanceRestarted
-                expr: resets(llamacpp:n_decode_total[15m]) > 0
-                labels:
-                  severity: warning
-                annotations:
-                  summary: "llama-server {{ $labels.instance_name }} on {{ $labels.host }} restarted."
-                  description: "The llamacpp:n_decode_total counter on {{ $labels.instance }} reset in the last 15m: the process restarted (crash, watchdog or deploy). A one-off after a deploy is expected; repeats mean InferenceInstanceRestartLoop. Check the inference-server-* unit (a9) or the launchd job (data-hub) and its watchdog log."
+              # to 0 when the process restarts (crash, watchdog kill, deploy). A single restart is not
+              # alerted (noise review 2026-11-16: it fired on every deploy and host reboot); a loop is.
               - alert: InferenceInstanceRestartLoop
                 expr: resets(llamacpp:n_decode_total[1h]) >= 3
                 labels:
@@ -665,13 +695,19 @@ spec:
               # Note: a counter with labels has no series until its first increment, so this stays
               # silent (empty vector) on a gateway that has never received a capture, and for 24h
               # after the last one; that is the design's expression, kept as written.
+              # Gated on use (noise review 2026-11-16): an idle weekend fired it for two days. The Stop hook
+              # ships a capture at least every 15 min of an active session, so 30 min of active personal
+              # Claude Code time (otel telemetry, agent-sessions group) with no capture means the hooks are
+              # broken. If the telemetry is missing, the gate is empty and the alert stays silent.
               - alert: MemoryCaptureStalled
-                expr: sum(increase(memory_capture_received_total{result="created"}[24h])) == 0
+                expr: >-
+                  sum(increase(memory_capture_received_total{result="created"}[24h])) == 0
+                  and on() sum(increase(claude_code_active_time_total_seconds_total{account="personal"}[24h])) > 1800
                 for: 1h
                 labels: { severity: warning }
                 annotations:
-                  summary: "No memory capture was stored in the last 24h."
-                  description: "Hooks are not delivering (gateway key revoked, hook broken after a Claude Code upgrade, gateway unreachable) or nobody used Claude Code. Check the gateway logs and `memory_capture_received_total`."
+                  summary: "No memory capture was stored in the last 24h although Claude Code was in use."
+                  description: "Personal Claude Code sessions were active for more than 30 min in 24h, yet no capture was stored: hooks are not delivering (gateway key revoked, hook broken after a Claude Code upgrade, gateway unreachable). Check the gateway logs, `memory_capture_received_total` and `$MEMORY_STATE_DIR/hooks.log` on the agent host."
               # probe: job blackbox-memory-http, /readyz through the blackbox exporter.
               - alert: MemoryGatewayDown
                 expr: probe_success{job="blackbox-memory-http"} == 0   # http probe of /readyz via the blackbox exporter
@@ -874,11 +910,11 @@ spec:
                   description: "{{ $value | humanize }} tokens (cache reads excluded) in the last hour for account {{ $labels.account }}. Open the \"agent sessions\" dashboard (tokens by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
               - alert: AgentCostPerHourHigh
                 expr: >-
-                  sum by (account) (increase(claude_code_cost_usage_USD_total[1h])) > 25
+                  sum by (account) (increase(claude_code_cost_usage_USD_total[1h])) > 125
                 for: 5m
                 labels: { severity: warning }
                 annotations:
-                  summary: "Account {{ $labels.account }} used more than $25 of API-equivalent Claude usage in the last hour."
+                  summary: "Account {{ $labels.account }} used more than $125 of API-equivalent Claude usage in the last hour."
                   description: "${{ $value | humanize }} of API-equivalent usage (list price; on a Max plan this counts against the plan, it is not billed) in the last hour for account {{ $labels.account }}. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
           - name: ci-egress-proxy
             rules:
@@ -993,8 +1029,9 @@ spec:
           - name: cluster-nodes
             rules:
               # Node and control-plane health while CI runs (olympus-sdk#392). The onodes are k3s servers whose etcd and
-              # containerd share the root disk with the runner pods' emptyDirs. kube_node_status_condition and the
-              # node-exporter series are each scraped twice (kube-state-metrics + service endpoints), hence max by.
+              # containerd share the root disk with the runner pods' emptyDirs. The node-exporter
+              # series are scraped twice (otel remote-write + service endpoints), hence max by; kube_node_status_condition
+              # has one source since 2026-11-16, and max by keeps it safe if a second appears.
               - alert: KubeNodePressure
                 expr: max by (node, condition) (kube_node_status_condition{condition=~"MemoryPressure|DiskPressure|PIDPressure", status="true"}) == 1
                 for: 5m
@@ -1175,8 +1212,8 @@ spec:
         requests:
           cpu: 10m
           memory: 112Mi
-      # Surface `cluster` on mgmt's kube_* series via the service-endpoints labelmap
-      # (uniform with the remote clusters, whose otel relabel sets cluster).
+      # Surface `cluster` on the kube_* series via the service-endpoints labelmap. The only kube-state-metrics:
+      # a second copy in otel (remote-written) sent every kube_* alert twice until 2026-11-16 (noise review).
       customLabels:
         cluster: olympus
     prometheus-node-exporter:

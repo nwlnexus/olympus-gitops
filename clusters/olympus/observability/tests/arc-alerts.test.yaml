@@ -115,7 +115,7 @@ tests:
               summary: "Root disk on onode-030c31 has only 10% free."
               description: "Below 10% the kubelet evicts pods; on the onodes etcd and containerd share this disk and etcd stops accepting writes when it is full. Drain CI if it runs there, then free space (`crictl rmi --prune`, journal, old images)."
 
-  - name: node pressure from either kube-state-metrics copy fires once
+  - name: node pressure reported by two scrapes of the same node fires once
     interval: 1m
     input_series:
       - series: 'kube_node_status_condition{job="kube-state-metrics", node="onode-0314ac", condition="DiskPressure", status="true"}'

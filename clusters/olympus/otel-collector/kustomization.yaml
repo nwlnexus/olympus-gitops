@@ -9,4 +9,3 @@ resources:
   - helmrelease-audit.yaml
   - prometheus-community-helmrepository.yaml
   - node-exporter-helmrelease.yaml
-  - kube-state-metrics-helmrelease.yaml
