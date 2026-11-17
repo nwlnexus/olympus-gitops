@@ -7,7 +7,7 @@ OpenTelemetry collectors and metric exporters in the `otel` namespace.
 | `opentelemetry-collector` (`helmrelease.yaml`) | Deployment | OTLP gateway for traces, metrics and logs sent by apps |
 | `otel-logs` (`helmrelease-logs.yaml`) | DaemonSet, every node | Pod logs (`/var/log/pods`) with Kubernetes metadata, to Loki |
 | `otel-audit` (`helmrelease-audit.yaml`) | DaemonSet, k3s servers only | Kubernetes API audit log, to Loki |
-| `node-exporter`, `kube-state-metrics` | | Prometheus exporters |
+| `node-exporter` | DaemonSet | Prometheus node exporter (kube-state-metrics runs once, in the `prometheus` release in `observability`) |
 
 ## Kubernetes API audit log
 

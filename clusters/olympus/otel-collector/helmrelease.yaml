@@ -118,20 +118,6 @@ spec:
                     target_label: instance
                   - target_label: cluster
                     replacement: olympus
-              - job_name: kube-state-metrics
-                kubernetes_sd_configs:
-                  - role: endpoints
-                    namespaces:
-                      names: [otel]
-                relabel_configs:
-                  - source_labels: [__meta_kubernetes_service_name]
-                    action: keep
-                    regex: kube-state-metrics
-                  - source_labels: [__meta_kubernetes_endpoint_port_name]
-                    action: keep
-                    regex: http
-                  - target_label: cluster
-                    replacement: olympus
       processors:
         memory_limiter:
           check_interval: 1s

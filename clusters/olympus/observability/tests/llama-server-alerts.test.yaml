@@ -43,26 +43,13 @@ tests:
         alertname: DataHubLlamaServerWedged
         exp_alerts: []
 
-  # --- InferenceInstanceRestarted (any reset in 15m) and InferenceInstanceRestartLoop (>= 3 in 1h) ---
-  - name: one reset fires Restarted on that instance only; the loop alert stays quiet
+  # --- InferenceInstanceRestartLoop (>= 3 resets in 1h); a single restart is not alerted -----------
+  - name: one reset does not fire the loop alert
     interval: 1m
     input_series:
       - series: 'llamacpp:n_decode_total{instance="100.89.177.55:8081",instance_name="llama-qwen36-27b",host="a9"}'
         values: "100 200 300 5 50 100 150 200 250 300 350 400"
-      - series: 'llamacpp:n_decode_total{instance="100.95.232.41:8082",instance_name="llama-qwen25-7b",host="datahub"}'
-        values: "100 200 300 400 500 600 700 800 900 1000 1100 1200"
     alert_rule_test:
-      - eval_time: 11m
-        alertname: InferenceInstanceRestarted
-        exp_alerts:
-          - exp_labels:
-              severity: warning
-              instance: "100.89.177.55:8081"
-              instance_name: llama-qwen36-27b
-              host: a9
-            exp_annotations:
-              summary: "llama-server llama-qwen36-27b on a9 restarted."
-              description: "The llamacpp:n_decode_total counter on 100.89.177.55:8081 reset in the last 15m: the process restarted (crash, watchdog or deploy). A one-off after a deploy is expected; repeats mean InferenceInstanceRestartLoop. Check the inference-server-* unit (a9) or the launchd job (data-hub) and its watchdog log."
       - eval_time: 11m
         alertname: InferenceInstanceRestartLoop
         exp_alerts: []
@@ -87,15 +74,12 @@ tests:
               summary: "llama-server llama-qwen25-7b on datahub restarted 3 times in the last hour."
               description: "The llamacpp:n_decode_total counter reset 3 times in 1h on 100.95.232.41:8082: the process is crash-looping or its watchdog keeps killing it. Read the server log and the watchdog's decision log."
 
-  - name: a steadily increasing counter never fires either alert
+  - name: a steadily increasing counter never fires the loop alert
     interval: 1m
     input_series:
       - series: 'llamacpp:n_decode_total{instance="100.89.177.55:8083",host="a9"}'
         values: "0+10x60"
     alert_rule_test:
-      - eval_time: 45m
-        alertname: InferenceInstanceRestarted
-        exp_alerts: []
       - eval_time: 45m
         alertname: InferenceInstanceRestartLoop
         exp_alerts: []

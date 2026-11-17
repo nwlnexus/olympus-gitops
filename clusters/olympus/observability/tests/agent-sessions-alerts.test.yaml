@@ -7,13 +7,13 @@ rule_files:
 evaluation_interval: 1m
 
 tests:
-  # --- AgentCostPerHourHigh: more than $25 in the last hour, for 5m -----------------------------
-  - name: cost above 25 USD per hour fires for the account that spent it, not for a quiet one
+  # --- AgentCostPerHourHigh: more than $125 in the last hour, for 5m -----------------------------
+  - name: cost above 125 USD per hour fires for the account that spent it, not for a quiet one
     interval: 1m
     input_series:
-      # personal: +1 USD every minute = 60 USD/h
+      # personal: +3 USD every minute = 180 USD/h
       - series: 'claude_code_cost_usage_USD_total{account="personal",vcs_repository_name="olympus-sdk",model="claude-opus-4"}'
-        values: "0+1x90"
+        values: "0+3x90"
       # work: +0.1 USD every minute = 6 USD/h
       - series: 'claude_code_cost_usage_USD_total{account="work",vcs_repository_name="app",model="claude-opus-4"}'
         values: "0+0.1x90"
@@ -28,16 +28,16 @@ tests:
               severity: warning
               account: personal
             exp_annotations:
-              summary: "Account personal used more than $25 of API-equivalent Claude usage in the last hour."
-              description: "$60 of API-equivalent usage (list price; on a Max plan this counts against the plan, it is not billed) in the last hour for account personal. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
+              summary: "Account personal used more than $125 of API-equivalent Claude usage in the last hour."
+              description: "$180 of API-equivalent usage (list price; on a Max plan this counts against the plan, it is not billed) in the last hour for account personal. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
 
   - name: spend split across repos and models still adds up per account
     interval: 1m
     input_series:
       - series: 'claude_code_cost_usage_USD_total{account="work",vcs_repository_name="a",model="m1"}'
-        values: "0+0.3x90"
+        values: "0+1.2x90"
       - series: 'claude_code_cost_usage_USD_total{account="work",vcs_repository_name="b",model="m2"}'
-        values: "0+0.3x90"
+        values: "0+1.2x90"
     alert_rule_test:
       - eval_time: 75m
         alertname: AgentCostPerHourHigh
@@ -46,8 +46,18 @@ tests:
               severity: warning
               account: work
             exp_annotations:
-              summary: "Account work used more than $25 of API-equivalent Claude usage in the last hour."
-              description: "$36 of API-equivalent usage (list price; on a Max plan this counts against the plan, it is not billed) in the last hour for account work. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
+              summary: "Account work used more than $125 of API-equivalent Claude usage in the last hour."
+              description: "$144 of API-equivalent usage (list price; on a Max plan this counts against the plan, it is not billed) in the last hour for account work. Open the \"agent sessions\" dashboard (cost by repo and model) to find the runaway session; a looping goal or a fan-out of subagents is the usual cause."
+
+  - name: a busy but normal working hour (60 USD/h, the old threshold's daily trigger) stays quiet
+    interval: 1m
+    input_series:
+      - series: 'claude_code_cost_usage_USD_total{account="personal",vcs_repository_name="olympus-sdk",model="m"}'
+        values: "0+1x90"
+    alert_rule_test:
+      - eval_time: 75m
+        alertname: AgentCostPerHourHigh
+        exp_alerts: []
 
   # --- AgentTokensPerHourHigh: more than 10M non-cache-read tokens in the last hour, for 5m -----
   - name: tokens above 10M per hour fire, and cache reads do not count
