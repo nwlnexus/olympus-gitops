@@ -1,0 +1,36 @@
+# Unit tests for AlertmanagerNotificationsFailing. Run with tests/check_prometheus.py.
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  - name: a webhook that keeps failing fires after 15m, a healthy e-mail integration does not
+    interval: 1m
+    input_series:
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager",integration="webhook",reason="other"}'
+        values: "0+1x60"
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager",integration="email",reason="other"}'
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: AlertmanagerNotificationsFailing
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: AlertmanagerNotificationsFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              integration: webhook
+            exp_annotations:
+              summary: "Alertmanager webhook notifications are failing."
+              description: "15 webhook notifications failed in the last 15m. email: Resend (key, quota, domain); webhook: the healthchecks.io ping (alertmanager-deadman secret, egress). `kubectl -n observability logs prometheus-alertmanager-0` shows the error."
+
+  - name: one failure that is not repeated clears without firing
+    interval: 1m
+    input_series:
+      - series: 'alertmanager_notifications_failed_total{job="alertmanager",integration="email",reason="other"}'
+        values: "0 1x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: AlertmanagerNotificationsFailing
+        exp_alerts: []

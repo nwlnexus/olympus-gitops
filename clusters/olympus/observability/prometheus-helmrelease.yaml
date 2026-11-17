@@ -64,6 +64,9 @@ spec:
       # the API at the root for Prometheus and the Grafana datasource.
       extraArgs:
         web.route-prefix: /
+        # Notification log and silences are kept 120h by default; the weekly MemorySupersessionReviewBacklog
+        # repeat (168h) needs a longer log or it re-sends after 5 days.
+        data.retention: 192h
       persistence:
         enabled: true
         storageClass: qnap-iscsi
@@ -153,6 +156,12 @@ spec:
     # (100.95.232.41) on purpose: the probes must fail if a service is not bound to
     # the tailnet address.
     extraScrapeConfigs: |
+      # Alertmanager's own metrics (notifications sent/failed per integration), so a failing receiver,
+      # including the Watchdog dead-man's switch webhook, is visible and alerted on.
+      - job_name: alertmanager
+        metrics_path: /metrics
+        static_configs:
+          - targets: ["prometheus-alertmanager.observability.svc:9093"]
       - job_name: blackbox-exporter
         metrics_path: /metrics
         static_configs:
@@ -564,6 +573,17 @@ spec:
                   severity: warning
                 annotations:
                   summary: "blackbox-exporter is not being scraped successfully (data-hub probes are blind)."
+              # A receiver keeps failing: the e-mail path (Resend) or the dead-man's switch webhook (healthchecks.io).
+              # If e-mail is the one failing this alert cannot reach anyone either; the dead-man's switch still
+              # does when Alertmanager itself is down, and this alert covers a broken webhook while e-mail works.
+              - alert: AlertmanagerNotificationsFailing
+                expr: sum by (integration) (increase(alertmanager_notifications_failed_total{job="alertmanager"}[15m])) > 0
+                for: 15m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: "Alertmanager {{ $labels.integration }} notifications are failing."
+                  description: "{{ $value }} {{ $labels.integration }} notifications failed in the last 15m. email: Resend (key, quota, domain); webhook: the healthchecks.io ping (alertmanager-deadman secret, egress). `kubectl -n observability logs prometheus-alertmanager-0` shows the error."
           - name: memory
             rules:
               # Memory platform stores (ns memory): probes come from the
