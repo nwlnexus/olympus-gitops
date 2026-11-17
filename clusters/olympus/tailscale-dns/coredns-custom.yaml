@@ -1,3 +1,18 @@
+# Known behaviour (olympus-sdk#636, decision 2026-11-17: documented, not "fixed"):
+# the ts.net block forwards to the Tailscale resolver (100.100.100.100) of the node CoreDNS runs on. On a node
+# with MagicDNS off (`tailscale debug prefs` shows "CorpDNS": false; onode-0314ac and onode-030c31 today) that
+# resolver answers SERVFAIL, not NXDOMAIN, for a *.raptor-mimosa.ts.net name that does not exist. Verified
+# 2026-11-17 from onode-0314ac: `dig @10.43.0.10 nonexistent.raptor-mimosa.ts.net` -> SERVFAIL, while
+# `dig @10.43.0.10 nonexistent.example.invalid` -> NXDOMAIN and real tailnet names resolve.
+# Effect: a wrong tailnet name gets a retryable error, and a musl pod that has the tailnet search domain stops at
+# the SERVFAIL (EAI_AGAIN) instead of trying the next search domain. Real names are unaffected, and no in-cluster
+# consumer looks up a name that does not exist (#622's search-domain leak is fixed at its source: MagicDNS off
+# on naraka-01).
+# Not changed on purpose: rewriting SERVFAIL to NXDOMAIN (`rewrite rcode`) cannot tell "no such name" from
+# "tailscaled is down", so an outage would read as a definitive not-found and be cached; pinning the forward to a
+# MagicDNS-on host adds a single point of failure for the ts.net zone. If a consumer ever needs clean
+# NXDOMAIN, turn MagicDNS on for the node CoreDNS runs on (the resolver then answers NXDOMAIN, as #636 saw on a MagicDNS-on host) or give the
+# consumer the full name.
 apiVersion: v1
 kind: ConfigMap
 metadata:
