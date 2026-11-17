@@ -1029,8 +1029,9 @@ spec:
           - name: cluster-nodes
             rules:
               # Node and control-plane health while CI runs (olympus-sdk#392). The onodes are k3s servers whose etcd and
-              # containerd share the root disk with the runner pods' emptyDirs. kube_node_status_condition and the
-              # node-exporter series are each scraped twice (kube-state-metrics + service endpoints), hence max by.
+              # containerd share the root disk with the runner pods' emptyDirs. The node-exporter
+              # series are scraped twice (otel remote-write + service endpoints), hence max by; kube_node_status_condition
+              # has one source since 2026-11-16, and max by keeps it safe if a second appears.
               - alert: KubeNodePressure
                 expr: max by (node, condition) (kube_node_status_condition{condition=~"MemoryPressure|DiskPressure|PIDPressure", status="true"}) == 1
                 for: 5m
