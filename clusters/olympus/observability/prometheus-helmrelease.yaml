@@ -74,6 +74,10 @@ spec:
           secretName: alertmanager-resend
           mountPath: /etc/alertmanager/secrets
           readOnly: true
+        - name: deadman
+          secretName: alertmanager-deadman
+          mountPath: /etc/alertmanager/deadman
+          readOnly: true
       config:
         global:
           resolve_timeout: 5m
@@ -93,10 +97,15 @@ spec:
           group_interval: 5m
           repeat_interval: 24h
           routes:
-            # Watchdog always fires; sink it (reserve for a future dead-man's-switch).
+            # Dead-man's switch: Watchdog always fires, so Alertmanager pings healthchecks.io every 5 min.
+            # When the pings stop (Prometheus, Alertmanager, the cluster or its egress is down),
+            # healthchecks.io e-mails from outside Olympus. Check period 5 min, grace 10 min.
             - matchers:
                 - 'alertname="Watchdog"'
-              receiver: 'null'
+              receiver: deadman
+              group_wait: 0s
+              group_interval: 5m
+              repeat_interval: 5m
             - matchers:
                 - 'severity="critical"'
               receiver: email
@@ -135,7 +144,10 @@ spec:
             email_configs:
               - to: nigel.williamslucas@gmail.com
                 send_resolved: false
-          - name: 'null'
+          - name: deadman
+            webhook_configs:
+              - url_file: /etc/alertmanager/deadman/ping_url
+                send_resolved: false
     # data-hub host probes via blackbox-exporter (observability/blackbox-exporter).
     # data-hub is a Mac Studio host, not a cluster; addresses are its tailnet IP
     # (100.95.232.41) on purpose: the probes must fail if a service is not bound to
