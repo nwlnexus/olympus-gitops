@@ -168,11 +168,11 @@ spec:
       containers:
         - name: memory-gateway
           # Pinned by digest, never by tag: the multi-arch INDEX digest (linux/amd64 + linux/arm64) of
-          # tag sha-f301fd7, built from olympus-sdk main by .github/workflows/memory-gateway.yml
+          # tag sha-0984088, built from olympus-sdk main by .github/workflows/memory-gateway.yml
           # (olympus-sdk#707). To bump: `docker buildx imagetools inspect
           # ghcr.io/nwlnexus/memory-gateway:sha-<short>` and take the index digest.
           # knowledge-indexer-cronjob.yaml pins the same digest; bump both together.
-          image: ghcr.io/nwlnexus/memory-gateway@sha256:3e4f38aca664d4b0445d804cc548fcef04439faebe906aed7b3045bbc4cb9dc2
+          image: ghcr.io/nwlnexus/memory-gateway@sha256:061a3de502c105c39f3f0feb376440c87c76a45f368451459985b76a41c7bf05
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
