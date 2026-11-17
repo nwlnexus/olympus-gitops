@@ -17,3 +17,6 @@ resources:
   - purge-cronjob.yaml
   # Fact consolidation (olympus-sdk#455): nightly `memory-admin consolidate` (dedupe/decay), gateway image as memory_worker.
   - consolidate-cronjob.yaml
+  # One-shot backlog clean-up (olympus-sdk#966): bulk-close the backfill-era supersession suggestions. Removed again
+  # once it has run.
+  - supersession-backlog-job.yaml
