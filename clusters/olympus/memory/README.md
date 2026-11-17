@@ -1,7 +1,7 @@
 # memory — data stores for the memory platform
 
 Namespace `memory`. Implements nwlnexus/olympus-sdk#449 (epic #444, spec sections D3, D4
-and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0017, see below); the
+and 5.2). This directory holds the **store** (Postgres) and the schema (migrations 0001-0018, see below); the
 gateway (#450, see `gateway/README.md`; deployed by its own Flux Kustomization), workers (#453, see
 `workers/README.md`) and the CPU embedding service (olympus-sdk#529, see `embedder/README.md`) have their
 own manifests and Flux Kustomizations.
@@ -59,7 +59,7 @@ the Postgres password later: change the 1Password field, then
 Migrations are plain SQL files in `migrations/`, named `NNNN_short_description.sql`
 (zero-padded, next free number), applied in filename order by `Job/memory-migrate`.
 
-1. Create `migrations/<next number>_<what>.sql` (the next free number is `0017`). It must be **idempotent** (`CREATE ... IF NOT EXISTS`,
+1. Create `migrations/<next number>_<what>.sql` (the next free number is `0019`). It must be **idempotent** (`CREATE ... IF NOT EXISTS`,
    `ADD COLUMN IF NOT EXISTS`, `DO $$ ... $$` guards), because it is run once per database but
    may be replayed by hand or after a restore. Do not put `BEGIN`/`COMMIT` in it: the runner
    wraps each file and its ledger row in one transaction, so a failing file leaves nothing behind.
@@ -151,6 +151,12 @@ cleanup (§14.10 step 4, below).
 | File | What |
 |---|---|
 | `0015_graph_forget_hardening.sql` | `CREATE OR REPLACE` of the three graph functions of 0013 (same signatures and grants) plus the internal helper `graph_neutral_sentence`: a shared edge that loses a forgotten fact gets the neutral sentence `source RELATION target` instead of keeping that fact's wording (and a rename in the same forget re-renders neutral sentences with the new name); the gateway role may detach only a forgotten fact; a merge applies the §14.5 conflict rule to the kept entity's current statements (newest wins, suggestions for the live facts); a fold keeps the newer sentence. Functions only, `lock_timeout` 5 s: safe while the gateway and workers write; order against the images does not matter |
+
+### Migration 0018: supersession judge (olympus-sdk#968)
+
+| File | What |
+|---|---|
+| `0018_supersession_judge.sql` | the judge's verdict on `memory.supersession_suggestion`: `judge_verdict` (`accept`, `reject`, `unsure`, `error`), `judge_reason` (at most 500 characters), `judge_model`, `judged_at`, written together; a partial index on the pending suggestions without a verdict; the client row `internal:judge` (kind `internal`, no scopes), which its decisions and audit rows carry. No grant changes (the table-level grants of 0004 and 0005 cover the columns). Apply before the worker and gateway images that use it. Independent of 0017 (graph functions only) |
 
 ### Role passwords
 

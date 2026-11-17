@@ -35,3 +35,4 @@ configMapGenerator:
       - migrations/0015_graph_forget_hardening.sql
       - migrations/0016_knowledge_source.sql
       - migrations/0017_graph_supersession_noise.sql
+      - migrations/0018_supersession_judge.sql
