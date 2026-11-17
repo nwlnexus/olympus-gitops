@@ -103,12 +103,15 @@ spec:
             # Dead-man's switch: Watchdog always fires, so Alertmanager pings healthchecks.io every 5 min.
             # When the pings stop (Prometheus, Alertmanager, the cluster or its egress is down),
             # healthchecks.io e-mails from outside Olympus. Check period 5 min, grace 10 min.
+            # Alertmanager re-sends only on a group_interval tick once repeat_interval has fully passed; with
+            # both at 5m the elapsed time at a tick is a hair under 5m, so every other tick was skipped and
+            # pings came every 10 min (the check showed "late"). 1m ticks with a 4m repeat send every 5 min.
             - matchers:
                 - 'alertname="Watchdog"'
               receiver: deadman
               group_wait: 0s
-              group_interval: 5m
-              repeat_interval: 5m
+              group_interval: 1m
+              repeat_interval: 4m
             - matchers:
                 - 'severity="critical"'
               receiver: email
