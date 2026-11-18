@@ -1,0 +1,144 @@
+# One-shot: close the single-valued statements already stored on repository entities (olympus-sdk#1019, epic #965).
+#
+# The worker no longer writes them (graph-v4 + policy rule repo_single_valued). Steps, as init containers and then
+# the main container, all with the gateway image and the consolidate CronJob's credentials (role memory_worker, Secret
+# memory-purge: it holds UPDATE on entity_edge and supersession_suggestion; decisions are recorded as internal:worker):
+#   1. graph close-repo-edges          dry run: how many current edges and pending suggestions match, by subject
+#   2. graph close-repo-edges --apply  invalidates the edges, closes their suggestions as obsolete (never rejected),
+#                                      one audit row per batch (operation repo_edges_close)
+#   3. graph reopen-repo-edges (dry)   proves the close can be undone: what `--since ... --apply` would reopen
+# Each step prints one JSON object to the pod log:
+#   kubectl -n memory logs job/memory-repo-edges-1019 --all-containers
+#
+# No ttlSecondsAfterFinished: Flux would recreate a deleted Job and run it again. A follow-up commit removes this file
+# (Flux prunes the Job). Undo, if ever needed: `graph reopen-repo-edges --since 2026-11-18T00:00:00Z --apply`.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: memory-repo-edges-1019
+  namespace: memory
+  labels:
+    app.kubernetes.io/name: memory-repo-edges
+    app.kubernetes.io/part-of: memory
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memory-repo-edges
+        app.kubernetes.io/part-of: memory
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      tolerations:
+        - key: olympus.io/role
+          operator: Equal
+          value: agent-services
+          effect: NoSchedule
+        - key: olympus.io/arch
+          operator: Equal
+          value: arm64
+          effect: NoSchedule
+      initContainers:
+        - name: wait-for-postgres
+          image: ghcr.io/nwlnexus/memory-gateway@sha256:8cfd9a6171d55386c675ee246ac9d7534df4d4d5e8c3858256b3c495c80fcde0
+          imagePullPolicy: IfNotPresent
+          command:
+            - node
+            - -e
+            - |
+              const net = require('node:net')
+              const deadline = Date.now() + 120000
+              const attempt = () => {
+                const s = net.connect({ host: 'postgres.memory.svc', port: 5432, timeout: 3000 })
+                s.once('connect', () => { s.destroy(); console.log('postgres reachable'); process.exit(0) })
+                const retry = (e) => {
+                  s.destroy()
+                  if (Date.now() > deadline) { console.error('postgres unreachable after 120 s: ' + (e && e.code)); process.exit(1) }
+                  setTimeout(attempt, 2000)
+                }
+                s.once('error', retry)
+                s.once('timeout', () => retry({ code: 'ETIMEDOUT' }))
+              }
+              attempt()
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+        - name: close-dry-run
+          image: ghcr.io/nwlnexus/memory-gateway@sha256:8cfd9a6171d55386c675ee246ac9d7534df4d4d5e8c3858256b3c495c80fcde0
+          imagePullPolicy: IfNotPresent
+          command: [node, dist/admin/cli.js, graph, close-repo-edges, --json, --actor, memory-repo-edges-1019]
+          env: &env
+            - name: DATABASE_URL_FILE
+              value: /run/secrets/consolidate/DATABASE_URL
+            - name: LOG_LEVEL
+              value: info
+          securityContext: &sec
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources: &res
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              memory: 256Mi
+          volumeMounts: &mounts
+            - name: tmp
+              mountPath: /tmp
+            - name: secrets
+              mountPath: /run/secrets/consolidate
+              readOnly: true
+        - name: close-apply
+          image: ghcr.io/nwlnexus/memory-gateway@sha256:8cfd9a6171d55386c675ee246ac9d7534df4d4d5e8c3858256b3c495c80fcde0
+          imagePullPolicy: IfNotPresent
+          command: [node, dist/admin/cli.js, graph, close-repo-edges, --apply, --json, --actor, memory-repo-edges-1019]
+          env: *env
+          securityContext: *sec
+          resources: *res
+          volumeMounts: *mounts
+      containers:
+        - name: reopen-dry-run
+          image: ghcr.io/nwlnexus/memory-gateway@sha256:8cfd9a6171d55386c675ee246ac9d7534df4d4d5e8c3858256b3c495c80fcde0
+          imagePullPolicy: IfNotPresent
+          command:
+            - node
+            - dist/admin/cli.js
+            - graph
+            - reopen-repo-edges
+            - --since
+            - "2026-11-18T00:00:00Z"
+            - --json
+            - --actor
+            - memory-repo-edges-1019
+          env: *env
+          securityContext: *sec
+          resources: *res
+          volumeMounts: *mounts
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 32Mi
+        - name: secrets
+          secret:
+            secretName: memory-purge
+            defaultMode: 0440
