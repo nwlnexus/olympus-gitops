@@ -17,5 +17,3 @@ resources:
   - purge-cronjob.yaml
   # Fact consolidation (olympus-sdk#455): nightly `memory-admin consolidate` (dedupe/decay), gateway image as memory_worker.
   - consolidate-cronjob.yaml
-  # One-shot (olympus-sdk#1019): close single-valued statements on repository entities. Removed again once it has run.
-  - repo-edges-job.yaml
