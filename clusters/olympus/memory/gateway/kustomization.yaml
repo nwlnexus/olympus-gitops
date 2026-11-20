@@ -17,5 +17,3 @@ resources:
   - purge-cronjob.yaml
   # Fact consolidation (olympus-sdk#455): nightly `memory-admin consolidate` (dedupe/decay), gateway image as memory_worker.
   - consolidate-cronjob.yaml
-  # One-shot read-only check (olympus-sdk#967). Removed again once it has run.
-  - checks-job.yaml
