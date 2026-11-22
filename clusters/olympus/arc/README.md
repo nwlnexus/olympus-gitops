@@ -5,7 +5,7 @@ compute-hub. Design: `docs/superpowers/specs/2026-10-19-ci-runners-on-cluster-de
 in `nwlnexus/olympus-sdk`; epic `nwlnexus/olympus-sdk#383` (this directory implements #386, #387
 and, with `../kvm-device-plugin/`, #390).
 
-**Status: live.** `olympus-linux` runs with `maxRunners: 4` (3 from 2026-10-19, 4 since 2026-11-10) and `olympus-gate` with
+**Status: live.** `olympus-linux` runs with `maxRunners: 6` (3 from 2026-10-19, 4 since 2026-11-10, 6 since 2026-11-22: olympus-gitops#295) and `olympus-gate` with
 `maxRunners: 8` (since 2026-10-19, after the preconditions below). `olympus-kvm`
 (`maxRunners: 2`) runs nothing until a node carries the KVM label (KVM section).
 
@@ -37,7 +37,7 @@ image by digest, `activeDeadlineSeconds` so a stuck job cannot hold a slot for d
 
 | Scale set | For | Pods | Per pod (requests / limits) |
 |-----------|-----|------|------------------------------|
-| `olympus-linux` | CI jobs (lint, test, build) | max 4 (`maxRunners`; more would let two heavy jobs stack on one control-plane node) | 2 CPU, 4 GiB / 4 CPU, 8 GiB; spread over the onodes via label `olympus.io/ci-runner`; deadline 3 h |
+| `olympus-linux` | CI jobs (lint, test, build) | max 6 (`maxRunners`; two per onode; more than 3 per onode needs a new headroom check) | 2 CPU, 4 GiB / 4 CPU, 8 GiB; amd64 only; spread over the onodes via label `olympus.io/ci-runner` (`nodeTaintsPolicy: Honor`, see below); deadline 3 h |
 | `olympus-gate` | the CI gate workflow: a poller (bash, gh, jq) that waits up to 120 min for sibling workflows | max 8 | 50m, 128Mi, 256Mi ephemeral / 500m, 512Mi, 2Gi; label `olympus.io/ci-gate`, soft spread (maxSkew 2, ScheduleAnyway); deadline 150 min |
 | `olympus-arm64` | arm64 jobs on the Mac-mini VMs (nothing routes there yet; `arm64-runner-smoke.yml` is the first user) | max 2, one per VM | 2 CPU, 4 GiB, 4 GiB ephemeral / 4 CPU, 7 GiB, 15 GiB; label `olympus.io/ci-runner-arm64`, deadline 3 h |
 | `olympus-knowledge` | the code-knowledge pack job (olympus-sdk `knowledge-pack.yml`) | max 1 (fleet-wide serialization of LLM use) | as `olympus-linux`; label `olympus.io/ci-knowledge`, no spread; deadline 2 h |
@@ -328,6 +328,24 @@ curl -sS -m 5 -k https://68.134.149.230:443                    # gateway WAN IP 
   7-day peak under 0.1 s on 2026-11-07, alert at 0.5 s).
 
 ### Capacity changes and etcd
+
+**Spread domains (olympus-gitops#295).** A `DoNotSchedule` topology spread counts every node that passes the
+pod's node affinity as a domain. With the default `nodeTaintsPolicy: Ignore` that includes nodes whose taint
+keeps the pod off, and they count as holding 0 pods. The arm64 VMs matched the olympus-linux affinity (no
+`olympus.io/role` label) and are tainted, so the pool topped out at one runner per onode (3) under
+`maxRunners: 4`. The symptom is `FailedScheduling ... N node(s) didn't match pod topology spread constraints` while
+the onodes have room. The olympus-linux template now sets `nodeTaintsPolicy: Honor` and requires
+`kubernetes.io/arch: amd64`. Any new scale set with a hard spread needs the same treatment.
+
+**Headroom rule for olympus-linux.** Raise `maxRunners` in steps of 3 (one more per onode) only when:
+- the onodes' summed requests at the new count stay inside allocatable (15 CPU / 23.2 GiB each, after
+  the kubelet reserves), counting the KVM runner and gates on the busiest node;
+- the etcd p99s below stay well under their thresholds;
+- `ArcQuotaSaturated` and `KubeNodePressure` are quiet.
+
+At 6 (2026-11-22), the busiest onode (onode-0312ce: services, the KVM runner, 3 gates and 2 runners) had
+about 7.4 CPU / 15.3 GiB of requests. Lifetime etcd p99 was under 8 ms for both WAL fsync and backend commit on
+all three onodes.
 
 Every control-plane node runs CI runner pods next to an etcd member, on the same disk. Before raising
 `maxRunners` (or adding a scale set that lands on the control plane), compare etcd's own disk latency for
