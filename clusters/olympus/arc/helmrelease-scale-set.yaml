@@ -30,10 +30,16 @@ spec:
     # and verified (node IPv6 link-local DROP + sshd hardening on all four nodes,
     # kubelet reserves on the three onodes, UniFi policy node IPs -> Gateway ports
     # 22/80/443/8443). Raised from 3 to 4 on 2026-11-10 after a week of node load at 3 showed
-    # ample headroom. Keep it at 4: more lets two heavy jobs stack on one control-plane node.
+    # ample headroom. Raised from 4 to 6 on 2026-11-22 (olympus-gitops#295): two per onode.
+    # Until then the topology spread below counted the tainted arm64 VMs as empty domains, so
+    # the real ceiling was 3 (one per onode) whatever this said. Headroom at 6: each onode has
+    # 15 CPU / 23.2 GiB allocatable; two runners add 4 CPU / 8 GiB requests, and the busiest
+    # onode (KVM runner + gates + services) stays near 7.4 CPU / 15.3 GiB requests; etcd WAL
+    # fsync and backend commit p99 under 8 ms on all three (thresholds 25 / 50 ms, README).
+    # Do not go above 6 (3 per onode) without a new headroom check.
     # Also the drain switch (README.md); known issue: raising it again from 0 can
     # leave queued jobs stuck until a new dispatch or a listener restart (#4715).
-    maxRunners: 4
+    maxRunners: 6
     # Explicit controller service account (no cluster lookup at render time).
     controllerServiceAccount:
       namespace: arc-system
@@ -108,15 +114,25 @@ spec:
                     - key: kubernetes.io/hostname
                       operator: NotIn
                       values: ["naraka-01"]
+                    # amd64 only: the arm64 VMs have no olympus.io/role label and would
+                    # otherwise match this term (they are kept off only by their taint).
+                    - key: kubernetes.io/arch
+                      operator: In
+                      values: ["amd64"]
         # Spread runners across the three onodes. Terminating pods are not counted
-        # by topology spread, so during churn up to 3 runners can briefly land on
-        # ONE node (3 x 4 CPU / 8 GiB limits = 12 CPU / 24 GiB of a 16 CPU / 27 GiB
-        # node): that is why maxRunners starts at 3 and kubelet reserves are a
-        # precondition (README.md).
+        # by topology spread, so during churn more runners than usual can briefly land
+        # on ONE node: kubelet reserves are a precondition (README.md) and runners rank
+        # lowest for eviction (priority -1000).
+        # nodeTaintsPolicy Honor (olympus-gitops#295): with the default Ignore, every node
+        # that passes the affinity counts as a domain even when its taint keeps runners off.
+        # The three tainted arm64 VMs then held 0 runners each, so the skew was already 1
+        # with one runner per onode and every further runner stayed Pending.
         topologySpreadConstraints:
           - maxSkew: 1
             topologyKey: kubernetes.io/hostname
             whenUnsatisfiable: DoNotSchedule
+            nodeAffinityPolicy: Honor
+            nodeTaintsPolicy: Honor
             labelSelector:
               matchLabels:
                 olympus.io/ci-runner: "true"
