@@ -31,9 +31,12 @@ spec:
     runnerGroup: olympus-ci
     minRunners: 0
     # Raised from 0 to 8 on 2026-10-19 together with olympus-linux (preconditions in
-    # README.md are done). The quota allows 12 pods in arc-runners (4 runners + 8 gates).
+    # README.md are done), and from 8 to 16 on 2026-11-22: every open PR push parks one CI gate
+    # poller here for the whole CI run, and automerge plus the event-driven gate (olympus-sdk#1141)
+    # queue behind them. A gate pod requests 50m / 128Mi, so 8 more add 0.4 CPU / 1 GiB of requests.
+    # Lower it again once #1141 removes the poller (its jobs then run for seconds).
     # Same drain switch and known issue #4715 as olympus-linux.
-    maxRunners: 8
+    maxRunners: 16
     # Explicit controller service account (no cluster lookup at render time).
     controllerServiceAccount:
       namespace: arc-system
@@ -82,10 +85,12 @@ spec:
         automountServiceAccountToken: false
         priorityClassName: ci-runner
         # Hard wall-clock cap for the pod (olympus-sdk#390 review m1): a stuck job cannot
-        # hold a slot for days. The gate polls for up to 120 min; 150 min leaves margin. The kubelet kills the runner; ARC
+        # hold a slot for days. The CI gate polls for up to 200 min (olympus-sdk#1005) and atlas-release's
+        # atlas-ci-gate for up to 190 min; 210 min stays above both, so the kubelet never kills a gate that its
+        # job timeout would still let finish (150 min did: "runner lost" on long VM runs). The kubelet kills the runner; ARC
         # 0.15.0 then deletes the EphemeralRunner if a job was assigned (the job fails
         # as "runner lost") or recreates the pod if none was, so the slot is freed.
-        activeDeadlineSeconds: 9000
+        activeDeadlineSeconds: 12600
         enableServiceLinks: false
         securityContext:
           runAsNonRoot: true
