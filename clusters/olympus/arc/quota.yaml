@@ -15,7 +15,7 @@
 # LIMITATION: the API server rejects ephemeral-storage in a scoped quota
 # ("unsupported scope applied to resource"), so ephemeral storage is capped only by
 # the total below (18/76 GiB before #390, 26/106 GiB after it = + two KVM pods's 4/15 GiB;
-# the arm64, knowledge and #295 runner pods added theirs since: 46/181 GiB today)
+# the arm64, knowledge and #295 runner pods added theirs since: 48/197 GiB today)
 # and per container by the LimitRange (15 GiB). Pods, CPU, memory and /dev/kvm are
 # split exactly; for disk, the non-KVM sets stay bounded by their pod counts x
 # per-pod limits, only the namespace sum gained one KVM pod's share.
@@ -27,17 +27,17 @@ metadata:
 spec:
   hard:
     # = ci-runners-non-kvm + ci-runners-kvm (keep the sums in step when tuning).
-    pods: "19"                     # 6 runners + 8 gates + 2 arm64 runners + 1 knowledge runner + 2 KVM runners
-    requests.cpu: "22500m"
-    requests.memory: 45Gi
-    limits.cpu: "46"
-    limits.memory: 90Gi
-    requests.ephemeral-storage: 46Gi
-    limits.ephemeral-storage: 181Gi
+    pods: "27"                     # 6 runners + 16 gates + 2 arm64 runners + 1 knowledge runner + 2 KVM runners
+    requests.cpu: "22900m"
+    requests.memory: 46Gi
+    limits.cpu: "50"
+    limits.memory: 94Gi
+    requests.ephemeral-storage: 48Gi
+    limits.ephemeral-storage: 197Gi
     requests.olympus.io/kvm: "2"
     persistentvolumeclaims: "0"    # runners are stateless (emptyDir only)
     services: "0"
-    secrets: "40"                  # one JIT-config Secret per runner/gate/arm64/knowledge/KVM pod + the synced app Secret
+    secrets: "56"                  # one JIT-config Secret per runner/gate/arm64/knowledge/KVM pod + the synced app Secret
 ---
 apiVersion: v1
 kind: ResourceQuota
@@ -49,9 +49,9 @@ spec:
   # Runner budget: 6 pods x (2 CPU / 4 GiB requests, 4 CPU / 8 GiB limits, 4 / 15 GiB
   # ephemeral) since olympus-gitops#295 (2026-11-22; 4 pods before): the spec's final
   # ceiling (6 pods, 24 CPU, 48 GiB), now that node reserves and monitoring exist.
-  # On top of it, up to 8 olympus-gate pods (50m / 128Mi / 256Mi requests,
-  # 500m / 512Mi / 2Gi limits): +0.4 CPU, +1Gi memory, +2Gi ephemeral requests;
-  # +4 CPU, +4Gi memory, +16Gi ephemeral limits. maxRunners caps gates at 8, so
+  # On top of it, up to 16 olympus-gate pods (8 before 2026-11-22; 50m / 128Mi / 256Mi requests,
+  # 500m / 512Mi / 2Gi limits): +0.8 CPU, +2Gi memory, +4Gi ephemeral requests;
+  # +8 CPU, +8Gi memory, +32Gi ephemeral limits. maxRunners caps gates at 16, so
   # the runner budget above always remains available to the 6 runner pods.
   # olympus-arm64 (olympus-sdk#694) adds 2 pods (2 CPU / 4 GiB requests, 4 CPU / 7 GiB
   # limits, 4 / 15 GiB ephemeral): +4 CPU, +8Gi requests; +8 CPU, +14Gi limits. The
@@ -65,11 +65,11 @@ spec:
         operator: NotIn
         values: ["ci-runner-kvm"]
   hard:
-    pods: "17"                     # 6 runners + 8 gates + 2 arm64 runners (olympus-arm64, #694) + 1 knowledge runner (#852)
-    requests.cpu: "18500m"
-    requests.memory: 37Gi
-    limits.cpu: "40"
-    limits.memory: 74Gi
+    pods: "25"                     # 6 runners + 16 gates + 2 arm64 runners (olympus-arm64, #694) + 1 knowledge runner (#852)
+    requests.cpu: "18900m"
+    requests.memory: 38Gi
+    limits.cpu: "44"
+    limits.memory: 78Gi
     requests.olympus.io/kvm: "0"   # only olympus-kvm pods may hold /dev/kvm
 ---
 apiVersion: v1
