@@ -1314,6 +1314,92 @@ spec:
                 annotations:
                   summary: "StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} deletes its PVCs (whenScaled {{ $labels.when_scaled }}, whenDeleted {{ $labels.when_deleted }})."
                   description: "Scaling it to 0 (the qnap-iscsi repair) or deleting it removes its volume claims. Set persistentVolumeClaimRetentionPolicy to Retain/Retain in its HelmRelease values (loki: singleBinary.persistence.whenScaled/whenDeleted)."
+              # Kernel-level storage state (olympus-gitops#301) from the node-exporter textfile collector: the olympus-sdk
+              # converge role `storage-textfile` writes /var/lib/node_exporter/textfile_collector/olympus_storage.prom on
+              # each k3s node once a minute (read-only: sysfs, kubelet/Trident staging records, `multipathd show`). A node
+              # the role has not reached has none of these series, so nothing here fires there; only
+              # StorageTextfileStale fires on a series that existed and stopped.
+              #
+              # ext4 keeps an error counter in the superblock until the next fsck (the qnap-iscsi repair's restage runs
+              # one). On the 7.x kernels an aborted ext4 stays "rw" and NodeFilesystemReadOnly cannot see it; this does.
+              - alert: NodeExt4Errors
+                expr: >-
+                  max by (node, device, volume) (node_ext4_errors{job="kubernetes-service-endpoints", service="node-exporter"}) > 0
+                labels: { severity: critical }
+                annotations:
+                  summary: "ext4 on {{ $labels.device }} ({{ $labels.volume }}) on {{ $labels.node }} has recorded {{ $value }} errors."
+                  description: "The kernel recorded ext4 errors on {{ $labels.device }} since its last fsck (/sys/fs/ext4/{{ $labels.device }}/errors_count); writes to it may fail with EIO even while it is mounted rw. `dmesg -T | grep -iE 'EXT4-fs error|JBD2|I/O error'` on {{ $labels.node }}. A volume ({{ $labels.volume }}): runbook clusters/olympus/qnap-storage/README.md, \"Runbook: qnap-iscsi volume ext4 aborted\". No volume: the node's own disk."
+              # Each qnap-iscsi volume has its own target and one session (one path). Staged volumes come from kubelet's
+              # NodeStage records; the per-volume check reads Trident's tracking file, which names the target, so a
+              # leftover session to another target cannot hide a missing one. A session in recovery (FAILED) is not
+              # LOGGED_IN; multipath queues the volume's I/O for up to no_path_retry 120 x 5 s = 600 s, then fails it.
+              - alert: IscsiSessionsMissing
+                expr: >-
+                  (
+                    max by (node) (node_csi_staged_volumes{job="kubernetes-service-endpoints", service="node-exporter", driver="csi.trident.qnap.io"})
+                    - max by (node) (node_iscsi_sessions_logged_in{job="kubernetes-service-endpoints", service="node-exporter"})
+                  ) > 0
+                  or
+                  count by (node) (max by (node, volume) (node_iscsi_volume_session_logged_in{job="kubernetes-service-endpoints", service="node-exporter"}) == 0)
+                for: 2m
+                labels: { severity: critical }
+                annotations:
+                  summary: "{{ $value }} staged qnap-iscsi volume(s) on {{ $labels.node }} have no logged-in iSCSI session."
+                  description: "Their I/O is queued by dm-multipath and fails about 10 min after the session dropped. Which ones: `node_iscsi_volume_session_logged_in{node=\"{{ $labels.node }}\"} == 0` and `node_iscsi_session_logged_in{node=\"{{ $labels.node }}\"}` (state label). On the node: `sudo iscsiadm -m session -P 1`, `dmesg -T | grep -iE 'iscsi|session recovery'`; check the QNAP (192.168.253.10:3260). iscsid keeps retrying the login; nothing in Trident does. Runbook: clusters/olympus/qnap-storage/README.md."
+              # The map's only path is down: queueing (no_path_retry countdown) or failing I/O. The sysfs count works
+              # when multipathd does not answer. One series per map, whichever branch matches first.
+              - alert: MultipathMapNoUsablePath
+                expr: >-
+                  max by (node, map, volume) (node_multipath_map_queueing{job="kubernetes-service-endpoints", service="node-exporter"}) == 1
+                  or
+                  max by (node, map, volume) (node_multipath_map_active_paths{job="kubernetes-service-endpoints", service="node-exporter"}) == 0
+                  or
+                  max by (node, map, volume) (node_multipath_map_scsi_paths_running{job="kubernetes-service-endpoints", service="node-exporter"}) == 0
+                for: 1m
+                labels: { severity: critical }
+                annotations:
+                  summary: "Multipath map {{ $labels.map }} ({{ $labels.volume }}) on {{ $labels.node }} has no usable path."
+                  description: "I/O to {{ $labels.volume }} is queued (no_path_retry 120 x 5 s, about 10 min from the path loss) and fails after that, which aborts the ext4 journal. `sudo multipathd show maps format \"%n %Q %N\"` and `sudo multipath -ll` on {{ $labels.node }}; a queueing column of \"N sec\" is the time left. Restore the path (QNAP, network, `iscsiadm -m session`); if the NAS is gone for good and pods must fail now: `sudo multipathd disablequeueing map {{ $labels.map }}`. Runbook: clusters/olympus/qnap-storage/README.md."
+              # A healthy map that would fail I/O at once on losing its path: the iscsi role's no_path_retry drop-in
+              # (olympus-sdk#1151) is not applied to it (`multipathd reconfigure` not run since, the #299 failure mode).
+              - alert: MultipathMapNotQueueing
+                expr: >-
+                  max by (node, map, volume) (node_multipath_map_queue_if_no_path{job="kubernetes-service-endpoints", service="node-exporter"}) == 0
+                  unless on (node, map, volume)
+                  max by (node, map, volume) (node_multipath_map_active_paths{job="kubernetes-service-endpoints", service="node-exporter"}) == 0
+                for: 1h
+                labels: { severity: warning }
+                annotations:
+                  summary: "Multipath map {{ $labels.map }} ({{ $labels.volume }}) on {{ $labels.node }} would fail I/O at once on a path loss."
+                  description: "Its no_path_retry is unset (queueing column \"-\" or \"off\"), so a few seconds of iSCSI outage return EIO and abort the ext4 journal (olympus-gitops#299). Check `/etc/multipath/conf.d/olympus-qnap.conf` exists on {{ $labels.node }} (converge role iscsi), then `sudo multipathd reconfigure` and `sudo multipathd show maps format \"%n %Q\"`."
+              # The writer itself: its file stopped being rewritten, or disappeared while node-exporter is up (a series
+              # that existed in the last day). A node without the role never had the series and raises nothing.
+              - alert: StorageTextfileStale
+                expr: >-
+                  (time() - max by (node) (node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter"})) > 300
+                  or
+                  (
+                    max by (node) (max_over_time(node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter"}[1d]))
+                    unless on (node) max by (node) (node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter"})
+                  )
+                  and on (node) max by (node) (up{job="kubernetes-service-endpoints", service="node-exporter"}) == 1
+                for: 5m
+                labels: { severity: warning }
+                annotations:
+                  summary: "The storage metrics on {{ $labels.node }} are not being written."
+                  description: "olympus_storage.prom was not rewritten for over 5 min, or is gone, so the ext4, iSCSI and multipath alerts are blind on {{ $labels.node }}. `systemctl status olympus-storage-textfile.timer olympus-storage-textfile.service` and `journalctl -u olympus-storage-textfile.service -n 20` there; a run stuck in D state means a hung filesystem or multipathd."
+              # A malformed .prom file (node-exporter drops it whole), or a source the writer could not read (multipathd
+              # did not answer within 10 s, or a staging directory unreadable).
+              - alert: StorageTextfileErrors
+                expr: >-
+                  max by (node) (node_textfile_scrape_error{job="kubernetes-service-endpoints", service="node-exporter"}) == 1
+                  or
+                  max by (node, collector) (node_storage_textfile_collector_success{job="kubernetes-service-endpoints", service="node-exporter"}) == 0
+                for: 10m
+                labels: { severity: warning }
+                annotations:
+                  summary: "The storage textfile metrics on {{ $labels.node }} are incomplete."
+                  description: "Either node-exporter cannot parse a file in its textfile directory (node_textfile_scrape_error; its log names the file), or the writer could not read a source (node_storage_textfile_collector_success == 0, collector \"{{ $labels.collector }}\"; multipath: `sudo multipathd show maps` hangs or fails). Some storage alerts are blind on {{ $labels.node }} until fixed."
           - name: ci-runners-macos
             rules:
               # Native macOS JIT runners on data-hub, mmini-01 and mmini-02 (olympus-sdk#392; not ARC). Each Mac's
