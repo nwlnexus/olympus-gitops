@@ -89,6 +89,12 @@ spec:
         enabled: true
         storageClass: qnap-iscsi
         size: 10Gi
+        # The chart defaults both to Delete: scaling loki to 0 for the qnap-iscsi repair on 2026-11-24 deleted
+        # storage-loki-0 (olympus-gitops#299). Retain keeps the claim on scale-down and on StatefulSet deletion;
+        # the PV's own reclaim policy (qnap-iscsi: Retain) is a separate, second guard.
+        enableStatefulSetAutoDeletePVC: true
+        whenScaled: Retain
+        whenDeleted: Retain
     # The loki-sc-rules sidecar container.
     sidecar:
       rules:
