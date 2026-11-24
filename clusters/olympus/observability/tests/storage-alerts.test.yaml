@@ -282,3 +282,258 @@ tests:
             exp_annotations:
               summary: "StatefulSet observability/loki deletes its PVCs (whenScaled Delete, whenDeleted Delete)."
               description: "Scaling it to 0 (the qnap-iscsi repair) or deleting it removes its volume claims. Set persistentVolumeClaimRetentionPolicy to Retain/Retain in its HelmRelease values (loki: singleBinary.persistence.whenScaled/whenDeleted)."
+
+  # olympus-gitops#301: kernel-level storage metrics from the storage-textfile writer (node-exporter textfile collector).
+  - name: 'gitops#301: an ext4 error count above 0 fires at once; 0 and a node without the role do not'
+    interval: 1m
+    input_series:
+      - series: node_ext4_errors{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", device="dm-2", volume="pvc-4f587be9-f98b-41b6-984f-c8904ee10b12"}
+        values: 0x10 3x20
+      - series: node_ext4_errors{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", device="nvme0n1p2", volume=""}
+        values: '0x30'
+      - series: up{job="kubernetes-service-endpoints", service="node-exporter", node="a9-mega"}
+        values: 1x30
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: NodeExt4Errors
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: NodeExt4Errors
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              node: onode-0314ac
+              device: dm-2
+              volume: pvc-4f587be9-f98b-41b6-984f-c8904ee10b12
+            exp_annotations:
+              summary: ext4 on dm-2 (pvc-4f587be9-f98b-41b6-984f-c8904ee10b12) on onode-0314ac has recorded 3 errors.
+              description: 'The kernel recorded ext4 errors on dm-2 since its last fsck (/sys/fs/ext4/dm-2/errors_count); writes to it may fail with EIO even while it is mounted rw. `dmesg -T | grep -iE ''EXT4-fs error|JBD2|I/O error''` on onode-0314ac. A volume (pvc-4f587be9-f98b-41b6-984f-c8904ee10b12): runbook clusters/olympus/qnap-storage/README.md, "Runbook: qnap-iscsi volume ext4 aborted". No volume: the node''s own disk.'
+
+  - name: 'gitops#301: a staged volume whose session drops fires after 2m; a node without the role does not'
+    interval: 1m
+    input_series:
+      - series: node_csi_staged_volumes{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", driver="csi.trident.qnap.io"}
+        values: 1x30
+      - series: node_iscsi_sessions_logged_in{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac"}
+        values: 1x10 0x20
+      - series: node_iscsi_volume_session_logged_in{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", volume="pvc-4f587be9-f98b-41b6-984f-c8904ee10b12", target="iscsi-trident-pvc-4f587be9-f98b-41b6-984f-c8904ee10b12"}
+        values: 1x10 0x20
+      - series: up{job="kubernetes-service-endpoints", service="node-exporter", node="onode-062caa"}
+        values: 1x30
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: IscsiSessionsMissing
+        exp_alerts: []
+      - eval_time: 14m
+        alertname: IscsiSessionsMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              node: onode-0314ac
+            exp_annotations:
+              summary: 1 staged qnap-iscsi volume(s) on onode-0314ac have no logged-in iSCSI session.
+              description: 'Their I/O is queued by dm-multipath and fails about 10 min after the session dropped. Which ones: `node_iscsi_volume_session_logged_in{node="onode-0314ac"} == 0` and `node_iscsi_session_logged_in{node="onode-0314ac"}` (state label). On the node: `sudo iscsiadm -m session -P 1`, `dmesg -T | grep -iE ''iscsi|session recovery''`; check the QNAP (192.168.253.10:3260). iscsid keeps retrying the login; nothing in Trident does. Runbook: clusters/olympus/qnap-storage/README.md.'
+
+  - name: 'gitops#301: a leftover session to another target does not hide a volume without its session'
+    interval: 1m
+    input_series:
+      - series: node_csi_staged_volumes{job="kubernetes-service-endpoints", service="node-exporter", node="naraka-01", driver="csi.trident.qnap.io"}
+        values: 2x20
+      - series: node_iscsi_sessions_logged_in{job="kubernetes-service-endpoints", service="node-exporter", node="naraka-01"}
+        values: 2x20
+      - series: node_iscsi_volume_session_logged_in{job="kubernetes-service-endpoints", service="node-exporter", node="naraka-01", volume="pvc-a", target="iscsi-trident-pvc-a"}
+        values: 1x20
+      - series: node_iscsi_volume_session_logged_in{job="kubernetes-service-endpoints", service="node-exporter", node="naraka-01", volume="pvc-b", target="iscsi-trident-pvc-b"}
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: IscsiSessionsMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              node: naraka-01
+            exp_annotations:
+              summary: 1 staged qnap-iscsi volume(s) on naraka-01 have no logged-in iSCSI session.
+              description: 'Their I/O is queued by dm-multipath and fails about 10 min after the session dropped. Which ones: `node_iscsi_volume_session_logged_in{node="naraka-01"} == 0` and `node_iscsi_session_logged_in{node="naraka-01"}` (state label). On the node: `sudo iscsiadm -m session -P 1`, `dmesg -T | grep -iE ''iscsi|session recovery''`; check the QNAP (192.168.253.10:3260). iscsid keeps retrying the login; nothing in Trident does. Runbook: clusters/olympus/qnap-storage/README.md.'
+
+  - name: 'gitops#301: a map that loses its only path and queues fires after 1m, one alert per map'
+    interval: 1m
+    input_series:
+      - series: node_multipath_map_queueing{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", map="mpathb", volume="pvc-4f587be9-f98b-41b6-984f-c8904ee10b12", wwid="36e843b66638646638376239623366666"}
+        values: 0x10 1x20
+      - series: node_multipath_map_active_paths{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", map="mpathb", volume="pvc-4f587be9-f98b-41b6-984f-c8904ee10b12", wwid="36e843b66638646638376239623366666"}
+        values: 1x10 0x20
+      - series: node_multipath_map_scsi_paths_running{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", map="mpathb", volume="pvc-4f587be9-f98b-41b6-984f-c8904ee10b12"}
+        values: 1x10 0x20
+      - series: node_multipath_map_queue_if_no_path{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", map="mpathb", volume="pvc-4f587be9-f98b-41b6-984f-c8904ee10b12", wwid="36e843b66638646638376239623366666"}
+        values: 1x30
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MultipathMapNoUsablePath
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: MultipathMapNoUsablePath
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              node: onode-0314ac
+              map: mpathb
+              volume: pvc-4f587be9-f98b-41b6-984f-c8904ee10b12
+            exp_annotations:
+              summary: Multipath map mpathb (pvc-4f587be9-f98b-41b6-984f-c8904ee10b12) on onode-0314ac has no usable path.
+              description: 'I/O to pvc-4f587be9-f98b-41b6-984f-c8904ee10b12 is queued (no_path_retry 120 x 5 s, about 10 min from the path loss) and fails after that, which aborts the ext4 journal. `sudo multipathd show maps format "%n %Q %N"` and `sudo multipath -ll` on onode-0314ac; a queueing column of "N sec" is the time left. Restore the path (QNAP, network, `iscsiadm -m session`); if the NAS is gone for good and pods must fail now: `sudo multipathd disablequeueing map mpathb`. Runbook: clusters/olympus/qnap-storage/README.md.'
+      - eval_time: 12m
+        alertname: MultipathMapNotQueueing
+        exp_alerts: []
+
+  - name: 'gitops#301: with multipathd not answering, the sysfs path count still fires'
+    interval: 1m
+    input_series:
+      - series: node_multipath_map_scsi_paths_running{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", map="mpathb", volume="pvc-4f587be9-f98b-41b6-984f-c8904ee10b12"}
+        values: 1x10 0x20
+    alert_rule_test:
+      - eval_time: 13m
+        alertname: MultipathMapNoUsablePath
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              node: onode-0314ac
+              map: mpathb
+              volume: pvc-4f587be9-f98b-41b6-984f-c8904ee10b12
+            exp_annotations:
+              summary: Multipath map mpathb (pvc-4f587be9-f98b-41b6-984f-c8904ee10b12) on onode-0314ac has no usable path.
+              description: 'I/O to pvc-4f587be9-f98b-41b6-984f-c8904ee10b12 is queued (no_path_retry 120 x 5 s, about 10 min from the path loss) and fails after that, which aborts the ext4 journal. `sudo multipathd show maps format "%n %Q %N"` and `sudo multipath -ll` on onode-0314ac; a queueing column of "N sec" is the time left. Restore the path (QNAP, network, `iscsiadm -m session`); if the NAS is gone for good and pods must fail now: `sudo multipathd disablequeueing map mpathb`. Runbook: clusters/olympus/qnap-storage/README.md.'
+
+  - name: 'gitops#301: a healthy map without no_path_retry warns after 1h; a map with it, or one with no path (the critical alert), does not'
+    interval: 1m
+    input_series:
+      - series: node_multipath_map_queue_if_no_path{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", map="mpathb", volume="pvc-4f587be9-f98b-41b6-984f-c8904ee10b12", wwid="36e843b66638646638376239623366666"}
+        values: '0x90'
+      - series: node_multipath_map_active_paths{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", map="mpathb", volume="pvc-4f587be9-f98b-41b6-984f-c8904ee10b12", wwid="36e843b66638646638376239623366666"}
+        values: 1x90
+      - series: node_multipath_map_queue_if_no_path{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", map="mpathc", volume="pvc-c", wwid="36e843b66638646638376239623366666"}
+        values: 1x90
+      - series: node_multipath_map_active_paths{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", map="mpathc", volume="pvc-c", wwid="36e843b66638646638376239623366666"}
+        values: 1x90
+      - series: node_multipath_map_queue_if_no_path{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", map="mpathd", volume="pvc-d", wwid="36e843b66638646638376239623366666"}
+        values: '0x90'
+      - series: node_multipath_map_active_paths{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", map="mpathd", volume="pvc-d", wwid="36e843b66638646638376239623366666"}
+        values: '0x90'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: MultipathMapNotQueueing
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: MultipathMapNotQueueing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              node: onode-0314ac
+              map: mpathb
+              volume: pvc-4f587be9-f98b-41b6-984f-c8904ee10b12
+            exp_annotations:
+              summary: Multipath map mpathb (pvc-4f587be9-f98b-41b6-984f-c8904ee10b12) on onode-0314ac would fail I/O at once on a path loss.
+              description: Its no_path_retry is unset (queueing column "-" or "off"), so a few seconds of iSCSI outage return EIO and abort the ext4 journal (olympus-gitops#299). Check `/etc/multipath/conf.d/olympus-qnap.conf` exists on onode-0314ac (converge role iscsi), then `sudo multipathd reconfigure` and `sudo multipathd show maps format "%n %Q"`.
+
+  - name: 'gitops#301: a writer that stops rewriting its file pages within 5 min; so does one whose file vanishes while node-exporter is up; a node that never had it and a node whose exporter is down do not'
+    interval: 1m
+    input_series:
+      - series: node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter", node="onode-030c31"}
+        values: 0+60x20 1200x40
+      - series: up{job="kubernetes-service-endpoints", service="node-exporter", node="onode-030c31"}
+        values: 1x60
+      - series: node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0312ce"}
+        values: 0+60x20 _x40
+      - series: up{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0312ce"}
+        values: 1x60
+      - series: node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0636e4"}
+        values: 0+60x20 _x40
+      - series: up{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0636e4"}
+        values: 1x20 0x40
+      - series: up{job="kubernetes-service-endpoints", service="node-exporter", node="a9-mega"}
+        values: 1x60
+      - series: node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac"}
+        values: 0+60x60
+      - series: up{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac"}
+        values: 1x60
+    alert_rule_test:
+      - eval_time: 24m
+        alertname: StorageTextfileStale
+        exp_alerts: []
+      - eval_time: 27m
+        alertname: StorageTextfileStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              node: onode-030c31
+            exp_annotations:
+              summary: The storage metrics on onode-030c31 are not being written.
+              description: olympus_storage.prom was not rewritten for over 3 min, or is gone, so the ext4, iSCSI and multipath alerts are blind on onode-030c31. `systemctl status olympus-storage-textfile.timer olympus-storage-textfile.service` and `journalctl -u olympus-storage-textfile.service -n 20` there; a run stuck in D state means a hung filesystem or multipathd.
+          - exp_labels:
+              severity: critical
+              node: onode-0312ce
+            exp_annotations:
+              summary: The storage metrics on onode-0312ce are not being written.
+              description: olympus_storage.prom was not rewritten for over 3 min, or is gone, so the ext4, iSCSI and multipath alerts are blind on onode-0312ce. `systemctl status olympus-storage-textfile.timer olympus-storage-textfile.service` and `journalctl -u olympus-storage-textfile.service -n 20` there; a run stuck in D state means a hung filesystem or multipathd.
+      - eval_time: 40m
+        alertname: StorageTextfileStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              node: onode-030c31
+            exp_annotations:
+              summary: The storage metrics on onode-030c31 are not being written.
+              description: olympus_storage.prom was not rewritten for over 3 min, or is gone, so the ext4, iSCSI and multipath alerts are blind on onode-030c31. `systemctl status olympus-storage-textfile.timer olympus-storage-textfile.service` and `journalctl -u olympus-storage-textfile.service -n 20` there; a run stuck in D state means a hung filesystem or multipathd.
+          - exp_labels:
+              severity: critical
+              node: onode-0312ce
+            exp_annotations:
+              summary: The storage metrics on onode-0312ce are not being written.
+              description: olympus_storage.prom was not rewritten for over 3 min, or is gone, so the ext4, iSCSI and multipath alerts are blind on onode-0312ce. `systemctl status olympus-storage-textfile.timer olympus-storage-textfile.service` and `journalctl -u olympus-storage-textfile.service -n 20` there; a run stuck in D state means a hung filesystem or multipathd.
+
+  - name: 'gitops#301: when Prometheus stops storing samples, the frozen sample does not age into StorageTextfileStale'
+    interval: 1m
+    input_series:
+      - series: node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac"}
+        values: -90+60x20 _x40
+      - series: up{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac"}
+        values: 1x20 _x40
+    alert_rule_test:
+      - eval_time: 24m
+        alertname: StorageTextfileStale
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: StorageTextfileStale
+        exp_alerts: []
+
+  - name: 'gitops#301: a source the writer cannot read, or a malformed file, warns after 10m'
+    interval: 1m
+    input_series:
+      - series: node_storage_textfile_collector_success{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", collector="multipath"}
+        values: 1x5 0x30
+      - series: node_storage_textfile_collector_success{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", collector="ext4"}
+        values: 1x35
+      - series: node_textfile_scrape_error{job="kubernetes-service-endpoints", service="node-exporter", node="naraka-01"}
+        values: 0x5 1x30
+      - series: node_textfile_scrape_error{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac"}
+        values: '0x35'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: StorageTextfileErrors
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: StorageTextfileErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              node: onode-0314ac
+              collector: multipath
+            exp_annotations:
+              summary: The storage textfile metrics on onode-0314ac are incomplete.
+              description: 'Either node-exporter cannot parse a file in its textfile directory (node_textfile_scrape_error; its log names the file), or the writer could not read a source (node_storage_textfile_collector_success == 0, collector "multipath"; multipath: `sudo multipathd show maps` hangs or fails). Some storage alerts are blind on onode-0314ac until fixed.'
+          - exp_labels:
+              severity: warning
+              node: naraka-01
+            exp_annotations:
+              summary: The storage textfile metrics on naraka-01 are incomplete.
+              description: 'Either node-exporter cannot parse a file in its textfile directory (node_textfile_scrape_error; its log names the file), or the writer could not read a source (node_storage_textfile_collector_success == 0, collector ""; multipath: `sudo multipathd show maps` hangs or fails). Some storage alerts are blind on naraka-01 until fixed.'

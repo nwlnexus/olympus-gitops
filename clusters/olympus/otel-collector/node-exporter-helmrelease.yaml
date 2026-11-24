@@ -23,3 +23,15 @@ spec:
     fullnameOverride: node-exporter
     # DaemonSet, hostNetwork/hostPID + host mounts are chart defaults. Service
     # node-exporter:9100 (port name "metrics"). Scraped by the otel collector.
+    # Textfile collector (olympus-gitops#301): kernel-level storage metrics (ext4 error counters, iSCSI
+    # sessions vs staged qnap-iscsi volumes, dm-multipath queueing/paths) written once a minute by the
+    # olympus-sdk converge role `storage-textfile` on the k3s nodes. DirectoryOrCreate: on a node the
+    # role has not reached yet the directory is empty, so the collector reports no error and no series.
+    extraArgs:
+      - --collector.textfile.directory=/host/textfile
+    extraHostVolumeMounts:
+      - name: textfile
+        hostPath: /var/lib/node_exporter/textfile_collector
+        type: DirectoryOrCreate
+        mountPath: /host/textfile
+        readOnly: true
