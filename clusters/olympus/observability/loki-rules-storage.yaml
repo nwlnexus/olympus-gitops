@@ -1,0 +1,38 @@
+# Loki ruler alert for broken pod volumes (olympus-gitops#299, storage incident 17–24 Nov 2026). Picked up by the
+# loki-sc-rules sidecar (label loki_rule) and evaluated by the Loki ruler (loki-helmrelease.yaml, rulerConfig),
+# which sends to the Prometheus Alertmanager directly, so it still alerts when Prometheus itself cannot store
+# anything (its volume was one of the five that failed).
+#
+# On the 7.x node kernels an aborted ext4 journal does not remount the filesystem read-only: writes fail with
+# EIO and node-exporter shows nothing (no ext4 error metric is exposed, and it cannot statfs kubelet mounts).
+# The applications log it. On 24 Nov 2026 between 04:20 and 12:10 UTC this expression matched exactly the five
+# broken workloads (grafana, loki-0, prometheus-server, redpanda-0, portainer) and nothing from 10–17 Nov or
+# after the repair. Excluded: Loki's own query logging (`query=` echoes this rule's text) and otel collector
+# export retries (`Exporting failed` quotes Loki's error, it is not the collector's own disk).
+#
+# Loki was itself blind from 17 Nov 08:19 until it restarted on 24 Nov (its WAL is on qnap-iscsi too), so this
+# complements PrometheusIngestionStopped, NodeFilesystemReadOnly and KubePodCrashLoopingLong
+# (prometheus-helmrelease.yaml, group storage-health); it does not replace them.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-storage
+  namespace: observability
+  labels:
+    loki_rule: ""
+data:
+  storage.yaml: |
+    groups:
+      - name: storage-io-errors
+        rules:
+          # A 30m window and a 5m hold: a crash-looping app logs the error once per restart (every 5–30 min),
+          # and a 10m window flipped between firing and resolved (noise review 2026-11-16, CiEgressDenials).
+          - alert: PodVolumeIOErrors
+            expr: |
+              sum by (k8s_namespace_name, k8s_pod_name) (count_over_time({k8s_namespace_name=~".+"} |~ `(?i)(input/output error|read-only file system|structure needs cleaning)` !~ `query=|Exporting failed` [30m])) > 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "{{ $labels.k8s_namespace_name }}/{{ $labels.k8s_pod_name }} logged {{ $value }} filesystem I/O errors in 30m."
+              description: "The pod logs \"input/output error\", \"read-only file system\" or \"structure needs cleaning\": its volume (usually qnap-iscsi) is broken and its writes fail. Loki: {k8s_pod_name=\"{{ $labels.k8s_pod_name }}\"} |~ \"(?i)input/output error|read-only file system\". Runbook: clusters/olympus/qnap-storage/README.md, \"Runbook: qnap-iscsi volume ext4 aborted\" (check the StatefulSet PVC retention policy before scaling anything to 0)."

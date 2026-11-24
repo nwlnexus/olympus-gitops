@@ -1,0 +1,284 @@
+# Unit tests for the storage-health group and the ingestion-dependent Watchdog (olympus-gitops#299, storage
+# incident 17–24 Nov 2026). Run with tests/check_prometheus.py (it extracts the rules from the HelmRelease first).
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  # 17 Nov: every append failed from 08:19, so `up` simply stops having samples. The Watchdog (dead-man ping)
+  # stops once the last sample is older than the 5m lookback; PrometheusIngestionStopped fires 5m after that.
+  - name: ingestion stops, the Watchdog goes quiet and PrometheusIngestionStopped fires
+    interval: 1m
+    input_series:
+      - series: 'up{job="prometheus", instance="localhost:9090"}'
+        values: "1x10 _x40"
+      - series: 'up{job="kubernetes-pods", instance="10.42.0.1:8080"}'
+        values: "1x10 _x40"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: Watchdog
+        exp_alerts:
+          - exp_labels:
+              severity: none
+            exp_annotations:
+              summary: "Alerting pipeline alive and Prometheus storing samples (always firing)."
+      - eval_time: 5m
+        alertname: PrometheusIngestionStopped
+        exp_alerts: []
+      - eval_time: 18m
+        alertname: Watchdog
+        exp_alerts: []
+      - eval_time: 18m
+        alertname: PrometheusIngestionStopped
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: PrometheusIngestionStopped
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "Prometheus has stored no samples for 10m."
+              description: "No `up` series has a sample newer than 5m: scrapes and remote write are not being stored, so every other metric alert is blind (the absent() alerts it mutes are consequences). Usual cause: the prometheus-server volume (qnap-iscsi) has an aborted ext4 journal. `kubectl -n observability logs deploy/prometheus-server | grep -iE 'WAL|input/output|read-only'`, then the runbook in clusters/olympus/qnap-storage/README.md."
+
+  - name: all targets down but samples still stored is TargetDown territory, not ingestion stopped
+    interval: 1m
+    input_series:
+      - series: 'up{job="kubernetes-pods", instance="10.42.0.1:8080"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: PrometheusIngestionStopped
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: Watchdog
+        exp_alerts: []
+
+  - name: sustained WAL write failures fire, none do not
+    interval: 1m
+    input_series:
+      - series: 'prometheus_tsdb_wal_writes_failed_total{job="prometheus", instance="localhost:9090"}'
+        values: "0x10 1+1x30"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PrometheusWALWritesFailing
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: PrometheusWALWritesFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: prometheus
+              instance: localhost:9090
+            exp_annotations:
+              summary: "Prometheus failed 10 WAL writes in 10m."
+              description: "Samples whose WAL write fails are dropped. Check the prometheus-server volume: free space (`kubelet_volume_stats_available_bytes{persistentvolumeclaim=\"prometheus-server\"}`), then I/O errors in the pod log; runbook in clusters/olympus/qnap-storage/README.md."
+
+  - name: a failed compaction fires the maintenance alert
+    interval: 1m
+    input_series:
+      - series: 'prometheus_tsdb_compactions_failed_total{job="prometheus", instance="localhost:9090"}'
+        values: "0x10 1x60"
+      - series: 'prometheus_tsdb_head_truncations_failed_total{job="prometheus", instance="localhost:9090"}'
+        values: "0x70"
+      - series: 'prometheus_tsdb_wal_truncations_failed_total{job="prometheus", instance="localhost:9090"}'
+        values: "0x70"
+      - series: 'prometheus_tsdb_checkpoint_creations_failed_total{job="prometheus", instance="localhost:9090"}'
+        values: "0x70"
+      - series: 'prometheus_tsdb_reloads_failures_total{job="prometheus", instance="localhost:9090"}'
+        values: "0x70"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PrometheusTSDBMaintenanceFailing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: PrometheusTSDBMaintenanceFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: prometheus
+              instance: localhost:9090
+            exp_annotations:
+              summary: "Prometheus TSDB compaction or truncation failed 1 times in 3h."
+              description: "Failed compactions or head/WAL truncations leave the head and WAL growing until Prometheus runs out of memory or disk. `kubectl -n observability logs deploy/prometheus-server | grep -iE 'compact|truncat|checkpoint|reload'`; an I/O error there means the volume (runbook in clusters/olympus/qnap-storage/README.md)."
+
+  # 24 Nov 12:08: Prometheus came back with prometheus_tsdb_wal_corruptions_total 1 from the startup replay.
+  - name: corruption found at startup fires during the first hour only
+    interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{job="prometheus", instance="localhost:9090"}'
+        values: "0x120"
+      - series: 'prometheus_tsdb_wal_corruptions_total{job="prometheus", instance="localhost:9090"}'
+        values: "1x120"
+      - series: 'prometheus_tsdb_mmap_chunk_corruptions_total{job="prometheus", instance="localhost:9090"}'
+        values: "0x120"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: PrometheusTSDBCorruption
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: prometheus
+              instance: localhost:9090
+            exp_annotations:
+              summary: "Prometheus found corrupt WAL segments or head chunks."
+              description: "Prometheus repaired its WAL or head chunks by dropping the corrupt part, so recent samples are lost. Corruption after a crash is expected once; repeated corruption means the volume is failing: check it with the runbook in clusters/olympus/qnap-storage/README.md."
+      - eval_time: 90m
+        alertname: PrometheusTSDBCorruption
+        exp_alerts: []
+
+  - name: corruption found later in the process lifetime fires
+    interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{job="prometheus", instance="localhost:9090"}'
+        values: "0x240"
+      - series: 'prometheus_tsdb_wal_corruptions_total{job="prometheus", instance="localhost:9090"}'
+        values: "0x200 1x40"
+      - series: 'prometheus_tsdb_mmap_chunk_corruptions_total{job="prometheus", instance="localhost:9090"}'
+        values: "0x240"
+    alert_rule_test:
+      - eval_time: 190m
+        alertname: PrometheusTSDBCorruption
+        exp_alerts: []
+      - eval_time: 210m
+        alertname: PrometheusTSDBCorruption
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: prometheus
+              instance: localhost:9090
+            exp_annotations:
+              summary: "Prometheus found corrupt WAL segments or head chunks."
+              description: "Prometheus repaired its WAL or head chunks by dropping the corrupt part, so recent samples are lost. Corruption after a crash is expected once; repeated corruption means the volume is failing: check it with the runbook in clusters/olympus/qnap-storage/README.md."
+
+  - name: remote write failing with 5xx fires; 4xx rejections do not
+    interval: 1m
+    input_series:
+      - series: 'prometheus_http_requests_total{job="prometheus", instance="localhost:9090", handler="/api/v1/write", code="204"}'
+        values: "0+50x40"
+      - series: 'prometheus_http_requests_total{job="prometheus", instance="localhost:9090", handler="/api/v1/write", code="500"}'
+        values: "0+50x40"
+      - series: 'prometheus_http_requests_total{job="prometheus", instance="localhost:9091", handler="/api/v1/write", code="204"}'
+        values: "0+50x40"
+      - series: 'prometheus_http_requests_total{job="prometheus", instance="localhost:9091", handler="/api/v1/write", code="400"}'
+        values: "0+50x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: PrometheusRemoteWriteReceiveErrors
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: prometheus
+              instance: localhost:9090
+            exp_annotations:
+              summary: "50% of remote-write requests into Prometheus fail with 5xx."
+              description: "Prometheus cannot append what the otel collectors and fleet hosts send it, so node and host metrics are being lost. `kubectl -n observability logs deploy/prometheus-server | grep -i write`; if it shows I/O errors, follow the runbook in clusters/olympus/qnap-storage/README.md."
+
+  # The loki volume on 24 Nov: "write /var/loki/wal/...: read-only file system".
+  - name: a qnap-iscsi mount remounted read-only fires with the PV name; a read-only tmpfs does not
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_readonly{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", instance="192.168.253.12:9100", fstype="ext4", device="/dev/mapper/mpathc", mountpoint="/var/lib/kubelet/pods/0a1b/volumes/kubernetes.io~csi/pvc-0db7cf2f-75e3-469d-968f-a7740950da24/mount"}'
+        values: "0x5 1x20"
+      - series: 'node_filesystem_readonly{job="node-exporter", node="onode-0314ac", instance="onode-0314ac", fstype="ext4", device="/dev/mapper/mpathc", mountpoint="/var/lib/kubelet/pods/0a1b/volumes/kubernetes.io~csi/pvc-0db7cf2f-75e3-469d-968f-a7740950da24/mount"}'
+        values: "0x5 1x20"
+      - series: 'node_filesystem_readonly{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac", instance="192.168.253.12:9100", fstype="tmpfs", device="tmpfs", mountpoint="/run/secrets"}'
+        values: "1x25"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: NodeFilesystemReadOnly
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: NodeFilesystemReadOnly
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              node: onode-0314ac
+              fstype: ext4
+              device: /dev/mapper/mpathc
+              mountpoint: /var/lib/kubelet/pods/0a1b/volumes/kubernetes.io~csi/pvc-0db7cf2f-75e3-469d-968f-a7740950da24/mount
+              persistentvolume: pvc-0db7cf2f-75e3-469d-968f-a7740950da24
+            exp_annotations:
+              summary: "ext4 filesystem /var/lib/kubelet/pods/0a1b/volumes/kubernetes.io~csi/pvc-0db7cf2f-75e3-469d-968f-a7740950da24/mount on onode-0314ac is read-only."
+              description: "/dev/mapper/mpathc (pvc-0db7cf2f-75e3-469d-968f-a7740950da24) was remounted read-only, usually after an I/O error or an aborted journal; every write from the pod using it fails. Runbook: clusters/olympus/qnap-storage/README.md, \"Runbook: qnap-iscsi volume ext4 aborted\" (`dmesg -T` on onode-0314ac, then the scale 0 → 1 repair)."
+
+  - name: a device error other than permission denied fires; the unprivileged exporter's permission denied does not
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_device_error{job="kubernetes-service-endpoints", service="node-exporter", node="naraka-01", fstype="ext4", device="/dev/mapper/mpathk", mountpoint="/var/lib/kubelet/pods/ee67/volumes/kubernetes.io~csi/pvc-7d45/mount", device_error="permission denied"}'
+        values: "1x20"
+      - series: 'node_filesystem_device_error{job="kubernetes-service-endpoints", service="node-exporter", node="naraka-01", fstype="nfs4", device="qnap.nwlnexus.net:/olympus-nfs-data/x", mountpoint="/mnt/x", device_error="input/output error"}'
+        values: "1x20"
+      - series: 'node_filesystem_device_error{job="kubernetes-service-endpoints", service="node-exporter", node="naraka-01", fstype="ext4", device="/dev/mapper/ubuntu--vg-ubuntu--lv", mountpoint="/"}'
+        values: "0x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NodeFilesystemDeviceError
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              node: naraka-01
+              fstype: nfs4
+              device: qnap.nwlnexus.net:/olympus-nfs-data/x
+              mountpoint: /mnt/x
+              device_error: input/output error
+            exp_annotations:
+              summary: "node-exporter cannot stat /mnt/x on naraka-01: input/output error."
+              description: "statfs on qnap.nwlnexus.net:/olympus-nfs-data/x (nfs4) fails with \"input/output error\". An I/O error means the filesystem or its iSCSI/NFS path is broken: `dmesg -T | tail -50` on naraka-01; for a qnap-iscsi volume follow clusters/olympus/qnap-storage/README.md."
+
+  # Grafana on 17–23 Nov: back-off at 5 min, so the waiting reason is reported most of the time with short gaps.
+  - name: a pod in CrashLoopBackOff for over 1h fires (critical in observability, warning elsewhere)
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_waiting_reason{job="kubernetes-service-endpoints", namespace="observability", pod="grafana-788f5768cd-6vj59", container="grafana", reason="CrashLoopBackOff"}'
+        values: "1x4 _ 1x4 _ 1x4 _ 1x4 _ 1x4 _ 1x4 _ 1x4 _ 1x4 _ 1x4 _ 1x4 _ 1x4 _ 1x4 _ 1x4 _ 1x4 _ 1x4 _ 1x4 _ 1x4 _"
+      - series: 'kube_pod_container_status_waiting_reason{job="kubernetes-service-endpoints", namespace="plex", pod="plex-0", container="plex", reason="CrashLoopBackOff"}'
+        values: "1x90"
+      - series: 'kube_pod_container_status_waiting_reason{job="kubernetes-service-endpoints", namespace="memory", pod="postgres-0", container="postgres", reason="ContainerCreating"}'
+        values: "1x90"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: KubePodCrashLoopingLong
+        exp_alerts: []
+      - eval_time: 80m
+        alertname: KubePodCrashLoopingLong
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: observability
+              pod: grafana-788f5768cd-6vj59
+              container: grafana
+            exp_annotations:
+              summary: "observability/grafana-788f5768cd-6vj59 (grafana) has been in CrashLoopBackOff for over 1h."
+              description: "`kubectl -n observability logs grafana-788f5768cd-6vj59 -c grafana --previous`. \"input/output error\" or \"read-only file system\" there means its volume is broken: runbook in clusters/olympus/qnap-storage/README.md."
+          - exp_labels:
+              severity: warning
+              namespace: plex
+              pod: plex-0
+              container: plex
+            exp_annotations:
+              summary: "plex/plex-0 (plex) has been in CrashLoopBackOff for over 1h."
+              description: "`kubectl -n plex logs plex-0 -c plex --previous`. \"input/output error\" or \"read-only file system\" there means its volume is broken: runbook in clusters/olympus/qnap-storage/README.md."
+
+  - name: a StatefulSet whose PVCs are deleted on scale-down fires after 1h; Retain/Retain does not
+    interval: 1m
+    input_series:
+      - series: 'kube_statefulset_persistentvolumeclaim_retention_policy{job="kubernetes-service-endpoints", namespace="observability", statefulset="loki", when_scaled="Delete", when_deleted="Delete"}'
+        values: "1x90"
+      - series: 'kube_statefulset_persistentvolumeclaim_retention_policy{job="kubernetes-service-endpoints", namespace="memory", statefulset="postgres", when_scaled="Retain", when_deleted="Retain"}'
+        values: "1x90"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: StatefulSetPVCAutoDelete
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: StatefulSetPVCAutoDelete
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: observability
+              statefulset: loki
+              when_scaled: Delete
+              when_deleted: Delete
+            exp_annotations:
+              summary: "StatefulSet observability/loki deletes its PVCs (whenScaled Delete, whenDeleted Delete)."
+              description: "Scaling it to 0 (the qnap-iscsi repair) or deleting it removes its volume claims. Set persistentVolumeClaimRetentionPolicy to Retain/Retain in its HelmRelease values (loki: singleBinary.persistence.whenScaled/whenDeleted)."
