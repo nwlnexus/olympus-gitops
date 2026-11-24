@@ -166,6 +166,11 @@ spec:
             target_matchers:
               - 'alertname="KubePodCrashLooping"'
             equal: [namespace, pod]
+          # The halt makes every later revision unmirrored; the halt is the one to act on.
+          - source_matchers:
+              - 'alertname="HermesConfigMirrorHalted"'
+            target_matchers:
+              - 'alertname="HermesConfigRevisionUnmirrored"'
         receivers:
           - name: email
             email_configs:
@@ -1582,6 +1587,74 @@ spec:
                 annotations:
                   summary: "facts.json for {{ $labels.repo }} is {{ $value | humanize1024 }}B, above the 144 KiB target."
                   description: "repos/{{ $labels.repo }}/facts.json passed the 144 KiB target (the generator also warns in meta.json). Technologies, external_systems and tooling carry most of the bytes; shorten evidence excerpts or cap evidence per row or rows per kind in packages/knowledge-gen rather than raising the target again (runbook section \"facts.json size\")."
+          - name: config-store
+            rules:
+              # Fleet config store durability (olympus-sdk#1134; runbook docs/runbooks/config-store-durability.md in
+              # olympus-sdk). Hermes copies every config revision and signed policy row to the R2 bucket olympus-config and
+              # refuses to sign host-config bundles until they are there. Gauges come from the `config_store` collector on
+              # Hermes /metrics (scrape job "hermes", olympus-sdk#1165). Timestamps are seconds since the epoch; a gauge
+              # with nothing to report (no unmirrored revision) is absent, so `time() - x` rules stay quiet then.
+              # Saves still work during an R2 outage (owner decision D4); only publishing waits.
+              - alert: HermesConfigRevisionUnmirrored
+                expr: time() - max(hermes_config_store_oldest_unmirrored_timestamp_seconds{job="hermes"}) > 900
+                for: 5m
+                labels: { severity: warning }
+                annotations:
+                  summary: "A config revision has waited {{ $value | humanizeDuration }} for its R2 copy; host-config publishing is paused."
+                  description: "Hermes has not copied a saved config revision to the R2 bucket olympus-config for over 15 minutes, so publishHostConfig, group publish and the auto re-publish refuse to sign. Saves still work. Check R2 status and `configDurability { unmirrored oldestUnmirroredAt halt { reason } }`; the mirror retries every 5 minutes. Runbook: docs/runbooks/config-store-durability.md (olympus-sdk)."
+              - alert: HermesConfigPolicyUnmirrored
+                expr: time() - max(hermes_config_store_oldest_unmirrored_policy_timestamp_seconds{job="hermes"}) > 3600
+                for: 15m
+                labels: { severity: warning }
+                annotations:
+                  summary: "A signed policy row has waited {{ $value | humanizeDuration }} for its R2 copy."
+                  description: "Hermes has not copied a signed policy row (host-config bundle or exec-allowlist) to R2 policy/ for over an hour. Publishing does not wait on these, but the durable record is incomplete. Check `configDurability { policyUnmirrored }` and the Worker logs for [config-durability] policy mirror. Runbook: docs/runbooks/config-store-durability.md (olympus-sdk)."
+              # A halt is an integrity break (owner decision on #1134): D1 and R2 disagree, config saves AND publishing are
+              # refused until a reconcile (phase 3). Hosts keep their bundles until they expire.
+              - alert: HermesConfigMirrorHalted
+                expr: max by (reason) (hermes_config_store_mirror_halted{job="hermes"}) == 1
+                for: 2m
+                labels: { severity: critical }
+                annotations:
+                  summary: "The fleet config store mirror is halted ({{ $labels.reason }}): config saves and publishing are refused."
+                  description: "fork: an R2 key holds a different revision than D1; r2_ahead: R2 holds a revision D1 does not (D1 was rolled back, e.g. Time Travel). Do not edit fleet config. Read `configDurability { halt { reason detail at } }` and follow the runbook docs/runbooks/config-store-durability.md (olympus-sdk); reconcile is olympus-sdk#1135."
+              - alert: HermesConfigIntegrityFailed
+                expr: min(hermes_config_store_integrity_ok{job="hermes"}) == 0
+                for: 5m
+                labels: { severity: critical }
+                annotations:
+                  summary: "The daily config store integrity check found damage."
+                  description: "The chain or a signature in D1 is broken, the log disagrees with the live tables, or an R2 object under rev/ or policy/ is missing, altered or extra. Read `configDurability { integrity { at problems } }` and run `atlas fleet config verify`. Runbook: docs/runbooks/config-store-durability.md (olympus-sdk)."
+              - alert: HermesConfigIntegrityStale
+                expr: time() - max(hermes_config_store_integrity_timestamp_seconds{job="hermes"}) > 26 * 3600
+                for: 30m
+                labels: { severity: warning }
+                annotations:
+                  summary: "The config store integrity check last ran {{ $value | humanizeDuration }} ago."
+                  description: "The daily integrity check runs from the Hermes scheduled handler; it has not completed for over 26 hours. Check the iris Worker's cron invocations and logs ([config-durability] integrity). Runbook: docs/runbooks/config-store-durability.md (olympus-sdk)."
+              - alert: HermesConfigBucketLockMissing
+                expr: min(hermes_config_store_lock_ok{job="hermes"}) == 0
+                for: 1h
+                labels: { severity: warning }
+                annotations:
+                  summary: "The olympus-config bucket lock is not in force: the lock canary could be overwritten or deleted."
+                  description: "Hermes's daily check could overwrite or delete rev/_canary/lock.json, so the lock rules that make the revision record immutable are missing. The owner applies them from config/r2/ in olympus-sdk (runbook docs/runbooks/config-store-durability.md); CI never holds a token that can."
+              - alert: HermesConfigDumpStale
+                expr: time() - max(hermes_config_store_dump_timestamp_seconds{job="hermes"}) > 30 * 3600
+                for: 30m
+                labels: { severity: warning }
+                annotations:
+                  summary: "The nightly Hermes identity dump last ran {{ $value | humanizeDuration }} ago."
+                  description: "The dump of machines, tokens, capabilities, host keys and envelopes to R2 dump/ runs nightly after 02:00 UTC. Check the Worker logs ([config-durability] dump) and `configDurability { lastDumpAt }`. Runbook: docs/runbooks/config-store-durability.md (olympus-sdk)."
+              # Bundles are refreshed at half their 30-day life, so under 10 days left means publishing has been blocked for
+              # weeks (decision 8 on olympus-sdk#1134: no refresh exemption).
+              - alert: HermesConfigBundleTtlLow
+                expr: min by (hostname) (hermes_config_store_bundle_min_expiry_timestamp_seconds{job="hermes"}) - time() < 10 * 86400
+                for: 30m
+                labels: { severity: warning }
+                annotations:
+                  summary: "The host-config bundle of {{ $labels.hostname }} expires in {{ $value | humanizeDuration }}."
+                  description: "The earliest-expiring signed host-config bundle in the fleet has under 10 days left, so it has not been refreshed for 20 days: publishing is blocked (see HermesConfigRevisionUnmirrored / HermesConfigMirrorHalted) or the auto re-publish is off. A host whose bundle expires stops converging. Runbook: docs/runbooks/config-store-durability.md (olympus-sdk)."
     prometheus-pushgateway:
       enabled: false
     kube-state-metrics:

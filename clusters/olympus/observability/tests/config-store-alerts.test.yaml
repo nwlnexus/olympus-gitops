@@ -1,0 +1,91 @@
+# Unit tests for the config-store group (olympus-sdk#1134): the `config_store` collector on Hermes /metrics
+# (scrape job "hermes", olympus-sdk#1165). Run with tests/check_prometheus.py.
+rule_files:
+- alerting_rules.yml
+evaluation_interval: "1m"
+tests:
+- name: a revision unmirrored for over 15 minutes fires after 5m more
+  interval: "1m"
+  input_series:
+  - series: "hermes_config_store_oldest_unmirrored_timestamp_seconds{job=\"hermes\", instance=\"api.nwlnexus.io\"}"
+    values: "0x30"
+  alert_rule_test:
+  - eval_time: "14m"
+    alertname: HermesConfigRevisionUnmirrored
+    exp_alerts: []
+  - eval_time: "25m"
+    alertname: HermesConfigRevisionUnmirrored
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: "A config revision has waited 25m 0s for its R2 copy; host-config publishing is paused."
+        description: "Hermes has not copied a saved config revision to the R2 bucket olympus-config for over 15 minutes, so publishHostConfig, group publish and the auto re-publish refuse to sign. Saves still work. Check R2 status and `configDurability { unmirrored oldestUnmirroredAt halt { reason } }`; the mirror retries every 5 minutes. Runbook: docs/runbooks/config-store-durability.md (olympus-sdk)."
+- name: a halted mirror is critical and names the reason
+  interval: "1m"
+  input_series:
+  - series: "hermes_config_store_mirror_halted{job=\"hermes\", instance=\"api.nwlnexus.io\", reason=\"none\"}"
+    values: "0 0 0 _x10"
+  - series: "hermes_config_store_mirror_halted{job=\"hermes\", instance=\"api.nwlnexus.io\", reason=\"fork\"}"
+    values: "_ _ _ 1x10"
+  alert_rule_test:
+  - eval_time: "2m"
+    alertname: HermesConfigMirrorHalted
+    exp_alerts: []
+  - eval_time: "6m"
+    alertname: HermesConfigMirrorHalted
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+        reason: fork
+      exp_annotations:
+        summary: "The fleet config store mirror is halted (fork): config saves and publishing are refused."
+        description: "fork: an R2 key holds a different revision than D1; r2_ahead: R2 holds a revision D1 does not (D1 was rolled back, e.g. Time Travel). Do not edit fleet config. Read `configDurability { halt { reason detail at } }` and follow the runbook docs/runbooks/config-store-durability.md (olympus-sdk); reconcile is olympus-sdk#1135."
+- name: a failed integrity check is critical; a missing lock is a warning after an hour
+  interval: "1m"
+  input_series:
+  - series: "hermes_config_store_integrity_ok{job=\"hermes\", instance=\"api.nwlnexus.io\"}"
+    values: "1 1 0x80"
+  - series: "hermes_config_store_lock_ok{job=\"hermes\", instance=\"api.nwlnexus.io\"}"
+    values: "0x80"
+  alert_rule_test:
+  - eval_time: "5m"
+    alertname: HermesConfigIntegrityFailed
+    exp_alerts: []
+  - eval_time: "8m"
+    alertname: HermesConfigIntegrityFailed
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+      exp_annotations:
+        summary: "The daily config store integrity check found damage."
+        description: "The chain or a signature in D1 is broken, the log disagrees with the live tables, or an R2 object under rev/ or policy/ is missing, altered or extra. Read `configDurability { integrity { at problems } }` and run `atlas fleet config verify`. Runbook: docs/runbooks/config-store-durability.md (olympus-sdk)."
+  - eval_time: "50m"
+    alertname: HermesConfigBucketLockMissing
+    exp_alerts: []
+  - eval_time: "70m"
+    alertname: HermesConfigBucketLockMissing
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+      exp_annotations:
+        summary: "The olympus-config bucket lock is not in force: the lock canary could be overwritten or deleted."
+        description: "Hermes's daily check could overwrite or delete rev/_canary/lock.json, so the lock rules that make the revision record immutable are missing. The owner applies them from config/r2/ in olympus-sdk (runbook docs/runbooks/config-store-durability.md); CI never holds a token that can."
+- name: a bundle expiring in under 10 days fires per host after 30m
+  interval: "1m"
+  input_series:
+  - series: "hermes_config_store_bundle_min_expiry_timestamp_seconds{job=\"hermes\", instance=\"api.nwlnexus.io\", hostname=\"onode-0314ac\"}"
+    values: "777600x60"
+  alert_rule_test:
+  - eval_time: "20m"
+    alertname: HermesConfigBundleTtlLow
+    exp_alerts: []
+  - eval_time: "40m"
+    alertname: HermesConfigBundleTtlLow
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        hostname: onode-0314ac
+      exp_annotations:
+        summary: "The host-config bundle of onode-0314ac expires in 8d 23h 20m 0s."
+        description: "The earliest-expiring signed host-config bundle in the fleet has under 10 days left, so it has not been refreshed for 20 days: publishing is blocked (see HermesConfigRevisionUnmirrored / HermesConfigMirrorHalted) or the auto re-publish is off. A host whose bundle expires stops converging. Runbook: docs/runbooks/config-store-durability.md (olympus-sdk)."
