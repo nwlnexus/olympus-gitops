@@ -147,7 +147,7 @@ spec:
           - source_matchers:
               - 'alertname="PrometheusIngestionStopped"'
             target_matchers:
-              - 'alertname=~"BlackboxExporterDown|MemoryEmbedderMetricsAbsent|CiEgressProxyDown|ArcControllerDown|MacCIRunnerHeartbeatMissing"'
+              - 'alertname=~"BlackboxExporterDown|MemoryEmbedderMetricsAbsent|CiEgressProxyDown|ArcControllerDown|MacCIRunnerHeartbeatMissing|StorageTextfileStale"'
           # The long crash loop is the one to act on; the 15m restart-rate alert for the same pod repeats it.
           - source_matchers:
               - 'alertname="KubePodCrashLoopingLong"'
@@ -1325,6 +1325,7 @@ spec:
               - alert: NodeExt4Errors
                 expr: >-
                   max by (node, device, volume) (node_ext4_errors{job="kubernetes-service-endpoints", service="node-exporter"}) > 0
+                keep_firing_for: 3m
                 labels: { severity: critical }
                 annotations:
                   summary: "ext4 on {{ $labels.device }} ({{ $labels.volume }}) on {{ $labels.node }} has recorded {{ $value }} errors."
@@ -1342,6 +1343,7 @@ spec:
                   or
                   count by (node) (max by (node, volume) (node_iscsi_volume_session_logged_in{job="kubernetes-service-endpoints", service="node-exporter"}) == 0)
                 for: 2m
+                keep_firing_for: 3m
                 labels: { severity: critical }
                 annotations:
                   summary: "{{ $value }} staged qnap-iscsi volume(s) on {{ $labels.node }} have no logged-in iSCSI session."
@@ -1356,6 +1358,7 @@ spec:
                   or
                   max by (node, map, volume) (node_multipath_map_scsi_paths_running{job="kubernetes-service-endpoints", service="node-exporter"}) == 0
                 for: 1m
+                keep_firing_for: 3m
                 labels: { severity: critical }
                 annotations:
                   summary: "Multipath map {{ $labels.map }} ({{ $labels.volume }}) on {{ $labels.node }} has no usable path."
@@ -1372,22 +1375,29 @@ spec:
                 annotations:
                   summary: "Multipath map {{ $labels.map }} ({{ $labels.volume }}) on {{ $labels.node }} would fail I/O at once on a path loss."
                   description: "Its no_path_retry is unset (queueing column \"-\" or \"off\"), so a few seconds of iSCSI outage return EIO and abort the ext4 journal (olympus-gitops#299). Check `/etc/multipath/conf.d/olympus-qnap.conf` exists on {{ $labels.node }} (converge role iscsi), then `sudo multipathd reconfigure` and `sudo multipathd show maps format \"%n %Q\"`."
-              # The writer itself: its file stopped being rewritten, or disappeared while node-exporter is up (a series
-              # that existed in the last day). A node without the role never had the series and raises nothing.
+              # The writer itself. node-exporter keeps serving the last file, so a dead writer would keep reporting
+              # "all sessions logged in" and silence every critical above: critical, inside the 600 s queue window.
+              # Age at scrape (sample time minus the value), not time() minus the value, so a Prometheus that stops
+              # storing samples does not age the frozen sample into an alert. Second branch: the file disappeared while
+              # node-exporter is up (a series that existed in the last day). A node without the role never had the
+              # series and raises nothing.
               - alert: StorageTextfileStale
                 expr: >-
-                  (time() - max by (node) (node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter"})) > 300
+                  max by (node) (
+                    timestamp(node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter"})
+                    - node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter"}
+                  ) > 180
                   or
                   (
                     max by (node) (max_over_time(node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter"}[1d]))
                     unless on (node) max by (node) (node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter"})
                   )
                   and on (node) max by (node) (up{job="kubernetes-service-endpoints", service="node-exporter"}) == 1
-                for: 5m
-                labels: { severity: warning }
+                for: 2m
+                labels: { severity: critical }
                 annotations:
                   summary: "The storage metrics on {{ $labels.node }} are not being written."
-                  description: "olympus_storage.prom was not rewritten for over 5 min, or is gone, so the ext4, iSCSI and multipath alerts are blind on {{ $labels.node }}. `systemctl status olympus-storage-textfile.timer olympus-storage-textfile.service` and `journalctl -u olympus-storage-textfile.service -n 20` there; a run stuck in D state means a hung filesystem or multipathd."
+                  description: "olympus_storage.prom was not rewritten for over 3 min, or is gone, so the ext4, iSCSI and multipath alerts are blind on {{ $labels.node }}. `systemctl status olympus-storage-textfile.timer olympus-storage-textfile.service` and `journalctl -u olympus-storage-textfile.service -n 20` there; a run stuck in D state means a hung filesystem or multipathd."
               # A malformed .prom file (node-exporter drops it whole), or a source the writer could not read (multipathd
               # did not answer within 10 s, or a staging directory unreadable).
               - alert: StorageTextfileErrors

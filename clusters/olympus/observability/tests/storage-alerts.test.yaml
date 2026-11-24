@@ -435,7 +435,7 @@ tests:
               summary: Multipath map mpathb (pvc-4f587be9-f98b-41b6-984f-c8904ee10b12) on onode-0314ac would fail I/O at once on a path loss.
               description: Its no_path_retry is unset (queueing column "-" or "off"), so a few seconds of iSCSI outage return EIO and abort the ext4 journal (olympus-gitops#299). Check `/etc/multipath/conf.d/olympus-qnap.conf` exists on onode-0314ac (converge role iscsi), then `sudo multipathd reconfigure` and `sudo multipathd show maps format "%n %Q"`.
 
-  - name: 'gitops#301: a writer that stops rewriting its file warns; one whose file vanishes while node-exporter is up warns; a node that never had it and a node whose exporter is down do not'
+  - name: 'gitops#301: a writer that stops rewriting its file pages within 5 min; so does one whose file vanishes while node-exporter is up; a node that never had it and a node whose exporter is down do not'
     interval: 1m
     input_series:
       - series: node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter", node="onode-030c31"}
@@ -457,24 +457,54 @@ tests:
       - series: up{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac"}
         values: 1x60
     alert_rule_test:
-      - eval_time: 22m
+      - eval_time: 24m
         alertname: StorageTextfileStale
         exp_alerts: []
+      - eval_time: 27m
+        alertname: StorageTextfileStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              node: onode-030c31
+            exp_annotations:
+              summary: The storage metrics on onode-030c31 are not being written.
+              description: olympus_storage.prom was not rewritten for over 3 min, or is gone, so the ext4, iSCSI and multipath alerts are blind on onode-030c31. `systemctl status olympus-storage-textfile.timer olympus-storage-textfile.service` and `journalctl -u olympus-storage-textfile.service -n 20` there; a run stuck in D state means a hung filesystem or multipathd.
+          - exp_labels:
+              severity: critical
+              node: onode-0312ce
+            exp_annotations:
+              summary: The storage metrics on onode-0312ce are not being written.
+              description: olympus_storage.prom was not rewritten for over 3 min, or is gone, so the ext4, iSCSI and multipath alerts are blind on onode-0312ce. `systemctl status olympus-storage-textfile.timer olympus-storage-textfile.service` and `journalctl -u olympus-storage-textfile.service -n 20` there; a run stuck in D state means a hung filesystem or multipathd.
       - eval_time: 40m
         alertname: StorageTextfileStale
         exp_alerts:
           - exp_labels:
-              severity: warning
+              severity: critical
               node: onode-030c31
             exp_annotations:
               summary: The storage metrics on onode-030c31 are not being written.
-              description: olympus_storage.prom was not rewritten for over 5 min, or is gone, so the ext4, iSCSI and multipath alerts are blind on onode-030c31. `systemctl status olympus-storage-textfile.timer olympus-storage-textfile.service` and `journalctl -u olympus-storage-textfile.service -n 20` there; a run stuck in D state means a hung filesystem or multipathd.
+              description: olympus_storage.prom was not rewritten for over 3 min, or is gone, so the ext4, iSCSI and multipath alerts are blind on onode-030c31. `systemctl status olympus-storage-textfile.timer olympus-storage-textfile.service` and `journalctl -u olympus-storage-textfile.service -n 20` there; a run stuck in D state means a hung filesystem or multipathd.
           - exp_labels:
-              severity: warning
+              severity: critical
               node: onode-0312ce
             exp_annotations:
               summary: The storage metrics on onode-0312ce are not being written.
-              description: olympus_storage.prom was not rewritten for over 5 min, or is gone, so the ext4, iSCSI and multipath alerts are blind on onode-0312ce. `systemctl status olympus-storage-textfile.timer olympus-storage-textfile.service` and `journalctl -u olympus-storage-textfile.service -n 20` there; a run stuck in D state means a hung filesystem or multipathd.
+              description: olympus_storage.prom was not rewritten for over 3 min, or is gone, so the ext4, iSCSI and multipath alerts are blind on onode-0312ce. `systemctl status olympus-storage-textfile.timer olympus-storage-textfile.service` and `journalctl -u olympus-storage-textfile.service -n 20` there; a run stuck in D state means a hung filesystem or multipathd.
+
+  - name: 'gitops#301: when Prometheus stops storing samples, the frozen sample does not age into StorageTextfileStale'
+    interval: 1m
+    input_series:
+      - series: node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac"}
+        values: -90+60x20 _x40
+      - series: up{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac"}
+        values: 1x20 _x40
+    alert_rule_test:
+      - eval_time: 24m
+        alertname: StorageTextfileStale
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: StorageTextfileStale
+        exp_alerts: []
 
   - name: 'gitops#301: a source the writer cannot read, or a malformed file, warns after 10m'
     interval: 1m
