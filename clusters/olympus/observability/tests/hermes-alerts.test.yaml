@@ -1,0 +1,109 @@
+# Unit tests for the hermes-host-config group (olympus-sdk#1165). Run with tests/check_prometheus.py.
+rule_files:
+  - alerting_rules.yml
+evaluation_interval: 1m
+
+tests:
+  # A host whose bundle stopped resolving at t=0 (since = 0 s): nothing for 6h, then a warning after 15m more.
+  # It resolves again at 7h: the series disappears and the alert clears.
+  - name: an unresolved host warns after 6h and clears when it resolves
+    interval: 5m
+    input_series:
+      - series: 'hermes_host_config_problem_since_timestamp_seconds{job="hermes", hostname="onode-1", problem="unresolved", reason="host-config does not resolve: x"}'
+        values: "0x84 _x12"
+    alert_rule_test:
+      - eval_time: 6h
+        alertname: HostConfigNotRefreshable
+        exp_alerts: []
+      - eval_time: 6h20m
+        alertname: HostConfigNotRefreshable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: hermes
+              hostname: onode-1
+              problem: unresolved
+              reason: "host-config does not resolve: x"
+            exp_annotations:
+              summary: "onode-1: host-config unresolved for 6h 20m 0s."
+              description: "Hermes cannot give onode-1 a new host-config bundle (unresolved): host-config does not resolve: x. Until fixed the host keeps its applied bundle, which expires 30 days after it was signed and then stops converge on the host (HostConfigBundleExpiring fires 7 days before). `atlas fleet config preview onode-1` shows why it does not resolve; a held root-exec change needs `atlas fleet config publish` by a human holding command:shell; a refused one needs the agent's reason (`atlas fleet config status`)."
+      - eval_time: 7h30m
+        alertname: HostConfigNotRefreshable
+        exp_alerts: []
+
+  # Applied bundle expires at 8 days (691200 s): critical from 1 day (when 7 days remain) plus 15m; also once expired.
+  - name: a bundle within 7 days of expiry is critical, and stays so once expired
+    interval: 5m
+    input_series:
+      - series: 'hermes_host_config_applied_expiry_timestamp_seconds{job="hermes", hostname="onode-2"}'
+        values: "691200x2700"
+    alert_rule_test:
+      - eval_time: 23h
+        alertname: HostConfigBundleExpiring
+        exp_alerts: []
+      - eval_time: 26h
+        alertname: HostConfigBundleExpiring
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: hermes
+              hostname: onode-2
+            exp_annotations:
+              summary: "onode-2: the applied host-config bundle expires in 6d 22h 0m 0s."
+              description: "Past its expires_at the agent stops converging onode-2 (timer runs refused as expired) and nothing manages the host. A healthy host is refreshed at half its 30-day lifetime, so this means Hermes has not signed for it for over 3 weeks: see HostConfigNotRefreshable and `atlas fleet config status onode-2`. A negative value means it has already expired."
+      - eval_time: 9d
+        alertname: HostConfigBundleExpiring
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: hermes
+              hostname: onode-2
+            exp_annotations:
+              summary: "onode-2: the applied host-config bundle expires in -1d 0h 0m 0s."
+              description: "Past its expires_at the agent stops converging onode-2 (timer runs refused as expired) and nothing manages the host. A healthy host is refreshed at half its 30-day lifetime, so this means Hermes has not signed for it for over 3 weeks: see HostConfigNotRefreshable and `atlas fleet config status onode-2`. A negative value means it has already expired."
+
+  # A healthy host (refreshed at half its lifetime: always > 14 days left) never fires.
+  - name: a healthy host is quiet
+    interval: 5m
+    input_series:
+      - series: 'hermes_host_config_applied_expiry_timestamp_seconds{job="hermes", hostname="onode-3"}'
+        values: "1296000x600"
+    alert_rule_test:
+      - eval_time: 2d
+        alertname: HostConfigBundleExpiring
+        exp_alerts: []
+
+  - name: a stale health check and a failing scrape warn
+    interval: 5m
+    input_series:
+      - series: 'hermes_host_config_health_checked_timestamp_seconds{job="hermes"}'
+        values: "0x30"
+      - series: 'up{job="hermes", instance="api.nwlnexus.io"}'
+        values: "1x6 0x30"
+      - series: 'hermes_metrics_collector_up{job="hermes", collector="config_store"}'
+        values: "0x12"
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: HermesHostConfigHealthStale
+        exp_alerts: []
+      - eval_time: 1h20m
+        alertname: HermesHostConfigHealthStale
+        exp_alerts:
+          - exp_labels: { severity: warning, job: hermes }
+            exp_annotations:
+              summary: "Hermes has not checked host-config health for 1h 20m 0s."
+              description: "The converge auto re-publish (Worker cron, every 15 minutes) records each check. Without it no host's bundle is refreshed and HostConfigNotRefreshable cannot fire. Check CONVERGE_AUTO_PUBLISH and the iris Worker's scheduled-event logs."
+      - eval_time: 1h10m
+        alertname: HermesMetricsScrapeFailing
+        exp_alerts:
+          - exp_labels: { severity: warning, job: hermes, instance: api.nwlnexus.io }
+            exp_annotations:
+              summary: "Prometheus cannot scrape Hermes /metrics."
+              description: "The hermes job has failed for 30m, so the host-config and config store alerts are blind. 401/403: the monitor token (1Password Dev item hermes-metrics, field token) was revoked or lacks metrics:read; check ExternalSecret observability/hermes-metrics-token. Otherwise api.nwlnexus.io is down or unreachable from the cluster."
+      - eval_time: 40m
+        alertname: HermesMetricsCollectorFailing
+        exp_alerts:
+          - exp_labels: { severity: warning, job: hermes, collector: config_store }
+            exp_annotations:
+              summary: "Hermes metrics collector config_store is failing."
+              description: "The collector's gauges are missing from /metrics, so its alerts cannot fire. The iris Worker logs 'metrics collector failed' or 'metrics collector refused' with the collector name."

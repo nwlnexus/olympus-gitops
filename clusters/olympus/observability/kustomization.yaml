@@ -22,6 +22,7 @@ resources:
   - alertmanager-resend-externalsecret.yaml
   - alertmanager-deadman-externalsecret.yaml
   - litellm-monitor-externalsecret.yaml
+  - hermes-metrics-externalsecret.yaml
 configMapGenerator:
   # Grafana dashboards as code; mounted by the `agents` dashboard provider in grafana-helmrelease.yaml.
   # The name is fixed (no hash suffix) because the HelmRelease values refer to it.
