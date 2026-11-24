@@ -41,6 +41,12 @@ spec:
           memory: 2240Mi
         limits:
           memory: 3Gi
+      # Bearer token of the `hermes` scrape job (ESO, hermes-metrics-externalsecret.yaml), as a file.
+      extraSecretMounts:
+        - name: hermes-metrics
+          secretName: hermes-metrics-token
+          mountPath: /etc/prometheus/hermes
+          readOnly: true
     # Alertmanager → Resend email (Phase 7). Server auto-wires to the bundled AM.
     configmapReload:
       prometheus:
@@ -148,6 +154,12 @@ spec:
               - 'alertname="PrometheusIngestionStopped"'
             target_matchers:
               - 'alertname=~"BlackboxExporterDown|MemoryEmbedderMetricsAbsent|CiEgressProxyDown|ArcControllerDown|MacCIRunnerHeartbeatMissing|StorageTextfileStale"'
+          # An expiring bundle is the louder form of the same host's refresh problem (olympus-sdk#1165).
+          - source_matchers:
+              - 'alertname="HostConfigBundleExpiring"'
+            target_matchers:
+              - 'alertname="HostConfigNotRefreshable"'
+            equal: [hostname]
           # The long crash loop is the one to act on; the 15m restart-rate alert for the same pod repeats it.
           - source_matchers:
               - 'alertname="KubePodCrashLoopingLong"'
@@ -178,6 +190,20 @@ spec:
         metrics_path: /metrics
         static_configs:
           - targets: ["prometheus-alertmanager.observability.svc:9093"]
+      # Hermes fleet-health gauges (olympus-sdk#1165): converge host-config health, config store health. The
+      # token holds only `metrics:read` (hermes-metrics-externalsecret.yaml). Rules: group hermes-host-config.
+      - job_name: hermes
+        scheme: https
+        metrics_path: /metrics
+        scrape_interval: 1m
+        scrape_timeout: 20s
+        authorization:
+          type: Bearer
+          credentials_file: /etc/prometheus/hermes/token
+        static_configs:
+          - targets: ["api.nwlnexus.io"]
+            labels:
+              service: hermes
       - job_name: blackbox-exporter
         metrics_path: /metrics
         static_configs:
@@ -1179,6 +1205,49 @@ spec:
                 annotations:
                   summary: "etcd backend commit p99 on {{ $labels.instance }} is {{ $value | humanizeDuration }}."
                   description: "Backend (bbolt) commit p99 on {{ $labels.instance }} has been over 50ms for 10m (healthy: under 25ms). Slow commits back up the apply loop and show as EtcdRequestLatencyHigh next. Check disk contention on that node first (CI runners, image pulls, `iostat -x 5` on the node), then the database size (`etcd_mvcc_db_total_size_in_bytes{job=\"etcd\"}`; defragment one member at a time if it is large). Do not raise runner capacity while this fires."
+          - name: hermes-host-config
+            rules:
+              # olympus-sdk#1165. Hermes re-resolves every host's host-config every 15 minutes. A host it cannot
+              # sign for (the bundle does not resolve, or a root-exec change waits for a human) gets nothing new,
+              # not even the refresh before its applied bundle's 30-day expiry; a host whose agent refused its
+              # newest bundle stays on the previous one. Gauges: GET https://api.nwlnexus.io/metrics.
+              # Where to look: `atlas fleet config status <host>` (health line), IRIS Fleet > host > Config.
+              - alert: HostConfigNotRefreshable
+                expr: time() - hermes_host_config_problem_since_timestamp_seconds > 6 * 3600
+                for: 15m
+                labels: { severity: warning }
+                annotations:
+                  summary: "{{ $labels.hostname }}: host-config {{ $labels.problem }} for {{ $value | humanizeDuration }}."
+                  description: "Hermes cannot give {{ $labels.hostname }} a new host-config bundle ({{ $labels.problem }}): {{ $labels.reason }}. Until fixed the host keeps its applied bundle, which expires 30 days after it was signed and then stops converge on the host (HostConfigBundleExpiring fires 7 days before). `atlas fleet config preview {{ $labels.hostname }}` shows why it does not resolve; a held root-exec change needs `atlas fleet config publish` by a human holding command:shell; a refused one needs the agent's reason (`atlas fleet config status`)."
+              - alert: HostConfigBundleExpiring
+                expr: hermes_host_config_applied_expiry_timestamp_seconds - time() < 7 * 86400
+                for: 15m
+                labels: { severity: critical }
+                annotations:
+                  summary: "{{ $labels.hostname }}: the applied host-config bundle expires in {{ $value | humanizeDuration }}."
+                  description: "Past its expires_at the agent stops converging {{ $labels.hostname }} (timer runs refused as expired) and nothing manages the host. A healthy host is refreshed at half its 30-day lifetime, so this means Hermes has not signed for it for over 3 weeks: see HostConfigNotRefreshable and `atlas fleet config status {{ $labels.hostname }}`. A negative value means it has already expired."
+              # The check above stopped running: the auto re-publish is off (CONVERGE_AUTO_PUBLISH=false) or failing.
+              - alert: HermesHostConfigHealthStale
+                expr: time() - hermes_host_config_health_checked_timestamp_seconds > 3600
+                for: 15m
+                labels: { severity: warning }
+                annotations:
+                  summary: "Hermes has not checked host-config health for {{ $value | humanizeDuration }}."
+                  description: "The converge auto re-publish (Worker cron, every 15 minutes) records each check. Without it no host's bundle is refreshed and HostConfigNotRefreshable cannot fire. Check CONVERGE_AUTO_PUBLISH and the iris Worker's scheduled-event logs."
+              - alert: HermesMetricsScrapeFailing
+                expr: up{job="hermes"} == 0
+                for: 30m
+                labels: { severity: warning }
+                annotations:
+                  summary: "Prometheus cannot scrape Hermes /metrics."
+                  description: "The hermes job has failed for 30m, so the host-config and config store alerts are blind. 401/403: the monitor token (1Password Dev item hermes-metrics, field token) was revoked or lacks metrics:read; check ExternalSecret observability/hermes-metrics-token. Otherwise api.nwlnexus.io is down or unreachable from the cluster."
+              - alert: HermesMetricsCollectorFailing
+                expr: hermes_metrics_collector_up == 0
+                for: 30m
+                labels: { severity: warning }
+                annotations:
+                  summary: "Hermes metrics collector {{ $labels.collector }} is failing."
+                  description: "The collector's gauges are missing from /metrics, so its alerts cannot fire. The iris Worker logs 'metrics collector failed' or 'metrics collector refused' with the collector name."
           - name: storage-health
             rules:
               # Storage incident 17–24 Nov 2026 (olympus-gitops#299). A few-second iSCSI outage aborted the ext4

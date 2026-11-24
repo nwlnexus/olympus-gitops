@@ -22,9 +22,19 @@ release = yaml.safe_load(open(os.path.join(here, "..", "prometheus-helmrelease.y
 values = release["spec"]["values"]
 
 with tempfile.TemporaryDirectory() as work:
+    scrape_configs = yaml.safe_load(values["extraScrapeConfigs"])
+    # Credential files are mounted Secrets in the pod (server.extraSecretMounts); promtool checks that they
+    # exist, so point them at a placeholder here.
+    placeholder = os.path.join(work, "credentials-placeholder")
+    with open(placeholder, "w") as out:
+        out.write("placeholder\n")
+    for job in scrape_configs:
+        auth = job.get("authorization") or {}
+        if "credentials_file" in auth:
+            auth["credentials_file"] = placeholder
     with open(os.path.join(work, "prometheus.yml"), "w") as out:
         yaml.safe_dump(
-            {"global": {"scrape_interval": "1m"}, "scrape_configs": yaml.safe_load(values["extraScrapeConfigs"])},
+            {"global": {"scrape_interval": "1m"}, "scrape_configs": scrape_configs},
             out,
             sort_keys=False,
         )
