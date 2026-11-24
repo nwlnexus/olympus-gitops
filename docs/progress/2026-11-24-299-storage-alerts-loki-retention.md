@@ -18,8 +18,8 @@ Cluster side of olympus-gitops#299: alerts for node fs errors/read-only remounts
 | # | Check (command) | Expected result | Last result | Commit |
 | --- | --- | --- | --- | --- |
 | 1 | `PATH=<scratch>/bin:<scratch>/venv/bin:$PATH python3 clusters/olympus/observability/tests/check_prometheus.py` | exit 0, test files incl. storage-alerts.test.yaml SUCCESS | PASS (exit 0) | |
-| 2 | `grep -n -A3 'persistence:' clusters/olympus/observability/loki-helmrelease.yaml` | whenScaled: Retain, whenDeleted: Retain | not run | |
-| 3 | `test -f clusters/olympus/qnap-storage/README.md && grep -n 'ext4 aborted' clusters/olympus/qnap-storage/README.md` | runbook section present | not run | |
+| 2 | `grep -n -A3 'persistence:' clusters/olympus/observability/loki-helmrelease.yaml` | whenScaled: Retain, whenDeleted: Retain | PASS | |
+| 3 | `test -f clusters/olympus/qnap-storage/README.md && grep -n 'ext4 aborted' clusters/olympus/qnap-storage/README.md` | runbook section present | PASS | |
 | 4 | post-merge `kubectl get sts -n observability loki -o jsonpath='{.spec.persistentVolumeClaimRetentionPolicy}'` | Retain/Retain | not run | |
 | 5 | post-merge `curl -s obs-prometheus:9090/api/v1/rules` lists PrometheusIngestionStopped etc. | present, health ok | not run | |
 
@@ -60,6 +60,8 @@ Blast radius: no index (olympus-gitops has no GitNexus index on purpose, CLAUDE.
 | 13:37 | Loki `{service_name="trident-node-linux"} \|~ "fsck"` 24 Nov | 0 | `command=fsck.ext4 … /dev/dm-1 contains a file system with errors, check forced.` | |
 | 13:38 | gh issue create (follow-up) | 0 | https://github.com/nwlnexus/olympus-gitops/issues/301 | |
 | 13:45 | `PATH=<scratch>/bin:<scratch>/venv/bin:$PATH python3 clusters/olympus/observability/tests/check_prometheus.py` (promtool 3.15.0) | 0 | check config SUCCESS; check rules `SUCCESS: 85 rules found`; test rules incl. storage-alerts.test.yaml SUCCESS | |
+| 14:00 | claim-verifier (sonnet) on caba0c4, checks 1-3 + live checks | 0 | `VERDICT: PASS` | caba0c4 |
+| 14:00 | PR #300 CI | 0 | `validate pass 6m48s`, `admission pass` | caba0c4 |
 
 ## Decisions
 
@@ -75,4 +77,4 @@ Blast radius: no index (olympus-gitops has no GitNexus index on purpose, CLAUDE.
 
 ## Next
 
-1. Full check_prometheus.py run, commit, push, claim-verifier, ready PR, automerge label; then post-merge checks 4-5 and the #299 comment.
+1. Remove this file, ready PR #300, verifier again, automerge label; then post-merge checks 4-5 and the #299 comment.
