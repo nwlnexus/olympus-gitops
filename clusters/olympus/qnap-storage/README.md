@@ -187,5 +187,68 @@ empty PV. The old PV is `Released` (Retain kept it and its data). To put the old
    It turns `Available`, still pre-bound to `<ns>/<pvc>` by name.
 7. Scale the StatefulSet to 1. It recreates the PVC from its template and the PV controller binds it to the
    pre-bound old PV. Check: `kubectl -n <ns> get pvc <pvc> -o jsonpath='{.spec.volumeName}'` is the old PV.
-8. Without step 4, delete the leftover empty PV (`kubectl delete pv <new-pv>`) and its LUN on the QNAP
-   (`iscsi-trident-<new-pv>`): with Retain, Trident leaves the LUN behind.
+8. Without step 4, retire the leftover empty PV through Trident as in "Runbook: retire a Retain volume"
+   (switch it to Delete; with Retain, deleting only the PV leaves the LUN behind). Never delete its LUN only on
+   the QNAP.
+
+## Runbook: retire a Retain volume
+
+Background: olympus-gitops#306. `qnap-iscsi` sets `reclaimPolicy: Retain`, so deleting a PVC keeps its PV
+(`Released`), and deleting that PV by hand keeps the Trident volume and its LUN and iSCSI target on the QNAP. On
+2026-10-29 the `mem0` and FalkorDB retirement (#173) and a clean-up of `Released` PVs deleted 9 PVs that way; their
+Trident volumes and 5 LUNs stayed behind with no PV. A LUN deleted only in the QNAP console (2026-11-24, Loki) left a
+Trident record that `tridentctl delete volume` can no longer remove.
+
+Rule: **retire a volume through Trident, never on the QNAP alone.** Trident deletes the LUN, its iSCSI target and
+its `TridentVolume` record together, in that order (unmap, delete target, delete LUN).
+
+### While the PV exists (PVC Bound or Released): switch the PV to Delete
+
+```sh
+kubectl get pv <pv> -o jsonpath='{.spec.claimRef.namespace}/{.spec.claimRef.name} {.status.phase} {.spec.persistentVolumeReclaimPolicy}{"\n"}'
+kubectl patch pv <pv> -p '{"spec":{"persistentVolumeReclaimPolicy":"Delete"}}'
+```
+
+Then delete the PVC (`kubectl -n <ns> delete pvc <pvc>`, or remove it from Git and let Flux prune it). A PV that is
+already `Released` is deleted by the PV controller as soon as its policy is Delete. Trident's `storage-api-server`
+container logs `Unmap Volume and Iscsi Target Successfully`, `Delete Iscsi Target Successfully` and
+`Delete Volume Successfully`, and the PV disappears. Do it before removing a workload's PVCs from Git when the data
+is no longer wanted; a StatefulSet's `volumeClaimTemplates` PVCs are not in Flux's inventory and must be deleted
+by hand.
+
+### The PV is already gone: tridentctl
+
+`tridentctl` ships in the QNAP plugin repository (`bin/linux-amd64/tridentctl` of github.com/qnap-dev/QNAP-CSI-PlugIn,
+the clone the `qnap-csi-bootstrap` role uses); it needs a kubeconfig that can exec into `trident-controller`.
+
+```sh
+tridentctl get volume -n trident
+kubectl get pv -o custom-columns=NAME:.metadata.name --no-headers
+tridentctl delete volume <pvc-uuid> -n trident
+```
+
+A Trident volume with no PV is an orphan. Before deleting one, find what it held: the PV's claim and phase are in
+Prometheus for 31 days after the PV is gone,
+`max by (persistentvolume, claim_namespace, name) (last_over_time(kube_persistentvolume_claim_ref{persistentvolume="<pv>"}[31d]))`
+and `kube_persistentvolume_created` / `kube_persistentvolume_status_phase` likewise; then the Git history of the
+workload (`git log -S <claim name>`).
+
+### Never
+
+- Delete only the LUN or iSCSI target in the QNAP console. Trident then keeps a record it cannot delete (below).
+- Delete a LUN after a failed `tridentctl delete volume`: fix the cause and retry instead.
+- Edit a `TridentVolume` CR or remove its finalizer by hand. Neither the QNAP plugin nor upstream Trident documents
+  it; Trident keeps its volumes in memory and would not notice until a controller restart.
+
+### A Trident record whose LUN is gone
+
+Upstream Trident deletes a volume's record only after the storage driver deletes the volume, and its drivers report
+success when the volume no longer exists (`core/orchestrator_core.go` `deleteVolume`: "If the volume does not exist
+on the backend, the driver will not return an error"). The QNAP driver (`qnap-csi` 1.6.0) does not: it first unmaps
+the LUN from its target and fails when the LUN is gone, for example
+`unmap failed, Error : Unmap IscsiTarget fail, Msg : Unmap Lun : 8; IscsiTarget : 9; API returns result : -1; Error Code : -19`
+(`pvc-ff2f8529…`, 2026-11-24), and keeps the record. The QNAP plugin documents no way to retire such a record.
+
+Such a record is harmless (no PV, no node session, no space on the QNAP). Leave it in place and note it on the
+storage issue. When the QNAP plugin is upgraded (1.6.3 is current), retry `tridentctl delete volume`. If it still
+fails, ask QNAP (github.com/qnap-dev/QNAP-CSI-PlugIn issues) for the supported way before touching the record.
