@@ -537,3 +537,54 @@ tests:
             exp_annotations:
               summary: The storage textfile metrics on naraka-01 are incomplete.
               description: 'Either node-exporter cannot parse a file in its textfile directory (node_textfile_scrape_error; its log names the file), or the writer could not read a source (node_storage_textfile_collector_success == 0, collector ""; multipath: `sudo multipathd show maps` hangs or fails). Some storage alerts are blind on naraka-01 until fixed.'
+
+  - name: 'gitops#303: a k3s node whose storage metrics never appear warns after 1h; a node that has them, or one that left the cluster, does not'
+    interval: 1m
+    input_series:
+      - series: kube_node_info{job="kubernetes-service-endpoints", service="prometheus-kube-state-metrics", node="onode-0314ac"}
+        values: 1x90
+      - series: node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter", node="onode-0314ac"}
+        values: 0+60x90
+      # A new node: in the cluster, no writer (role not assigned, or no node-exporter pod).
+      - series: kube_node_info{job="kubernetes-service-endpoints", service="prometheus-kube-state-metrics", node="onode-new"}
+        values: 1x90
+      # Its series from another job does not count (only node-exporter's scrape feeds the storage alerts).
+      - series: node_storage_textfile_last_run_timestamp_seconds{job="other", node="onode-new"}
+        values: 0+60x90
+      # A node removed from the cluster: no kube_node_info, no series.
+      - series: kube_node_info{job="kubernetes-service-endpoints", service="prometheus-kube-state-metrics", node="onode-gone"}
+        values: 1x10 _x80
+    alert_rule_test:
+      - eval_time: 59m
+        alertname: StorageTextfileMissing
+        exp_alerts: []
+      - eval_time: 61m
+        alertname: StorageTextfileMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              node: onode-new
+            exp_annotations:
+              summary: No storage metrics from k3s node onode-new.
+              description: node-exporter on onode-new serves no node_storage_textfile_last_run_timestamp_seconds, so the ext4, iSCSI and multipath alerts cannot fire for it. Check that the node-exporter pod runs there (`kubectl -n otel get pods -o wide | grep node-exporter | grep onode-new`), then that the converge role storage-textfile is assigned (`atlas fleet config status onode-new`; group k3s-iscsi) and `systemctl status olympus-storage-textfile.timer` on the node.
+
+  - name: 'gitops#303: the writer reaching a new node clears the warning'
+    interval: 1m
+    input_series:
+      - series: kube_node_info{job="kubernetes-service-endpoints", service="prometheus-kube-state-metrics", node="onode-new"}
+        values: 1x120
+      - series: node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter", node="onode-new"}
+        values: _x70 4200+60x50
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: StorageTextfileMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              node: onode-new
+            exp_annotations:
+              summary: No storage metrics from k3s node onode-new.
+              description: node-exporter on onode-new serves no node_storage_textfile_last_run_timestamp_seconds, so the ext4, iSCSI and multipath alerts cannot fire for it. Check that the node-exporter pod runs there (`kubectl -n otel get pods -o wide | grep node-exporter | grep onode-new`), then that the converge role storage-textfile is assigned (`atlas fleet config status onode-new`; group k3s-iscsi) and `systemctl status olympus-storage-textfile.timer` on the node.
+      - eval_time: 75m
+        alertname: StorageTextfileMissing
+        exp_alerts: []
