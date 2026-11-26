@@ -75,7 +75,7 @@ tests:
               description: "2 `embed` job(s) exhausted their attempts. Inspect with `queue stats`, fix the cause, then `queue requeue-dead` (memory-admin CLI in the gateway image)."
 
   # --- MemoryCaptureStalled: no created capture in 24h while Claude Code was in use, for 1h ----
-  # claude_code_active_time_total_seconds_total: +60 s per 5m step = 12 min/h of active personal time.
+  # claude_code_active_time_seconds_total: +60 s per 5m step = 12 min/h of active personal time.
   - name: flat created counter with active personal sessions fires
     interval: 5m
     input_series:
@@ -83,7 +83,7 @@ tests:
         values: "10x400"
       - series: 'memory_capture_received_total{result="duplicate",hook_event="Stop",pod="a"}'
         values: "0+5x400"
-      - series: 'claude_code_active_time_total_seconds_total{account="personal",type="cli"}'
+      - series: 'claude_code_active_time_seconds_total{account="personal",type="cli"}'
         values: "0+60x400"
     alert_rule_test:
       # 2h: only 24 min of active time so far, under the 30 min gate
@@ -104,10 +104,10 @@ tests:
     input_series:
       - series: 'memory_capture_received_total{result="created",hook_event="Stop",pod="a"}'
         values: "10x400"
-      - series: 'claude_code_active_time_total_seconds_total{account="personal",type="cli"}'
+      - series: 'claude_code_active_time_seconds_total{account="personal",type="cli"}'
         values: "500x400"
       # work sessions do not capture into this gateway (route by cwd), so they do not count
-      - series: 'claude_code_active_time_total_seconds_total{account="work",type="cli"}'
+      - series: 'claude_code_active_time_seconds_total{account="work",type="cli"}'
         values: "0+60x400"
     alert_rule_test:
       - eval_time: 26h
