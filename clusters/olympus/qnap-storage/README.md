@@ -102,6 +102,7 @@ The alerts (Prometheus `storage-health` group in `../observability/prometheus-he
 | `KubePodCrashLoopingLong` | A pod has been in CrashLoopBackOff for over 1h. |
 | `NodeFilesystemDeviceError` | statfs fails for a reason other than permissions (host or NFS mounts). |
 | `PrometheusWALWritesFailing`, `PrometheusTSDBMaintenanceFailing`, `PrometheusTSDBCorruption` | Prometheus TSDB write, compaction or corruption problems while it still ingests. |
+| `StorageTextfileMissing` (warning, 1h) | A k3s node (`kube_node_info`) whose node-exporter serves no storage textfile metrics: the kernel-level storage alerts are blind there (no `storage-textfile` converge role, or no node-exporter pod). Inhibited by `PrometheusIngestionStopped`. |
 
 No exporter exposes ext4 error counts or iSCSI session state; confirm on the node:
 

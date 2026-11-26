@@ -153,7 +153,7 @@ spec:
           - source_matchers:
               - 'alertname="PrometheusIngestionStopped"'
             target_matchers:
-              - 'alertname=~"BlackboxExporterDown|MemoryEmbedderMetricsAbsent|CiEgressProxyDown|ArcControllerDown|MacCIRunnerHeartbeatMissing|StorageTextfileStale"'
+              - 'alertname=~"BlackboxExporterDown|MemoryEmbedderMetricsAbsent|CiEgressProxyDown|ArcControllerDown|MacCIRunnerHeartbeatMissing|StorageTextfileStale|StorageTextfileMissing"'
           # An expiring bundle is the louder form of the same host's refresh problem (olympus-sdk#1165).
           - source_matchers:
               - 'alertname="HostConfigBundleExpiring"'
@@ -1472,6 +1472,19 @@ spec:
                 annotations:
                   summary: "The storage metrics on {{ $labels.node }} are not being written."
                   description: "olympus_storage.prom was not rewritten for over 3 min, or is gone, so the ext4, iSCSI and multipath alerts are blind on {{ $labels.node }}. `systemctl status olympus-storage-textfile.timer olympus-storage-textfile.service` and `journalctl -u olympus-storage-textfile.service -n 20` there; a run stuck in D state means a hung filesystem or multipathd."
+              # A k3s node whose storage metrics were never written, or have been gone for over a day (olympus-gitops#303):
+              # the alerts above stay silent on missing series, so a new node, a node without the converge role
+              # storage-textfile, or one without a node-exporter pod would be blind. Fires on missing data: it is in the
+              # PrometheusIngestionStopped inhibit. kube_node_info's `node` is the same name node-exporter's `node` carries.
+              - alert: StorageTextfileMissing
+                expr: >-
+                  count by (node) (kube_node_info)
+                  unless on (node) max by (node) (node_storage_textfile_last_run_timestamp_seconds{job="kubernetes-service-endpoints", service="node-exporter"})
+                for: 1h
+                labels: { severity: warning }
+                annotations:
+                  summary: "No storage metrics from k3s node {{ $labels.node }}."
+                  description: "node-exporter on {{ $labels.node }} serves no node_storage_textfile_last_run_timestamp_seconds, so the ext4, iSCSI and multipath alerts cannot fire for it. Check that the node-exporter pod runs there (`kubectl -n otel get pods -o wide | grep node-exporter | grep {{ $labels.node }}`), then that the converge role storage-textfile is assigned (`atlas fleet config status {{ $labels.node }}`; group k3s-iscsi) and `systemctl status olympus-storage-textfile.timer` on the node."
               # A malformed .prom file (node-exporter drops it whole), or a source the writer could not read (multipathd
               # did not answer within 10 s, or a staging directory unreadable).
               - alert: StorageTextfileErrors
