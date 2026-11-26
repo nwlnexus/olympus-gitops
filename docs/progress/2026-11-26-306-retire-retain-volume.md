@@ -4,7 +4,7 @@
 - **Branch / worktree:** `docs/306-retire-retain-volume` in `/home/nwilliams-lucas/projects/personal/.worktrees/olympus-gitops-306`
 - **Session:** `personal-olympus-gitops-306` (lane W7-D) on ai-agent-host; registry id `f0fed2a1-b423-4c93-9b7b-d8492953fdff`
 - **Started:** 2026-11-26 08:20 UTC · **Turn cap:** 40
-- **Draft PR:** not yet
+- **Draft PR:** https://github.com/nwlnexus/olympus-gitops/pull/307 · issue comment https://github.com/nwlnexus/olympus-gitops/issues/306#issuecomment-7185708036
 
 ## Goal
 
