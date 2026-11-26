@@ -783,10 +783,13 @@ spec:
               # ships a capture at least every 15 min of an active session, so 30 min of active personal
               # Claude Code time (otel telemetry, agent-sessions group) with no capture means the hooks are
               # broken. If the telemetry is missing, the gate is empty and the alert stays silent.
+              # The OTLP metric claude_code.active_time.total (unit s) is stored as
+              # claude_code_active_time_seconds_total; the gate used the name claude_code_active_time_total_seconds_total,
+              # which never existed, so the alert could not fire until #115 (2026-11-26).
               - alert: MemoryCaptureStalled
                 expr: >-
                   sum(increase(memory_capture_received_total{result="created"}[24h])) == 0
-                  and on() sum(increase(claude_code_active_time_total_seconds_total{account="personal"}[24h])) > 1800
+                  and on() sum(increase(claude_code_active_time_seconds_total{account="personal"}[24h])) > 1800
                 for: 1h
                 labels: { severity: warning }
                 annotations:

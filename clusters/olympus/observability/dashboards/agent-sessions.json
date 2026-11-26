@@ -280,7 +280,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(claude_code_active_time_total_seconds_total{account=~\"$account\", vcs_repository_name=~\"$repo\"}[$__range]))",
+          "expr": "sum(increase(claude_code_active_time_seconds_total{account=~\"$account\", vcs_repository_name=~\"$repo\"}[$__range]))",
           "instant": true,
           "datasource": {
             "type": "prometheus",
@@ -723,7 +723,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (tool_name) (count_over_time({service_name=\"claude-code\"} | account=~\"$account\" | event_name=\"claude_code.tool_result\" | success=\"false\" [$__auto]))",
+          "expr": "sum by (tool_name) (count_over_time({service_name=\"claude-code\"} | account=~\"$account\" | event_name=~\"(claude_code[.])?tool_result\" | success=\"false\" [$__auto]))",
           "legendFormat": "{{tool_name}}",
           "datasource": {
             "type": "loki",
@@ -774,7 +774,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (source) (count_over_time({service_name=\"claude-code\"} | account=~\"$account\" | event_name=\"claude_code.tool_decision\" | decision=\"reject\" [$__auto]))",
+          "expr": "sum by (source) (count_over_time({service_name=\"claude-code\"} | account=~\"$account\" | event_name=~\"(claude_code[.])?tool_decision\" | decision=\"reject\" [$__auto]))",
           "legendFormat": "{{source}}",
           "datasource": {
             "type": "loki",
@@ -825,7 +825,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (status_code) (count_over_time({service_name=\"claude-code\"} | account=~\"$account\" | event_name=\"claude_code.api_error\" [$__auto]))",
+          "expr": "sum by (status_code) (count_over_time({service_name=\"claude-code\"} | account=~\"$account\" | event_name=~\"(claude_code[.])?api_error\" [$__auto]))",
           "legendFormat": "{{status_code}}",
           "datasource": {
             "type": "loki",
@@ -875,7 +875,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (event_name) (count_over_time({service_name=\"claude-code\"} | account=~\"$account\" | event_name=~\"claude_code.(safety_event|api_refusal)\" [$__auto]))",
+          "expr": "sum by (event_name) (count_over_time({service_name=\"claude-code\"} | account=~\"$account\" | event_name=~\"(claude_code[.])?(safety_event|api_refusal)\" [$__auto]))",
           "legendFormat": "{{event_name}}",
           "datasource": {
             "type": "loki",
