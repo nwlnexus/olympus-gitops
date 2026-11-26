@@ -10,7 +10,7 @@ series now and over the last 7 days, and prints those with none now:
 "0 and 0" is an event that has not happened yet, a collector that is off, or a renamed or missing metric: compare
 the metric name with Prometheus's /api/v1/label/__name__/values. Grafana variables are dropped from matchers and
 variable ranges ($__rate_interval, $interval) become 5m, so a selector is checked as broadly as the dashboard
-allows.
+allows. Targets on a Loki datasource (LogQL) are listed as skipped, not checked.
 
 Needs PyYAML. Dashboards imported from grafana.com (`gnetId` in grafana-helmrelease.yaml) are not in the repo;
 download them first, e.g. https://grafana.com/api/dashboards/1860/revisions/45/download. From this directory's
@@ -56,6 +56,7 @@ def walk(node, out):
 
 
 exprs = []  # (source, panel or alert, expression)
+skipped_loki = []  # (dashboard, panel): LogQL targets, not Prometheus
 
 
 def rules_exprs(path):
@@ -77,11 +78,18 @@ def dash_exprs(path):
     d = json.load(open(path))
     title = d.get("title", path)
 
+    def is_loki(n):
+        ds = n.get("datasource")
+        return isinstance(ds, dict) and ds.get("type") == "loki" or isinstance(ds, str) and "loki" in ds.lower()
+
     def rec(n, panel):
         if isinstance(n, dict):
             p = n.get("title", panel) if "targets" in n or "panels" in n else panel
             if isinstance(n.get("expr"), str) and n["expr"].strip():
-                exprs.append((title, p, n["expr"]))
+                if is_loki(n):
+                    skipped_loki.append((title, p))
+                else:
+                    exprs.append((title, p, n["expr"]))
             q = n.get("query")
             if isinstance(q, dict):
                 q = q.get("query")
@@ -137,3 +145,5 @@ for row in sorted(missing):
 print(f"# {len(exprs)} expressions, {len(cache)} selectors, {len(missing)} with no series now")
 for row in not_parsed:
     print("# not parsed:", " | ".join(row))
+for row in sorted(set(skipped_loki)):
+    print("# skipped (Loki datasource, LogQL):", " | ".join(row))
