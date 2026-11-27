@@ -89,3 +89,41 @@ tests:
       exp_annotations:
         summary: "The host-config bundle of onode-0314ac expires in 8d 23h 20m 0s."
         description: "The earliest-expiring signed host-config bundle in the fleet has under 10 days left, so it has not been refreshed for 20 days: publishing is blocked (see HermesConfigRevisionUnmirrored / HermesConfigMirrorHalted) or the auto re-publish is off. A host whose bundle expires stops converging. Runbook: docs/runbooks/config-store-durability.md (olympus-sdk)."
+- name: a token change set the auto re-publish signed fires once, with its change id, until the series ends
+  interval: "1m"
+  input_series:
+  - series: "hermes_config_token_change_published_timestamp_seconds{job=\"hermes\", instance=\"api.nwlnexus.io\", change_id=\"c-1\", token=\"t-1\", hosts=\"3\"}"
+    values: "1000x10 _x10"
+  alert_rule_test:
+  - eval_time: "1m"
+    alertname: HermesConfigTokenChangePublished
+    exp_alerts:
+    - exp_labels:
+        severity: info
+        change_id: c-1
+        token: t-1
+        hosts: "3"
+      exp_annotations:
+        summary: "A config change saved by token t-1 reached 3 host(s) through the auto re-publish."
+        description: "Change set c-1 was saved by an API token and signed into host-config bundles with no human step. Review it at https://app.nwlnexus.io/config/changes/c-1 (or `configChanges` / `atlas fleet config history`). To undo it in one step: revertConfigChange(changeId: \"c-1\") (`atlas fleet config revert c-1`). Stop switches: revoke the token, CONVERGE_AUTO_PUBLISH=false, or return hosts to audit."
+  - eval_time: "18m"
+    alertname: HermesConfigTokenChangePublished
+    exp_alerts: []
+- name: a failed first run of a token change bundle warns, naming the host and the change set
+  interval: "1m"
+  input_series:
+  - series: "hermes_config_token_change_run_failed_timestamp_seconds{job=\"hermes\", instance=\"api.nwlnexus.io\", change_id=\"c-2\", token=\"t-1\", hostname=\"onode-0314ac\", status=\"failed\"}"
+    values: "2000x10"
+  alert_rule_test:
+  - eval_time: "2m"
+    alertname: HermesConfigTokenChangeRunFailed
+    exp_alerts:
+    - exp_labels:
+        severity: warning
+        change_id: c-2
+        token: t-1
+        hostname: onode-0314ac
+        status: failed
+      exp_annotations:
+        summary: "The first run on onode-0314ac of a bundle carrying token change c-2 failed."
+        description: "A host's first converge run after the auto re-publish signed a token-authored change set (c-2, token t-1) ended failed. Read the run (`hostConfig { resources }`, `atlas fleet config status`) and, if the change is the cause, revert it in one step: revertConfigChange(changeId: \"c-2\") (`atlas fleet config revert c-2`). There is no automatic revert."
