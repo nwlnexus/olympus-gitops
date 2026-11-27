@@ -1680,12 +1680,13 @@ spec:
               # Token-authored config changes (olympus-sdk#1136, spec §7.5, owner decision D3): a change set an API token
               # saved reaches hosts through the auto re-publish with no human step, so each one that does is mailed once.
               # The `config_token_changes` collector keeps a published series for 2 hours after the first bundle and a
-              # failed-run series for a day; the route below groups by change_id and never repeats within a week.
+              # failed-run series for a day; the route below groups by change_id and never repeats within a week. The
+              # published series' labels never change while it lives (no host count), so it stays one alert.
               - alert: HermesConfigTokenChangePublished
-                expr: max by (change_id, token, hosts) (hermes_config_token_change_published_timestamp_seconds{job="hermes"}) > 0
+                expr: max by (change_id, token) (hermes_config_token_change_published_timestamp_seconds{job="hermes"}) > 0
                 labels: { severity: info }
                 annotations:
-                  summary: "A config change saved by token {{ $labels.token }} reached {{ $labels.hosts }} host(s) through the auto re-publish."
+                  summary: "A config change saved by token {{ $labels.token }} reached hosts through the auto re-publish."
                   description: "Change set {{ $labels.change_id }} was saved by an API token and signed into host-config bundles with no human step. Review it at https://app.nwlnexus.io/config/changes/{{ $labels.change_id }} (or `configChanges` / `atlas fleet config history`). To undo it in one step: revertConfigChange(changeId: \"{{ $labels.change_id }}\") (`atlas fleet config revert {{ $labels.change_id }}`). Stop switches: revoke the token, CONVERGE_AUTO_PUBLISH=false, or return hosts to audit."
               - alert: HermesConfigTokenChangeRunFailed
                 expr: max by (change_id, token, hostname, status) (hermes_config_token_change_run_failed_timestamp_seconds{job="hermes"}) > 0

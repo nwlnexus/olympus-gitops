@@ -92,7 +92,7 @@ tests:
 - name: a token change set the auto re-publish signed fires once, with its change id, until the series ends
   interval: "1m"
   input_series:
-  - series: "hermes_config_token_change_published_timestamp_seconds{job=\"hermes\", instance=\"api.nwlnexus.io\", change_id=\"c-1\", token=\"t-1\", hosts=\"3\"}"
+  - series: "hermes_config_token_change_published_timestamp_seconds{job=\"hermes\", instance=\"api.nwlnexus.io\", change_id=\"c-1\", token=\"t-1\"}"
     values: "1000x10 _x10"
   alert_rule_test:
   - eval_time: "1m"
@@ -102,9 +102,8 @@ tests:
         severity: info
         change_id: c-1
         token: t-1
-        hosts: "3"
       exp_annotations:
-        summary: "A config change saved by token t-1 reached 3 host(s) through the auto re-publish."
+        summary: "A config change saved by token t-1 reached hosts through the auto re-publish."
         description: "Change set c-1 was saved by an API token and signed into host-config bundles with no human step. Review it at https://app.nwlnexus.io/config/changes/c-1 (or `configChanges` / `atlas fleet config history`). To undo it in one step: revertConfigChange(changeId: \"c-1\") (`atlas fleet config revert c-1`). Stop switches: revoke the token, CONVERGE_AUTO_PUBLISH=false, or return hosts to audit."
   - eval_time: "18m"
     alertname: HermesConfigTokenChangePublished
