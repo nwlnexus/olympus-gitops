@@ -122,6 +122,12 @@ spec:
                 - 'severity="critical"'
               receiver: email
               repeat_interval: 4h
+            # One mail per token-authored config change set (olympus-sdk#1136): grouped by change id, never repeated.
+            - matchers:
+                - 'alertname=~"HermesConfigTokenChange.+"'
+              receiver: email-warning
+              group_by: [alertname, change_id]
+              repeat_interval: 168h
             # A review queue changes over weeks; a weekly reminder is enough.
             - matchers:
                 - 'alertname="MemorySupersessionHumanQueueStale"'
@@ -1671,6 +1677,22 @@ spec:
                 annotations:
                   summary: "The host-config bundle of {{ $labels.hostname }} expires in {{ $value | humanizeDuration }}."
                   description: "The earliest-expiring signed host-config bundle in the fleet has under 10 days left, so it has not been refreshed for 20 days: publishing is blocked (see HermesConfigRevisionUnmirrored / HermesConfigMirrorHalted) or the auto re-publish is off. A host whose bundle expires stops converging. Runbook: docs/runbooks/config-store-durability.md (olympus-sdk)."
+              # Token-authored config changes (olympus-sdk#1136, spec §7.5, owner decision D3): a change set an API token
+              # saved reaches hosts through the auto re-publish with no human step, so each one that does is mailed once.
+              # The `config_token_changes` collector keeps a published series for 2 hours after the first bundle and a
+              # failed-run series for a day; the route below groups by change_id and never repeats within a week.
+              - alert: HermesConfigTokenChangePublished
+                expr: max by (change_id, token, hosts) (hermes_config_token_change_published_timestamp_seconds{job="hermes"}) > 0
+                labels: { severity: info }
+                annotations:
+                  summary: "A config change saved by token {{ $labels.token }} reached {{ $labels.hosts }} host(s) through the auto re-publish."
+                  description: "Change set {{ $labels.change_id }} was saved by an API token and signed into host-config bundles with no human step. Review it at https://app.nwlnexus.io/config/changes/{{ $labels.change_id }} (or `configChanges` / `atlas fleet config history`). To undo it in one step: revertConfigChange(changeId: \"{{ $labels.change_id }}\") (`atlas fleet config revert {{ $labels.change_id }}`). Stop switches: revoke the token, CONVERGE_AUTO_PUBLISH=false, or return hosts to audit."
+              - alert: HermesConfigTokenChangeRunFailed
+                expr: max by (change_id, token, hostname, status) (hermes_config_token_change_run_failed_timestamp_seconds{job="hermes"}) > 0
+                labels: { severity: warning }
+                annotations:
+                  summary: "The first run on {{ $labels.hostname }} of a bundle carrying token change {{ $labels.change_id }} {{ $labels.status }}."
+                  description: "A host's first converge run after the auto re-publish signed a token-authored change set ({{ $labels.change_id }}, token {{ $labels.token }}) ended {{ $labels.status }}. Read the run (`hostConfig { resources }`, `atlas fleet config status`) and, if the change is the cause, revert it in one step: revertConfigChange(changeId: \"{{ $labels.change_id }}\") (`atlas fleet config revert {{ $labels.change_id }}`). There is no automatic revert."
     prometheus-pushgateway:
       enabled: false
     kube-state-metrics:
